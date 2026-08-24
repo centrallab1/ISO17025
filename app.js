@@ -88,6 +88,9 @@ const state = {
   calYear: new Date().getFullYear(),
   modal: null, // { mode:'new'|'edit', id }
   queueListOpen: false,
+  approvalTab: 'all',
+  approvalPage: 1,
+  approvalTypeFilter: 'All',
 };
 
 const ICONS = {
@@ -115,6 +118,55 @@ function emptyState(title, sub){
 function pendingQueue(){
   return DOCUMENTS.filter(d=> d.approvalStatus==='ร่าง' || d.approvalStatus==='รอทบทวน' || d.approvalStatus==='รออนุมัติ')
     .sort((a,b)=> (a.lastUpdated||0)-(b.lastUpdated||0));
+}
+let notifOpen = false;
+function wireNotifBell(){
+  const bell = document.getElementById('notifBell');
+  if(bell) bell.addEventListener('click', e=>{
+    e.stopPropagation();
+    notifOpen = !notifOpen;
+    renderNotifPanel();
+  });
+  document.addEventListener('click', ()=>{
+    if(notifOpen){ notifOpen = false; renderNotifPanel(); }
+  });
+}
+function updateNotifBadge(){
+  const dot = document.getElementById('notifDot');
+  if(!dot) return;
+  const n = pendingQueue().length;
+  dot.style.display = n>0 ? 'block' : 'none';
+}
+function renderNotifPanel(){
+  const wrap = document.getElementById('notifPanel');
+  if(!wrap) return;
+  updateNotifBadge();
+  if(!notifOpen){ wrap.style.display = 'none'; wrap.innerHTML=''; return; }
+  const queue = pendingQueue();
+  wrap.className = 'notif-panel';
+  wrap.style.display = 'block';
+  wrap.innerHTML = `
+    <div class="notif-head">คำขอรอดำเนินการ (${queue.length})</div>
+    ${queue.length ? queue.map(d=>{
+      const label = d.lastRequestType==='new' ? 'คำขอเอกสารใหม่' : d.lastRequestType==='revision' ? `คำขอปรับปรุง Rev.${d.lastRequestFrom||'-'} → ${d.rev||'-'}` : 'รอดำเนินการ';
+      return `
+      <div class="notif-item" data-notif-doc="${d.id}">
+        <div class="notif-icon">${ic('clock')}</div>
+        <div class="notif-text">
+          <div class="notif-title">${d.id} — ${cleanName(d)}</div>
+          <div class="notif-sub">${label} · ${approvalBadge(d.approvalStatus)}</div>
+        </div>
+      </div>`;
+    }).join('') : `<div class="notif-empty">ไม่มีคำขอค้างอยู่</div>`}
+  `;
+  wrap.querySelectorAll('[data-notif-doc]').forEach(elx=>{
+    elx.addEventListener('click', e=>{
+      e.stopPropagation();
+      notifOpen = false;
+      renderNotifPanel();
+      goTo('approval', { selectedDoc: elx.dataset.notifDoc });
+    });
+  });
 }
 function nextRevNumber(currentRev){
   const n = parseInt(currentRev, 10);
@@ -155,6 +207,7 @@ async function boot(){
   removeBootScreen();
   wireNav();
   wireGlobalSearch();
+  wireNotifBell();
   render();
 }
 function renderBootScreen(text){
@@ -235,8 +288,8 @@ function render(){
   switch(state.view){
     case 'dashboard': el.innerHTML = viewDashboard(); break;
     case 'iso': el.innerHTML = viewISO(); attachISOHandlers(); break;
-    case 'documents': renderDocumentsInto(); wireDocControls(); renderModalLayer(); return;
-    case 'records': el.innerHTML = viewRecords(); break;
+    case 'documents': renderDocumentsInto(); wireDocControls(); renderModalLayer(); updateNotifBadge(); return;
+    case 'records': el.innerHTML = viewEvidence(); attachEvidenceHandlers(); break;
     case 'revision': el.innerHTML = viewRevision(); attachDocPicker('revision'); break;
     case 'approval': el.innerHTML = viewApproval(); attachApprovalHandlers(); break;
     case 'audit': el.innerHTML = viewAudit(); attachAuditHandlers(); break;
@@ -248,6 +301,7 @@ function render(){
   }
   attachGlobalRowHandlers();
   renderModalLayer();
+  updateNotifBadge();
 }
 function attachGlobalRowHandlers(){
   document.querySelectorAll('[data-open-doc]').forEach(row=>{
@@ -517,7 +571,15 @@ function renderDocumentsInto(){
 }
 function wireDocControls(){
   const search = document.getElementById('docSearch');
-  if(search) search.addEventListener('input', e=>{ state.docFilter.q = e.target.value; state.docPage=1; renderDocumentsInto(); wireDocControls(); });
+  if(search) search.addEventListener('input', e=>{
+    const cursorPos = e.target.selectionStart;
+    state.docFilter.q = e.target.value;
+    state.docPage=1;
+    renderDocumentsInto();
+    wireDocControls();
+    const refreshed = document.getElementById('docSearch');
+    if(refreshed){ refreshed.focus(); refreshed.setSelectionRange(cursorPos, cursorPos); }
+  });
   const fc = document.getElementById('fClause');
   if(fc) fc.addEventListener('change', e=>{ state.docFilter.clause = e.target.value; state.docFilter.preset='all'; state.docPage=1; renderDocumentsInto(); wireDocControls(); });
   const ft = document.getElementById('fType');
@@ -571,7 +633,7 @@ function docModal(){
   const editing = mode==='edit';
   const revising = mode==='revise';
   const d = (editing||revising) ? DOCUMENTS.find(x=>x.id===state.modal.id) : {
-    id:'', name:'', clause:'', link:'', note:'ว่าง', rev:'0', preparedBy:'', reviewerName:'', approverName:'',
+    id:'', name:'', clause: state.modal.presetClause || '', link:'', note: state.modal.presetNote || 'ว่าง', rev:'0', preparedBy:'', reviewerName:'', approverName:'',
   };
   if(!d) return `<div class="modal-backdrop" id="docModalBackdrop"><div class="modal"><div class="modal-body">${emptyState('ไม่พบเอกสาร','')}</div><div class="modal-actions"><button class="btn ghost" id="modalCancelBtn">ปิด</button></div></div></div>`;
 
@@ -684,18 +746,68 @@ function wireModalControls(){
 }
 
 // ============================================================
-// RECORDS VIEW — this dataset has no separate "records" collection;
-// the closest real analog is the LF (form/record) document type.
+// EVIDENCE / SUPPORT VIEW — all documents with note==='สนับสนุน',
+// grouped by ISO clause, shown as clickable document-name links to
+// the pasted SharePoint URL (replaces the old "Records" page).
 // ============================================================
-function viewRecords(){
-  const recs = DOCUMENTS.filter(d=> docTypeCode(d)==='LF');
+function viewEvidence(){
+  const items = DOCUMENTS.filter(d=> d.note==='สนับสนุน');
+  const byClause = {};
+  items.forEach(d=>{
+    const key = d.clause || '';
+    (byClause[key] = byClause[key]||[]).push(d);
+  });
+  const orderedKeys = [...CLAUSES.map(c=>c[0]), ''];
+  const sections = orderedKeys.filter(k=> byClause[k] && byClause[k].length);
+
   return `
   <div class="panel">
     <div class="panel-head">
-      <div><div class="panel-title">Records</div><div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">แบบฟอร์ม/บันทึกผล (เอกสารประเภท LF) — ทะเบียนนี้ยังไม่มีคอลเลกชัน "Records" แยกต่างหากใน Firestore</div></div>
+      <div>
+        <div class="panel-title">Evidence / Support</div>
+        <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">เอกสารสนับสนุน/หลักฐาน (ใบรับรอง มาตรฐานอ้างอิง ฯลฯ) จัดกลุ่มตามข้อกำหนด ISO 17025 — วางลิงก์ SharePoint แล้วกดชื่อเพื่อเปิดได้เลย</div>
+      </div>
+      <button class="btn primary" id="btnNewEvidence">${ic('plus')} เพิ่มรายการสนับสนุน</button>
     </div>
-    ${recs.length ? docTable(recs) : emptyState('ไม่มีเอกสารประเภทแบบฟอร์ม','No LF-type documents found.')}
-  </div>`;
+  </div>
+  ${sections.length ? sections.map(key=>{
+    const docs = byClause[key];
+    const label = key ? clauseLabel(key) : 'ไม่ระบุข้อกำหนด';
+    return `
+    <div class="panel">
+      <div class="panel-title" style="margin-bottom:12px;">${label} <span style="color:var(--ink-500); font-weight:600; font-size:12px;">(${docs.length})</span></div>
+      <div style="display:flex; flex-direction:column; gap:2px;">
+        ${docs.map(d=>`
+          <div class="evidence-item">
+            <div class="file-ic">${ic('file')}</div>
+            <div class="evi-main">
+              ${d.link
+                ? `<a class="evi-name" href="${d.link}" target="_blank" rel="noopener">${cleanName(d)}</a>`
+                : `<span class="evi-name evi-nolink">${cleanName(d)}</span>`}
+              <div class="evi-sub">${d.id}${!d.link ? ' · ยังไม่มีลิงก์' : ''}</div>
+            </div>
+            <div class="row-actions">
+              <button data-edit="${d.id}" title="แก้ไข">${ic('edit')}</button>
+              <button data-del="${d.id}" class="del" title="ลบ">${ic('trash')}</button>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  }).join('') : `<div class="panel">${emptyState('ยังไม่มีเอกสารสนับสนุน','เพิ่มรายการแรกได้จากปุ่ม "เพิ่มรายการสนับสนุน" ด้านบน')}</div>`}
+  `;
+}
+function attachEvidenceHandlers(){
+  const btn = document.getElementById('btnNewEvidence');
+  if(btn) btn.addEventListener('click', ()=> openModal({ mode:'new', presetNote:'สนับสนุน' }));
+  document.querySelectorAll('[data-edit]').forEach(b=> b.addEventListener('click', ()=> openModal({ mode:'edit', id:b.dataset.edit })));
+  document.querySelectorAll('[data-del]').forEach(b=> b.addEventListener('click', async ()=>{
+    const d = DOCUMENTS.find(x=>x.id===b.dataset.del);
+    if(!d) return;
+    if(!confirm(`ลบรายการ "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
+    DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
+    await persistDocs();
+    render();
+  }));
 }
 
 // ============================================================
@@ -763,16 +875,40 @@ function attachDetailActionHandlers(){
 // single lastUpdated timestamp + a comment trail, not versioned
 // revisions, so we show exactly that rather than inventing Rev.00-03.
 // ============================================================
+// Groups a document's flat comment history into cards, one per revision/
+// approval request cycle, detected from the "ขอปรับปรุงจาก Rev.X เป็น Rev.Y"
+// marker comment written by the revise-request flow.
+function groupHistoryByRequest(d){
+  const comments = (d.comments||[]).slice(); // stored oldest → newest
+  const groups = [];
+  let current = null;
+  comments.forEach(c=>{
+    const m = c.text.match(/ขอปรับปรุงจาก Rev\.(.*?) เป็น Rev\.(.*)/);
+    if(m){
+      current = { type:'revision', fromRev:m[1], toRev:m[2], requestedBy:c.by, requestedAt:c.time, events:[] };
+      groups.push(current);
+    } else {
+      if(!current){
+        current = { type:'initial', toRev: d.rev || null, requestedBy: d.preparedBy || c.by, requestedAt: d.createdDate || c.time, events:[] };
+        groups.push(current);
+      }
+      current.events.push(c);
+    }
+  });
+  if(!groups.length){
+    groups.push({ type:'initial', toRev: d.rev || null, requestedBy: d.preparedBy || '', requestedAt: d.createdDate || d.lastUpdated, events:[] });
+  }
+  return groups.slice().reverse(); // newest request first
+}
 function viewRevision(){
   if(!state.selectedDoc) state.selectedDoc = DOCUMENTS[0] && DOCUMENTS[0].id;
   const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
   if(!d) return `<div class="panel">${emptyState('ยังไม่มีเอกสาร','No documents in the register yet.')}</div>`;
-  const timeline = [
-    { label:'สร้าง/แก้ไขล่าสุด', date:d.lastUpdated, desc:`สถานะปัจจุบัน: ${d.note} · การอนุมัติ: ${d.approvalStatus}` },
-    ...(d.comments||[]).slice().reverse().map(c=>({ label:c.by, date:c.time, desc:c.text })),
-    ...(d.effectiveDate ? [{ label:'ประกาศใช้', date:d.effectiveDate, desc:`ผู้อนุมัติ: ${d.approverName || 'ไม่ระบุ'}` }] : []),
-    ...(d.createdDate ? [{ label:'จัดทำเอกสาร', date:d.createdDate, desc:`ผู้จัดทำ: ${d.preparedBy || 'ไม่ระบุ'}` }] : []),
-  ].sort((a,b)=> (b.date||0)-(a.date||0));
+  const groups = groupHistoryByRequest(d);
+  const linkBtn = d.link
+    ? `<a class="btn ghost" href="${d.link}" target="_blank" rel="noopener">${ic('link')} เปิดใน SharePoint</a>`
+    : `<button class="btn ghost" disabled>${ic('link')} ยังไม่มีลิงก์</button>`;
+
   return `
   <div class="crumb" data-back="1">‹ Back</div>
   <div class="panel">
@@ -780,16 +916,31 @@ function viewRevision(){
       <div class="panel-title">History — ${d.id} ${cleanName(d)}</div>
       <select class="select" id="revDocPicker">${DOCUMENTS.map(x=>`<option value="${x.id}" ${x.id===d.id?'selected':''}>${x.id}</option>`).join('')}</select>
     </div>
-    <div style="font-size:11.5px; color:var(--ink-500); margin-bottom:14px;">ระบบนี้เก็บเวลาที่แก้ไขล่าสุดและประวัติความเห็นการอนุมัติ ยังไม่ได้เก็บเลข Revision แยกเป็นเวอร์ชันย้อนหลัง</div>
-    <div class="timeline">
-      ${timeline.length ? timeline.map((t,i)=>`
-        <div class="tl-item ${i>0?'old':''}">
-          <div class="tl-dot"></div>
-          <div class="tl-head"><div class="tl-rev">${t.label}</div><div class="tl-date">${fmtDateTime(t.date)}</div></div>
-          <div class="tl-desc">${t.desc}</div>
-        </div>`).join('') : emptyState('ยังไม่มีประวัติ','No history recorded yet.')}
-    </div>
-  </div>`;
+    <div style="font-size:11.5px; color:var(--ink-500); margin-bottom:16px;">แยกตามรอบคำขอ (เอกสารเริ่มต้น / คำขอปรับปรุงแต่ละครั้ง) พร้อมลิงก์เอกสารปัจจุบัน</div>
+  </div>
+  ${groups.map(g=>{
+    const title = g.type==='revision' ? `คำขอปรับปรุง Rev.${g.fromRev||'-'} → Rev.${g.toRev||'-'}` : `เอกสารเริ่มต้น${g.toRev ? ` (Rev.${g.toRev})` : ''}`;
+    return `
+    <div class="hist-card">
+      <div class="hist-card-head">
+        <div>
+          <div class="hist-card-title">${title}</div>
+          <div class="hist-card-meta">ขอโดย ${g.requestedBy || 'ไม่ระบุ'} · ${fmtDateTime(g.requestedAt)}</div>
+        </div>
+        ${linkBtn}
+      </div>
+      ${g.events.length ? `
+      <div class="timeline">
+        ${g.events.map((e,i)=>`
+          <div class="tl-item ${i>0?'old':''}">
+            <div class="tl-dot"></div>
+            <div class="tl-head"><div class="tl-rev">${e.by}</div><div class="tl-date">${fmtDateTime(e.time)}</div></div>
+            <div class="tl-desc">${e.text}</div>
+          </div>`).join('')}
+      </div>` : `<div style="font-size:12px; color:var(--ink-400); margin-top:10px;">ยังไม่มีการดำเนินการเพิ่มเติมในรอบนี้</div>`}
+    </div>`;
+  }).join('')}
+  `;
 }
 
 // ============================================================
@@ -797,15 +948,119 @@ function viewRevision(){
 // comment required, writes STATUS_FLOW transitions to Firestore)
 // ============================================================
 let lastActorName = '';
+const STEP_LABEL = { 'ร่าง':'รอส่งตรวจ', 'รอทบทวน':'รอผู้ทบทวน', 'รออนุมัติ':'รอผู้อนุมัติ', 'อนุมัติแล้ว':'เสร็จสมบูรณ์', 'ไม่อนุมัติ':'ถูกปฏิเสธ' };
+const STEP_COLOR_VAR = { active:'--green-600', review:'--amber-600', pending:'--blue-600', overdue:'--red-600', draft:'--ink-400' };
+function stepIndicator(status){
+  const cls = APPROVAL_STATUS_STYLE[status] || 'draft';
+  const cv = STEP_COLOR_VAR[cls];
+  return `<span style="display:inline-flex; align-items:center; gap:6px; font-weight:600; font-size:12px; color:var(${cv});"><span style="width:7px;height:7px;border-radius:50%;background:var(${cv});display:inline-block; flex-shrink:0;"></span>${STEP_LABEL[status]||status}</span>`;
+}
+function actorForDoc(d){
+  const status = d.approvalStatus || 'ร่าง';
+  if(status==='ร่าง') return { name: d.preparedBy||'', role:'เจ้าหน้าที่เอกสาร' };
+  if(status==='รอทบทวน') return { name: d.reviewerName||'', role:'ผู้ทบทวน' };
+  if(status==='รออนุมัติ') return { name: d.approverName||'', role:'ผู้อนุมัติ' };
+  if(status==='อนุมัติแล้ว') return { name: d.approvedBy||d.approverName||'', role:'ผู้อนุมัติ' };
+  if(status==='ไม่อนุมัติ') return { name: d.approvedBy||'', role:'ผู้พิจารณา' };
+  return { name:'', role:'' };
+}
+function initials(name){
+  if(!name) return '?';
+  return name.trim().slice(0,2);
+}
+
 function viewApproval(){
   const queue = pendingQueue();
   if(!state.selectedDoc) state.selectedDoc = (queue[0] || DOCUMENTS[0] || {}).id;
+
+  const countReview = DOCUMENTS.filter(x=>x.approvalStatus==='รอทบทวน').length;
+  const countWaitApprove = DOCUMENTS.filter(x=>x.approvalStatus==='รออนุมัติ').length;
+  const countApproved = DOCUMENTS.filter(x=>x.approvalStatus==='อนุมัติแล้ว').length;
+  const total = DOCUMENTS.length;
+
+  const tabs = [
+    { key:'all', label:'ทั้งหมด', n: total },
+    { key:'รอทบทวน', label:'รอทบทวน', n: countReview },
+    { key:'รออนุมัติ', label:'รออนุมัติ', n: countWaitApprove },
+    { key:'อนุมัติแล้ว', label:'อนุมัติแล้ว', n: countApproved },
+  ];
+
+  let filtered = state.approvalTab==='all' ? DOCUMENTS.slice() : DOCUMENTS.filter(x=>x.approvalStatus===state.approvalTab);
+  if(state.approvalTypeFilter!=='All') filtered = filtered.filter(x=>docTypeCode(x)===state.approvalTypeFilter);
+  filtered = filtered.slice().sort((a,b)=> (b.lastUpdated||0)-(a.lastUpdated||0));
+
+  const pageSize = 10;
+  const pages = Math.max(1, Math.ceil(filtered.length/pageSize));
+  state.approvalPage = Math.min(state.approvalPage, pages);
+  const start = (state.approvalPage-1)*pageSize;
+  const pageItems = filtered.slice(start, start+pageSize);
+  const typeOpts = [['All','ทุกประเภท'], ...Object.entries(DOC_TYPE_MAP)];
+
+  return `
+  <div class="stat-row">
+    <div class="stat-card"><div class="stat-icon blue">${ic('doc')}</div>
+      <div><div class="stat-num">${total}</div><div class="stat-label">รายการทั้งหมด</div></div></div>
+    <div class="stat-card"><div class="stat-icon amber">${ic('clock')}</div>
+      <div><div class="stat-num">${countReview}</div><div class="stat-label">รอทบทวน</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">${ic('clock')}</div>
+      <div><div class="stat-num">${countWaitApprove}</div><div class="stat-label">รออนุมัติ</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">${ic('check')}</div>
+      <div><div class="stat-num">${countApproved}</div><div class="stat-label">อนุมัติแล้ว</div></div></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">Approval</div>
+        <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">ติดตามสถานะการพิจารณาและอนุมัติเอกสาร</div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <select class="select" id="apTypeFilter">${typeOpts.map(([v,l])=>`<option value="${v}" ${v===state.approvalTypeFilter?'selected':''}>${l}</option>`).join('')}</select>
+        <button class="btn primary" id="btnApNewDoc">${ic('plus')} นำรายการใหม่</button>
+      </div>
+    </div>
+
+    <div class="tabs">
+      ${tabs.map(t=>`<button class="tab ${state.approvalTab===t.key?'active':''}" data-ap-tab="${t.key}">${t.label}<span class="cnt">${t.n}</span></button>`).join('')}
+    </div>
+
+    <div class="table-wrap"><table class="dtable">
+      <thead><tr><th>รหัสเอกสาร</th><th>ชื่อเอกสาร</th><th>สถานะ</th><th>ขั้นตอนปัจจุบัน</th><th>ผู้ดำเนินการ</th><th>อัปเดตล่าสุด</th></tr></thead>
+      <tbody>
+        ${pageItems.length ? pageItems.map(d=>{
+          const actor = actorForDoc(d);
+          return `
+        <tr class="${d.id===state.selectedDoc?'current-row':''}" data-select-approval="${d.id}">
+          <td class="mono">${d.id}</td>
+          <td class="name" title="${cleanName(d).replace(/"/g,'&quot;')}">${cleanName(d)}</td>
+          <td>${approvalBadge(d.approvalStatus)}</td>
+          <td>${stepIndicator(d.approvalStatus||'ร่าง')}</td>
+          <td><div class="actor-cell"><div class="row-avatar">${initials(actor.name)}</div><div><div class="actor-name">${actor.name||'—'}</div><div class="actor-role">${actor.role}</div></div></div></td>
+          <td>${fmtDateTime(d.lastUpdated)}</td>
+        </tr>`;
+        }).join('') : `<tr><td colspan="6" style="text-align:center; padding:40px 0; color:var(--ink-500);">ไม่มีเอกสารในหมวดนี้</td></tr>`}
+      </tbody>
+    </table></div>
+    <div class="pagination">
+      <div>แสดง ${pageItems.length?start+1:0}–${start+pageItems.length} จาก ${filtered.length} รายการ</div>
+      <div class="pg-btns">
+        <button ${state.approvalPage===1?'disabled':''} id="apPgPrev">‹</button>
+        ${Array.from({length:pages}).map((_,i)=>`<button class="${i+1===state.approvalPage?'active':''}" data-appg="${i+1}">${i+1}</button>`).join('')}
+        <button ${state.approvalPage===pages?'disabled':''} id="apPgNext">›</button>
+      </div>
+    </div>
+  </div>
+
+  ${viewApprovalDetail()}
+  `;
+}
+
+function viewApprovalDetail(){
   const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
-  if(!d) return `<div class="panel">${emptyState('ยังไม่มีเอกสาร','No documents in the register yet.')}</div>`;
+  if(!d) return '';
   const status = d.approvalStatus || 'ร่าง';
   const currentIdx = STATUS_FLOW.indexOf(status);
   const isRejected = status === 'ไม่อนุมัติ';
-  const queuePos = queue.findIndex(x=>x.id===d.id);
 
   const steps = STATUS_FLOW.map((s,i)=>{
     const done = !isRejected && i<=currentIdx;
@@ -814,52 +1069,20 @@ function viewApproval(){
   });
 
   const isApproved = status === 'อนุมัติแล้ว';
-  // fallback for docs approved before approvedBy/approvedAt existed: use the
-  // most recent comment as a best-effort approver record
   const lastComment = (d.comments||[])[ (d.comments||[]).length-1 ];
   const approvedBy = d.approvedBy || (lastComment ? lastComment.by : '');
   const approvedAt = d.approvedAt || (lastComment ? lastComment.time : d.lastUpdated);
   const approvedComment = d.approvedComment !== undefined ? d.approvedComment : (lastComment ? lastComment.text : '');
   const requestLabel = d.lastRequestType==='new' ? 'เอกสารใหม่' : d.lastRequestType==='revision' ? `ปรับปรุง (Rev.${d.lastRequestFrom||'-'} → ${d.rev||'-'})` : null;
 
-  const countDraft = queue.filter(x=>x.approvalStatus==='ร่าง').length;
-  const countReview = queue.filter(x=>x.approvalStatus==='รอทบทวน').length;
-  const countApprove = queue.filter(x=>x.approvalStatus==='รออนุมัติ').length;
-
-  const queueBanner = queue.length ? `
-  <div class="panel" style="background:var(--blue-50); border-color:var(--blue-500); margin-bottom:16px;">
-    <div class="queue-summary">
-      <div style="font-size:12.5px; font-weight:700; color:var(--blue-600);">
-        รอดำเนินการทั้งหมด ${queue.length} รายการ${queuePos>=0 ? ` · กำลังดู ${queuePos+1}/${queue.length}` : ''}
-      </div>
-      <span class="queue-count-chip" style="color:var(--ink-500);">ร่าง <span class="n">${countDraft}</span></span>
-      <span class="queue-count-chip" style="color:var(--amber-600);">รอทบทวน <span class="n">${countReview}</span></span>
-      <span class="queue-count-chip" style="color:var(--blue-600);">รออนุมัติ <span class="n">${countApprove}</span></span>
-      <div class="spacer"></div>
-      <button class="queue-toggle" id="btnToggleQueueList">${state.queueListOpen ? 'ซ่อนรายการ ▲' : 'ดูรายการทั้งหมด ▼'}</button>
-      ${queue.length>1 ? `<button class="btn ghost" id="btnSkipQueue">ข้ามรายการนี้ ›</button>` : ''}
-    </div>
-    ${state.queueListOpen ? `
-    <div class="queue-list">
-      ${queue.map(x=>`
-        <div class="queue-item ${x.id===d.id?'current':''}" data-jump-queue="${x.id}">
-          <span class="qi-id">${x.id}</span>
-          <span class="qi-name">${cleanName(x)}</span>
-          ${approvalBadge(x.approvalStatus)}
-        </div>`).join('')}
-    </div>` : ''}
-  </div>` : '';
-
   return `
-  ${queueBanner}
-  <div class="crumb" data-back="1">‹ Back</div>
   <div class="panel">
     <div class="panel-head">
       <div>
         <div class="panel-title" style="display:flex; align-items:center; gap:9px; flex-wrap:wrap;">${d.id} ${cleanName(d)} ${approvalBadge(status)}</div>
         <div style="font-size:12px; color:var(--ink-500); margin-top:3px; font-weight:600;">ข้อกำหนด: ${d.clause ? clauseLabel(d.clause) : 'ไม่ระบุ'}${requestLabel ? ` · คำขอ: ${requestLabel}` : ''}</div>
       </div>
-      <select class="select" id="apDocPicker">${DOCUMENTS.map(x=>`<option value="${x.id}" ${x.id===d.id?'selected':''}>${x.id}</option>`).join('')}</select>
+      <button class="btn ghost" data-go="docdetail">${ic('doc')} ดูรายละเอียดเอกสาร</button>
     </div>
 
     <div class="approval-flow">
@@ -901,18 +1124,20 @@ function viewApproval(){
       </div>`).join('') || `<div style="color:var(--ink-500); font-size:12.5px;">ยังไม่มีความเห็น</div>`}
   </div>`;
 }
+
 function attachApprovalHandlers(){
-  const picker = document.getElementById('apDocPicker');
-  if(picker) picker.addEventListener('change', e=>{ state.selectedDoc = e.target.value; render(); });
-  const skipBtn = document.getElementById('btnSkipQueue');
-  if(skipBtn) skipBtn.addEventListener('click', ()=>{
-    const rest = pendingQueue().filter(x=>x.id!==state.selectedDoc);
-    if(rest.length){ state.selectedDoc = rest[0].id; render(); }
+  document.querySelectorAll('[data-ap-tab]').forEach(elx=>{
+    elx.addEventListener('click', ()=>{ state.approvalTab = elx.dataset.apTab; state.approvalPage = 1; render(); });
   });
-  const toggleBtn = document.getElementById('btnToggleQueueList');
-  if(toggleBtn) toggleBtn.addEventListener('click', ()=>{ state.queueListOpen = !state.queueListOpen; render(); });
-  document.querySelectorAll('[data-jump-queue]').forEach(elx=>{
-    elx.addEventListener('click', ()=>{ state.selectedDoc = elx.dataset.jumpQueue; render(); });
+  const typeFilter = document.getElementById('apTypeFilter');
+  if(typeFilter) typeFilter.addEventListener('change', e=>{ state.approvalTypeFilter = e.target.value; state.approvalPage = 1; render(); });
+  const newBtn = document.getElementById('btnApNewDoc');
+  if(newBtn) newBtn.addEventListener('click', ()=> openModal({ mode:'new' }));
+  document.querySelectorAll('[data-appg]').forEach(b=>b.addEventListener('click', ()=>{ state.approvalPage=parseInt(b.dataset.appg,10); render(); }));
+  const pgPrev = document.getElementById('apPgPrev'); if(pgPrev) pgPrev.addEventListener('click', ()=>{ state.approvalPage=Math.max(1,state.approvalPage-1); render(); });
+  const pgNext = document.getElementById('apPgNext'); if(pgNext) pgNext.addEventListener('click', ()=>{ state.approvalPage=state.approvalPage+1; render(); });
+  document.querySelectorAll('[data-select-approval]').forEach(row=>{
+    row.addEventListener('click', ()=>{ state.selectedDoc = row.dataset.selectApproval; render(); });
   });
 
   const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
@@ -938,8 +1163,6 @@ function attachApprovalHandlers(){
       d.approvedAt = now;
       d.approvedComment = comment || '';
     }
-    const rest = pendingQueue().filter(x=>x.id!==d.id);
-    if(rest.length) state.selectedDoc = rest[0].id;
     render();
     await persistDocs();
   });
@@ -956,8 +1179,6 @@ function attachApprovalHandlers(){
     d.comments = d.comments || [];
     d.comments.push({ by:actor, text:comment, time: Date.now() });
     d.approvedBy = null; d.approvedAt = null; d.approvedComment = null;
-    const rest = pendingQueue().filter(x=>x.id!==d.id);
-    if(rest.length) state.selectedDoc = rest[0].id;
     render();
     await persistDocs();
   });
