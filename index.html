@@ -84,56 +84,67 @@
 <div id="app" style="padding: 1rem 0;">
   <h2 class="sr-only">แอปจัดหมวดหมู่เอกสารตามข้อกำหนด ISO/IEC 17025:2017 พร้อมลิงก์ SharePoint</h2>
 
-  <div id="stats" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; margin-bottom:1rem;"></div>
+  <div id="layout" style="display:grid; grid-template-columns:180px 1fr; gap:1.5rem; align-items:start;">
+    <div id="chips" style="display:flex; flex-direction:column; gap:6px; position:sticky; top:1rem;"></div>
 
-  <div id="progressWrap" style="margin-bottom:1.25rem;">
-    <div style="display:flex; height:10px; border-radius:6px; overflow:hidden; background:var(--surface-1);" id="progressBar"></div>
-  </div>
+    <div id="mainContent" style="min-width:0;">
+      <div id="stats" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; margin-bottom:1rem;"></div>
 
-  <div id="chips" style="display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; margin-bottom:1rem;"></div>
+      <div id="progressWrap" style="margin-bottom:1.25rem;">
+        <div style="display:flex; height:10px; border-radius:6px; overflow:hidden; background:var(--surface-1);" id="progressBar"></div>
+      </div>
 
-  <div style="display:flex; gap:8px; margin-bottom:1.25rem; flex-wrap:wrap; align-items:center;">
-    <input id="search" type="text" placeholder="ค้นหาชื่อเอกสาร..." style="flex:1; min-width:160px;" />
-    <select id="filterClause" style="min-width:180px;"></select>
-    <button id="addBtn" style="white-space:nowrap;">+ เพิ่มเอกสาร</button>
-  </div>
+      <div style="display:flex; gap:8px; margin-bottom:1.25rem; flex-wrap:wrap; align-items:center;">
+        <input id="search" type="text" placeholder="ค้นหาชื่อเอกสาร..." style="flex:1; min-width:160px;" />
+        <select id="filterClause" style="min-width:180px;"></select>
+        <button id="addBtn" style="white-space:nowrap;">+ เพิ่มเอกสาร</button>
+      </div>
 
-  <div id="formCard" style="display:none; background:var(--surface-2); border:0.5px solid var(--border); border-radius:12px; padding:1rem 1.25rem; margin-bottom:1.5rem;">
-    <p style="font-weight:500; font-size:15px; margin:0 0 12px;" id="formTitle">เพิ่มเอกสารใหม่</p>
-    <div style="display:flex; flex-direction:column; gap:10px;">
-      <div>
-        <label style="font-size:13px; color:var(--text-secondary); display:block; margin-bottom:4px;">ชื่อเอกสาร</label>
-        <input id="fName" type="text" placeholder="เช่น คู่มือคุณภาพ (Quality Manual)" style="width:100%;" />
+      <div id="formCard" style="display:none; background:var(--surface-2); border:0.5px solid var(--border); border-radius:12px; padding:1rem 1.25rem; margin-bottom:1.5rem;">
+        <p style="font-weight:500; font-size:15px; margin:0 0 12px;" id="formTitle">เพิ่มเอกสารใหม่</p>
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          <div>
+            <label style="font-size:13px; color:var(--text-secondary); display:block; margin-bottom:4px;">ชื่อเอกสาร</label>
+            <input id="fName" type="text" placeholder="เช่น คู่มือคุณภาพ (Quality Manual)" style="width:100%;" />
+          </div>
+          <div>
+            <label style="font-size:13px; color:var(--text-secondary); display:block; margin-bottom:4px;">ข้อกำหนด ISO/IEC 17025:2017 <span id="autoHint" style="color:var(--text-muted); font-weight:400;"></span></label>
+            <select id="fClause" style="width:100%;"></select>
+          </div>
+          <div>
+            <label style="font-size:13px; color:var(--text-secondary); display:block; margin-bottom:4px;">ลิงก์ SharePoint</label>
+            <input id="fLink" type="text" placeholder="https://yourtenant.sharepoint.com/..." style="width:100%;" />
+          </div>
+          <div>
+            <label style="font-size:13px; color:var(--text-secondary); display:block; margin-bottom:4px;">สถานะเอกสาร</label>
+            <select id="fNote" style="width:100%;">
+              <option value="ควบคุม">ควบคุม</option>
+              <option value="แจกจ่าย">แจกจ่าย</option>
+              <option value="สนับสนุน">สนับสนุน</option>
+              <option value="ยกเลิก">ยกเลิก</option>
+              <option value="ว่าง">ว่าง</option>
+            </select>
+          </div>
+          <div id="formError" style="font-size:13px; color:var(--text-danger); display:none;"></div>
+          <div style="display:flex; gap:8px; margin-top:4px;">
+            <button id="saveBtn">บันทึก</button>
+            <button id="cancelBtn">ยกเลิก</button>
+          </div>
+        </div>
       </div>
-      <div>
-        <label style="font-size:13px; color:var(--text-secondary); display:block; margin-bottom:4px;">ข้อกำหนด ISO/IEC 17025:2017 <span id="autoHint" style="color:var(--text-muted); font-weight:400;"></span></label>
-        <select id="fClause" style="width:100%;"></select>
-      </div>
-      <div>
-        <label style="font-size:13px; color:var(--text-secondary); display:block; margin-bottom:4px;">ลิงก์ SharePoint</label>
-        <input id="fLink" type="text" placeholder="https://yourtenant.sharepoint.com/..." style="width:100%;" />
-      </div>
-      <div>
-        <label style="font-size:13px; color:var(--text-secondary); display:block; margin-bottom:4px;">สถานะเอกสาร</label>
-        <select id="fNote" style="width:100%;">
-          <option value="ควบคุม">ควบคุม</option>
-          <option value="แจกจ่าย">แจกจ่าย</option>
-          <option value="สนับสนุน">สนับสนุน</option>
-          <option value="ยกเลิก">ยกเลิก</option>
-          <option value="ว่าง">ว่าง</option>
-        </select>
-      </div>
-      <div id="formError" style="font-size:13px; color:var(--text-danger); display:none;"></div>
-      <div style="display:flex; gap:8px; margin-top:4px;">
-        <button id="saveBtn">บันทึก</button>
-        <button id="cancelBtn">ยกเลิก</button>
-      </div>
+
+      <div id="list"></div>
+      <div id="empty" style="display:none; text-align:center; padding:2rem 0; color:var(--text-muted); font-size:14px;">ยังไม่มีเอกสาร กด "เพิ่มเอกสาร" เพื่อเริ่มต้น</div>
     </div>
   </div>
-
-  <div id="list"></div>
-  <div id="empty" style="display:none; text-align:center; padding:2rem 0; color:var(--text-muted); font-size:14px;">ยังไม่มีเอกสาร กด "เพิ่มเอกสาร" เพื่อเริ่มต้น</div>
 </div>
+
+<style>
+  @media (max-width: 640px) {
+    #layout { grid-template-columns: 1fr !important; }
+    #chips { flex-direction: row !important; overflow-x: auto; position: static !important; }
+  }
+</style>
 
 
 <script type="module">
@@ -360,7 +371,7 @@ function renderChips() {
 }
 
 function chipStyle(active) {
-  return `white-space:nowrap; flex-shrink:0; font-size:13px; padding:6px 12px; border-radius:999px; border:0.5px solid ${active ? 'var(--border-accent)' : 'var(--border)'}; background:${active ? 'var(--bg-accent)' : 'var(--surface-2)'}; color:${active ? 'var(--text-accent)' : 'var(--text-primary)'}; cursor:pointer;`;
+  return `white-space:nowrap; flex-shrink:0; font-size:13px; padding:8px 12px; border-radius:8px; border:0.5px solid ${active ? 'var(--border-accent)' : 'var(--border)'}; background:${active ? 'var(--bg-accent)' : 'var(--surface-2)'}; color:${active ? 'var(--text-accent)' : 'var(--text-primary)'}; cursor:pointer; width:100%; text-align:left;`;
 }
 
 function render() {
@@ -483,6 +494,8 @@ function render() {
       if (d.link) {
         const linkEl = document.createElement('a');
         linkEl.href = d.link;
+        linkEl.target = '_blank';
+        linkEl.rel = 'noopener noreferrer';
         linkEl.style.cssText = 'font-size:13px; color:var(--text-accent); text-decoration:none;';
         linkEl.textContent = 'เปิดใน SharePoint →';
         left.appendChild(linkEl);
