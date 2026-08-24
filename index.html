@@ -79,6 +79,7 @@
     overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
   }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <div id="app" style="padding: 1rem 0;">
@@ -88,6 +89,12 @@
     <div id="chips" style="display:flex; flex-direction:column; gap:6px; position:sticky; top:1rem;"></div>
 
     <div id="mainContent" style="min-width:0;">
+      <div style="display:flex; gap:8px; margin-bottom:1rem;">
+        <button id="tabList" style="padding:6px 14px; font-size:13px;">รายการเอกสาร</button>
+        <button id="tabDashboard" style="padding:6px 14px; font-size:13px;">แดชบอร์ด</button>
+      </div>
+
+      <div id="listView">
       <div id="stats" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; margin-bottom:1rem;"></div>
 
       <div id="progressWrap" style="margin-bottom:1.25rem;">
@@ -135,6 +142,25 @@
 
       <div id="list"></div>
       <div id="empty" style="display:none; text-align:center; padding:2rem 0; color:var(--text-muted); font-size:14px;">ยังไม่มีเอกสาร กด "เพิ่มเอกสาร" เพื่อเริ่มต้น</div>
+      </div>
+
+      <div id="dashboardView" style="display:none;">
+        <div id="dashStats" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; margin-bottom:1.25rem;"></div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:12px;">
+          <div style="background:var(--surface-2); border:0.5px solid var(--border); border-radius:12px; padding:1rem;">
+            <p style="font-size:13px; color:var(--text-secondary); margin:0 0 8px;">ตามหมวดใหญ่ (4-8)</p>
+            <canvas id="chartGroup"></canvas>
+          </div>
+          <div style="background:var(--surface-2); border:0.5px solid var(--border); border-radius:12px; padding:1rem;">
+            <p style="font-size:13px; color:var(--text-secondary); margin:0 0 8px;">ตามสถานะเอกสาร</p>
+            <canvas id="chartStatus"></canvas>
+          </div>
+          <div style="background:var(--surface-2); border:0.5px solid var(--border); border-radius:12px; padding:1rem; grid-column:1/-1;">
+            <p style="font-size:13px; color:var(--text-secondary); margin:0 0 8px;">ตามประเภทเอกสาร</p>
+            <canvas id="chartDocType"></canvas>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -618,6 +644,108 @@ document.getElementById('fName').oninput = () => {
   } else {
     hint.textContent = name ? '(ไม่พบคำที่ตรง เลือกเอง)' : '';
   }
+};
+
+// ------------------------------------------------------------------
+// Dashboard
+// ------------------------------------------------------------------
+const DOC_TYPE_MAP = {
+  'LM': 'คู่มือคุณภาพ (Manual)',
+  'LP': 'ขั้นตอนปฏิบัติงาน (Procedure)',
+  'WI': 'วิธีปฏิบัติงาน (Work Instruction)',
+  'LF': 'แบบฟอร์ม (Form)',
+  'LS': 'เอกสารสนับสนุน (Support)'
+};
+const DOC_TYPE_COLORS = {
+  'LM': '#7F77DD',
+  'LP': '#378ADD',
+  'WI': '#1D9E75',
+  'LF': '#D4537E',
+  'LS': '#888780',
+  'อื่นๆ': '#c9c7bd'
+};
+
+function docTypeOf(d) {
+  const src = (d.id || '') + ' ' + (d.name || '');
+  const m = src.match(/RDI-([A-Z]+)-/);
+  if (m && DOC_TYPE_MAP[m[1]]) return m[1];
+  return 'อื่นๆ';
+}
+
+let chartGroupInstance = null, chartStatusInstance = null, chartDocTypeInstance = null;
+
+function renderDashboard() {
+  const dashStats = document.getElementById('dashStats');
+  const total = docs.length;
+  const classified = docs.filter(d => d.clause).length;
+  const withLink = docs.filter(d => d.link).length;
+  dashStats.innerHTML = `
+    <div style="background:var(--surface-1); border-radius:var(--radius); padding:1rem;">
+      <p style="font-size:13px; color:var(--text-secondary); margin:0 0 4px;">เอกสารทั้งหมด</p>
+      <p style="font-size:24px; font-weight:500; margin:0;">${total}</p>
+    </div>
+    <div style="background:var(--surface-1); border-radius:var(--radius); padding:1rem;">
+      <p style="font-size:13px; color:var(--text-secondary); margin:0 0 4px;">จัดหมวดแล้ว</p>
+      <p style="font-size:24px; font-weight:500; margin:0;">${classified} / ${total}</p>
+    </div>
+    <div style="background:var(--surface-1); border-radius:var(--radius); padding:1rem;">
+      <p style="font-size:13px; color:var(--text-secondary); margin:0 0 4px;">มีลิงก์ SharePoint แล้ว</p>
+      <p style="font-size:24px; font-weight:500; margin:0;">${withLink} / ${total}</p>
+    </div>
+  `;
+
+  // By major group (4-8)
+  const groupCounts = GROUPS.map(([code]) => docs.filter(d => groupOf(d.clause) === code).length);
+  const groupLabels = GROUPS.map(([,label]) => label);
+  const groupColors = GROUPS.map(([,,ramp]) => GROUP_HEX[ramp]);
+  if (chartGroupInstance) chartGroupInstance.destroy();
+  chartGroupInstance = new Chart(document.getElementById('chartGroup'), {
+    type: 'pie',
+    data: { labels: groupLabels, datasets: [{ data: groupCounts, backgroundColor: groupColors }] },
+    options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } } }
+  });
+
+  // By status
+  const statusKeys = Object.keys(STATUS_STYLE);
+  const statusCounts = statusKeys.map(s => docs.filter(d => d.note === s).length);
+  const statusColorMap = {
+    'ควบคุม': '#3b6d11', 'แจกจ่าย': '#185fa5', 'สนับสนุน': '#888780',
+    'ยกเลิก': '#a32d2d', 'ว่าง': '#854f0b', 'ไม่พบ': '#854f0b'
+  };
+  const nonZero = statusKeys.map((s,i) => [s, statusCounts[i]]).filter(([,c]) => c > 0);
+  if (chartStatusInstance) chartStatusInstance.destroy();
+  chartStatusInstance = new Chart(document.getElementById('chartStatus'), {
+    type: 'doughnut',
+    data: {
+      labels: nonZero.map(([s]) => s),
+      datasets: [{ data: nonZero.map(([,c]) => c), backgroundColor: nonZero.map(([s]) => statusColorMap[s] || '#c9c7bd') }]
+    },
+    options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } } }
+  });
+
+  // By document type
+  const typeKeys = Object.keys(DOC_TYPE_MAP).concat(['อื่นๆ']);
+  const typeCounts = typeKeys.map(k => docs.filter(d => docTypeOf(d) === k).length);
+  const typeLabels = typeKeys.map(k => DOC_TYPE_MAP[k] || 'อื่นๆ');
+  if (chartDocTypeInstance) chartDocTypeInstance.destroy();
+  chartDocTypeInstance = new Chart(document.getElementById('chartDocType'), {
+    type: 'bar',
+    data: { labels: typeLabels, datasets: [{ data: typeCounts, backgroundColor: typeKeys.map(k => DOC_TYPE_COLORS[k]) }] },
+    options: {
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+    }
+  });
+}
+
+document.getElementById('tabList').onclick = () => {
+  document.getElementById('listView').style.display = 'block';
+  document.getElementById('dashboardView').style.display = 'none';
+};
+document.getElementById('tabDashboard').onclick = () => {
+  document.getElementById('listView').style.display = 'none';
+  document.getElementById('dashboardView').style.display = 'block';
+  renderDashboard();
 };
 
 load();
