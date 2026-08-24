@@ -74,7 +74,7 @@ const state = {
   view: 'dashboard',
   selectedClause: '',
   isoTab: 'documents',
-  docFilter: { clause:'All', type:'All', status:'All', q:'' },
+  docFilter: { clause:'All', type:'All', status:'All', q:'', preset:'all' },
   docPage: 1,
   selectedDoc: null,
   calMonth: new Date().getMonth(),
@@ -102,6 +102,19 @@ function ic(name, cls=''){ return `<svg class="${cls}" viewBox="0 0 24 24" fill=
 
 function emptyState(title, sub){
   return `<div class="empty-state">${ic('empty')}<h3>${title}</h3><p>${sub}</p></div>`;
+}
+
+// display-only: many document names already have the doc ID typed into
+// them (e.g. name="RDI-LM-01 คู่มือคุณภาพ"), which duplicates the ID
+// column/label everywhere id+name are shown together. Strip it for display.
+function cleanName(d){
+  if(!d || !d.name) return '';
+  const id = (d.id||'').trim();
+  let n = d.name.trim();
+  if(id && n.startsWith(id)){
+    n = n.slice(id.length).replace(/^[\s\-:–—]+/, '').trim();
+  }
+  return n || d.name;
 }
 
 // ============================================================
@@ -137,33 +150,49 @@ function removeBootScreen(){
 }
 
 // ============================================================
-// NAV
+// NAV + HISTORY STACK (so "back" returns to the actual previous
+// page/filters, not a hardcoded target)
 // ============================================================
+let navStack = [];
+function snapshotState(){
+  // state only holds plain data (no functions/DOM refs), safe to deep-clone
+  return JSON.parse(JSON.stringify(state));
+}
+function syncNavActive(){
+  document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active', b.dataset.view===state.view));
+}
 function wireNav(){
   document.querySelectorAll('.nav-item').forEach(btn=>{
     btn.addEventListener('click', ()=>{
-      document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-      state.view = btn.dataset.view;
-      render();
-      window.scrollTo({top:0, behavior:'instant'});
+      const extra = btn.dataset.view==='documents' ? { docFilter:{ clause:'All', type:'All', status:'All', q:'', preset:'all' }, docPage:1 } : {};
+      goTo(btn.dataset.view, extra);
     });
   });
 }
 function goTo(view, extra={}){
+  navStack.push(snapshotState());
   Object.assign(state, extra);
   state.view = view;
-  document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active', b.dataset.view===view));
+  syncNavActive();
   render();
+  window.scrollTo({top:0, behavior:'instant'});
+}
+function goBack(){
+  if(navStack.length){
+    const prev = navStack.pop();
+    Object.assign(state, prev);
+    syncNavActive();
+    render();
+  } else {
+    goTo('dashboard');
+  }
   window.scrollTo({top:0, behavior:'instant'});
 }
 function wireGlobalSearch(){
   const gs = document.getElementById('globalSearch');
   gs.addEventListener('keydown', e=>{
     if(e.key==='Enter'){
-      state.docFilter.q = e.target.value;
-      state.docPage = 1;
-      goTo('documents');
+      goTo('documents', { docFilter:{ clause:'All', type:'All', status:'All', q:e.target.value, preset:'all' }, docPage:1 });
     }
   });
 }
@@ -193,8 +222,17 @@ function attachGlobalRowHandlers(){
   document.querySelectorAll('[data-open-doc]').forEach(row=>{
     row.addEventListener('click', ()=> goTo('docdetail', { selectedDoc: row.dataset.openDoc }));
   });
+  document.querySelectorAll('[data-back]').forEach(elx=>{
+    elx.addEventListener('click', ()=> goBack());
+  });
   document.querySelectorAll('[data-go]').forEach(elx=>{
-    elx.addEventListener('click', ()=> goTo(elx.dataset.go));
+    elx.addEventListener('click', ()=>{
+      if(elx.dataset.preset){
+        goTo(elx.dataset.go, { docFilter:{ clause:'All', type:'All', status:'All', q:'', preset:elx.dataset.preset }, docPage:1 });
+      } else {
+        goTo(elx.dataset.go);
+      }
+    });
   });
 }
 
@@ -209,13 +247,13 @@ function viewDashboard(){
 
   return `
   <div class="stat-row">
-    <div class="stat-card"><div class="stat-icon blue">${ic('doc')}</div>
+    <div class="stat-card" data-go="documents" data-preset="all" style="cursor:pointer;"><div class="stat-icon blue">${ic('doc')}</div>
       <div><div class="stat-num">${s.total}</div><div class="stat-label">Documents ทั้งหมด</div></div></div>
-    <div class="stat-card"><div class="stat-icon green">${ic('check')}</div>
+    <div class="stat-card" data-go="documents" data-preset="active" style="cursor:pointer;"><div class="stat-icon green">${ic('check')}</div>
       <div><div class="stat-num">${s.active}</div><div class="stat-label">ควบคุม / แจกจ่าย (ใช้งานอยู่)</div></div></div>
-    <div class="stat-card"><div class="stat-icon amber">${ic('clock')}</div>
+    <div class="stat-card" data-go="documents" data-preset="pending" style="cursor:pointer;"><div class="stat-icon amber">${ic('clock')}</div>
       <div><div class="stat-num">${s.pending}</div><div class="stat-label">รอทบทวน / รออนุมัติ</div></div></div>
-    <div class="stat-card"><div class="stat-icon red">${ic('alert')}</div>
+    <div class="stat-card" data-go="documents" data-preset="attention" style="cursor:pointer;"><div class="stat-icon red">${ic('alert')}</div>
       <div><div class="stat-num">${s.attention}</div><div class="stat-label">ต้องตรวจสอบ (ไม่พบ / ไม่อนุมัติ)</div></div></div>
   </div>
 
@@ -229,26 +267,26 @@ function viewDashboard(){
           <div class="prog-track"><div class="prog-fill" style="width:${c.pct}%"></div></div>
           <div class="prog-pct">${c.pct}%</div>
         </div>`).join('')}
-      ${unclassified ? `<div style="margin-top:12px; font-size:11.5px; color:var(--ink-500);">มีเอกสาร <b style="color:var(--ink-900);">${unclassified}</b> รายการที่ยังไม่ได้ระบุข้อกำหนด <span class="panel-link" data-go="documents" style="cursor:pointer;">ดูรายการ</span></div>` : ''}
+      ${unclassified ? `<div style="margin-top:12px; font-size:11.5px; color:var(--ink-500);">มีเอกสาร <b style="color:var(--ink-900);">${unclassified}</b> รายการที่ยังไม่ได้ระบุข้อกำหนด <span class="panel-link" data-go="documents" data-preset="unclassified" style="cursor:pointer;">ดูรายการ</span></div>` : ''}
     </div>
     <div class="panel">
       <div class="panel-head"><div class="panel-title">Action Required</div></div>
-      <div class="action-item">
+      <div class="action-item" data-go="documents" data-preset="missing" style="cursor:pointer;">
         <div class="action-dot red">${ic('alert')}</div>
         <div class="action-text">เอกสารสถานะ "ไม่พบ" ในทะเบียน</div>
         <div class="action-count">${DOCUMENTS.filter(d=>d.note==='ไม่พบ').length} รายการ</div>
       </div>
-      <div class="action-item">
+      <div class="action-item" data-go="documents" data-preset="rejected" style="cursor:pointer;">
         <div class="action-dot red">${ic('alert')}</div>
         <div class="action-text">ถูกปฏิเสธการอนุมัติ (ไม่อนุมัติ)</div>
         <div class="action-count">${DOCUMENTS.filter(d=>d.approvalStatus==='ไม่อนุมัติ').length} รายการ</div>
       </div>
-      <div class="action-item">
+      <div class="action-item" data-go="documents" data-preset="waitingreview" style="cursor:pointer;">
         <div class="action-dot amber">${ic('clock')}</div>
         <div class="action-text">รอทบทวน</div>
         <div class="action-count">${DOCUMENTS.filter(d=>d.approvalStatus==='รอทบทวน').length} รายการ</div>
       </div>
-      <div class="action-item">
+      <div class="action-item" data-go="documents" data-preset="waitingapproval" style="cursor:pointer;">
         <div class="action-dot amber">${ic('clock')}</div>
         <div class="action-text">รออนุมัติ</div>
         <div class="action-count">${DOCUMENTS.filter(d=>d.approvalStatus==='รออนุมัติ').length} รายการ</div>
@@ -262,7 +300,7 @@ function viewDashboard(){
       <div class="rowline" data-open-doc="${d.id}" style="cursor:pointer">
         <div class="file-ic">${ic('file')}</div>
         <div class="rl-main">
-          <div class="rl-title">${d.id} &nbsp;${d.name}</div>
+          <div class="rl-title">${d.id} &nbsp;${cleanName(d)}</div>
           <div class="rl-sub">${fmtDateTime(d.lastUpdated)} · ${docTypeLabel(d)}</div>
         </div>
         ${statusBadge(d.note)}
@@ -327,7 +365,7 @@ function docTable(docs){
   return `<div class="table-wrap"><table class="dtable">
     <thead><tr><th>Document ID</th><th>Document Name</th><th>Type</th><th>Status</th><th>Approval</th><th>Last Updated</th></tr></thead>
     <tbody>${docs.map(d=>`<tr data-open-doc="${d.id}">
-      <td class="mono">${d.id}</td><td class="name">${d.name}</td><td>${docTypeLabel(d)}</td>
+      <td class="mono">${d.id}</td><td class="name">${cleanName(d)}</td><td>${docTypeLabel(d)}</td>
       <td>${statusBadge(d.note)}</td><td>${approvalBadge(d.approvalStatus)}</td><td>${fmtDate(d.lastUpdated)}</td>
     </tr>`).join('')}</tbody>
   </table></div>`;
@@ -365,8 +403,21 @@ function attachISOTabHandlers(){
 // ============================================================
 // DOCUMENTS LIST VIEW (+ full CRUD, writes to Firestore)
 // ============================================================
+const DOC_PRESETS = {
+  all: d=> true,
+  active: d=> d.note==='ควบคุม' || d.note==='แจกจ่าย',
+  pending: d=> d.approvalStatus==='รอทบทวน' || d.approvalStatus==='รออนุมัติ',
+  attention: d=> d.note==='ไม่พบ' || d.approvalStatus==='ไม่อนุมัติ',
+  missing: d=> d.note==='ไม่พบ',
+  rejected: d=> d.approvalStatus==='ไม่อนุมัติ',
+  waitingreview: d=> d.approvalStatus==='รอทบทวน',
+  waitingapproval: d=> d.approvalStatus==='รออนุมัติ',
+  unclassified: d=> !d.clause,
+};
 function filteredDocs(){
+  const presetFn = DOC_PRESETS[state.docFilter.preset] || DOC_PRESETS.all;
   return DOCUMENTS.filter(d=>{
+    if(!presetFn(d)) return false;
     if(state.docFilter.clause!=='All' && (d.clause||'')!==state.docFilter.clause) return false;
     if(state.docFilter.type!=='All' && docTypeCode(d)!==state.docFilter.type) return false;
     if(state.docFilter.status!=='All' && d.note!==state.docFilter.status) return false;
@@ -389,6 +440,8 @@ function renderDocumentsInto(){
   const clauseOpts = [['All','ทุกข้อกำหนด'], ['','ไม่ระบุ'], ...CLAUSES];
   const typeOpts = [['All','ทุกประเภท'], ...Object.entries(DOC_TYPE_MAP)];
   const statusOpts = ['All','ควบคุม','แจกจ่าย','สนับสนุน','ยกเลิก','ว่าง','ไม่พบ'];
+  const PRESET_LABEL = { active:'ควบคุม/แจกจ่าย', pending:'รอทบทวน/รออนุมัติ', attention:'ต้องตรวจสอบ', missing:'ไม่พบ', rejected:'ไม่อนุมัติ', waitingreview:'รอทบทวน', waitingapproval:'รออนุมัติ', unclassified:'ไม่ระบุข้อกำหนด' };
+  const presetActive = state.docFilter.preset && state.docFilter.preset!=='all';
 
   el.innerHTML = `
   <div class="panel">
@@ -399,6 +452,7 @@ function renderDocumentsInto(){
       <select class="select" id="fClause">${clauseOpts.map(([v,l])=>`<option value="${v}" ${v===state.docFilter.clause?'selected':''}>${l}</option>`).join('')}</select>
       <select class="select" id="fType">${typeOpts.map(([v,l])=>`<option value="${v}" ${v===state.docFilter.type?'selected':''}>${l}</option>`).join('')}</select>
       <select class="select" id="fStatus">${statusOpts.map(s=>`<option ${s===state.docFilter.status?'selected':''}>${s}</option>`).join('')}</select>
+      ${presetActive ? `<button class="btn ghost" id="btnClearPreset">✕ ${PRESET_LABEL[state.docFilter.preset]||''}</button>` : ''}
       <div class="spacer"></div>
       <div style="font-size:12px; color:var(--ink-500); font-weight:600;">${list.length} entries</div>
     </div>
@@ -407,7 +461,7 @@ function renderDocumentsInto(){
       <tbody>
         ${pageItems.length ? pageItems.map(d=>`
         <tr data-open-doc="${d.id}">
-          <td class="mono">${d.id}</td><td class="name">${d.name}</td><td>${d.clause || '<span style="color:var(--ink-400);">—</span>'}</td>
+          <td class="mono">${d.id}</td><td class="name">${cleanName(d)}</td><td>${d.clause || '<span style="color:var(--ink-400);">—</span>'}</td>
           <td>${docTypeLabel(d)}</td><td>${statusBadge(d.note)}</td><td>${approvalBadge(d.approvalStatus)}</td><td>${fmtDate(d.lastUpdated)}</td>
           <td><div class="row-actions" onclick="event.stopPropagation()">
             <button data-edit="${d.id}" title="Edit">${ic('edit')}</button>
@@ -432,11 +486,13 @@ function wireDocControls(){
   const search = document.getElementById('docSearch');
   if(search) search.addEventListener('input', e=>{ state.docFilter.q = e.target.value; state.docPage=1; renderDocumentsInto(); wireDocControls(); });
   const fc = document.getElementById('fClause');
-  if(fc) fc.addEventListener('change', e=>{ state.docFilter.clause = e.target.value; state.docPage=1; renderDocumentsInto(); wireDocControls(); });
+  if(fc) fc.addEventListener('change', e=>{ state.docFilter.clause = e.target.value; state.docFilter.preset='all'; state.docPage=1; renderDocumentsInto(); wireDocControls(); });
   const ft = document.getElementById('fType');
-  if(ft) ft.addEventListener('change', e=>{ state.docFilter.type = e.target.value; state.docPage=1; renderDocumentsInto(); wireDocControls(); });
+  if(ft) ft.addEventListener('change', e=>{ state.docFilter.type = e.target.value; state.docFilter.preset='all'; state.docPage=1; renderDocumentsInto(); wireDocControls(); });
   const fs = document.getElementById('fStatus');
-  if(fs) fs.addEventListener('change', e=>{ state.docFilter.status = e.target.value; state.docPage=1; renderDocumentsInto(); wireDocControls(); });
+  if(fs) fs.addEventListener('change', e=>{ state.docFilter.status = e.target.value; state.docFilter.preset='all'; state.docPage=1; renderDocumentsInto(); wireDocControls(); });
+  const clearPreset = document.getElementById('btnClearPreset');
+  if(clearPreset) clearPreset.addEventListener('click', ()=>{ state.docFilter.preset='all'; state.docPage=1; renderDocumentsInto(); wireDocControls(); });
   document.querySelectorAll('[data-pg]').forEach(b=>b.addEventListener('click', ()=>{ state.docPage=parseInt(b.dataset.pg,10); renderDocumentsInto(); wireDocControls(); }));
   const prev = document.getElementById('pgPrev'); if(prev) prev.addEventListener('click', ()=>{ state.docPage=Math.max(1,state.docPage-1); renderDocumentsInto(); wireDocControls(); });
   const next = document.getElementById('pgNext'); if(next) next.addEventListener('click', ()=>{ state.docPage=state.docPage+1; renderDocumentsInto(); wireDocControls(); });
@@ -538,13 +594,13 @@ function viewDocDetail(docId){
   const d = DOCUMENTS.find(x=>x.id===docId);
   if(!d) return `<div class="panel">${emptyState('ไม่พบเอกสาร','This document may have been deleted.')}</div>`;
   return `
-  <div class="crumb" data-go="documents">‹ Back to Document List</div>
+  <div class="crumb" data-back="1">‹ Back</div>
   <div class="panel">
     <div class="detail-head">
       <div class="doc-thumb">${ic('pdf')}<span>${docTypeCode(d)}</span></div>
       <div style="flex:1;">
         <div class="detail-title-row"><div class="detail-title">${d.id}</div>${statusBadge(d.note)}${approvalBadge(d.approvalStatus)}</div>
-        <div class="detail-sub">${d.name}</div>
+        <div class="detail-sub">${cleanName(d)}</div>
         <div class="kv-row"><div class="k">ประเภท</div><div class="v">${docTypeLabel(d)}</div></div>
         <div class="kv-row"><div class="k">อัปเดตล่าสุด</div><div class="v">${fmtDateTime(d.lastUpdated)}</div></div>
         <div class="kv-row"><div class="k">ผู้ทบทวน</div><div class="v">${d.reviewerName || '—'}</div></div>
@@ -581,10 +637,10 @@ function viewRevision(){
     ...(d.comments||[]).slice().reverse().map(c=>({ label:c.by, date:c.time, desc:c.text })),
   ];
   return `
-  <div class="crumb" data-go="docdetail">‹ Back</div>
+  <div class="crumb" data-back="1">‹ Back</div>
   <div class="panel">
     <div class="panel-head">
-      <div class="panel-title">History — ${d.id} ${d.name}</div>
+      <div class="panel-title">History — ${d.id} ${cleanName(d)}</div>
       <select class="select" id="revDocPicker">${DOCUMENTS.map(x=>`<option value="${x.id}" ${x.id===d.id?'selected':''}>${x.id}</option>`).join('')}</select>
     </div>
     <div style="font-size:11.5px; color:var(--ink-500); margin-bottom:14px;">ระบบนี้เก็บเวลาที่แก้ไขล่าสุดและประวัติความเห็นการอนุมัติ ยังไม่ได้เก็บเลข Revision แยกเป็นเวอร์ชันย้อนหลัง</div>
@@ -617,11 +673,20 @@ function viewApproval(){
     return { label:s, cls: done?'done':(isNext?'pending':'waiting') };
   });
 
+  const isApproved = status === 'อนุมัติแล้ว';
+  // fallback for docs approved before approvedBy/approvedAt existed: use the
+  // most recent comment as a best-effort approver record
+  const lastComment = (d.comments||[])[ (d.comments||[]).length-1 ];
+  const approvedBy = d.approvedBy || (lastComment ? lastComment.by : '');
+  const approvedAt = d.approvedAt || (lastComment ? lastComment.time : d.lastUpdated);
+  const approvedComment = d.approvedComment !== undefined ? d.approvedComment : (lastComment ? lastComment.text : '');
+
   return `
+  <div class="crumb" data-back="1">‹ Back</div>
   <div class="panel">
     <div class="panel-head">
       <div>
-        <div class="panel-title">${d.id} ${d.name}</div>
+        <div class="panel-title">${d.id} ${cleanName(d)}</div>
         <div style="font-size:12px; color:var(--ink-500); margin-top:3px; font-weight:600;">ข้อกำหนด: ${d.clause ? clauseLabel(d.clause) : 'ไม่ระบุ'}</div>
       </div>
       <select class="select" id="apDocPicker">${DOCUMENTS.map(x=>`<option value="${x.id}" ${x.id===d.id?'selected':''}>${x.id}</option>`).join('')}</select>
@@ -638,6 +703,14 @@ function viewApproval(){
       ${isRejected ? `<div class="af-line"></div><div class="af-step"><div class="af-circle" style="border-color:var(--red-600); background:var(--red-50);">${ic('alert')}</div><div class="af-name">ไม่อนุมัติ</div><div class="af-status" style="background:var(--red-50); color:var(--red-600);">Rejected</div></div>` : ''}
     </div>
 
+    ${isApproved ? `
+    <div class="side-box" style="border-color:var(--green-600); background:var(--green-50);">
+      <div class="side-box-title" style="color:var(--green-600);">อนุมัติแล้ว</div>
+      <div style="font-size:13px; color:var(--ink-900); font-weight:700;">${approvedBy || 'ไม่ระบุผู้อนุมัติ'}</div>
+      <div style="font-size:12px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(approvedAt)}</div>
+      ${approvedComment ? `<div style="font-size:12.5px; color:var(--ink-700); margin-top:8px; padding-top:8px; border-top:1px solid var(--line);">${approvedComment}</div>` : ''}
+    </div>
+    ` : `
     <div class="field" style="max-width:320px;"><label>ชื่อผู้ดำเนินการ</label><input id="approvalActor" placeholder="ชื่อ-นามสกุล"></div>
     <div class="comment-box">
       <label style="font-size:12px; font-weight:700; color:var(--ink-700); display:block; margin-bottom:8px;">ความเห็น (จำเป็นถ้ากด "ไม่อนุมัติ")</label>
@@ -645,9 +718,10 @@ function viewApproval(){
       <div id="approvalError" class="field-error" style="display:none;"></div>
       <div class="comment-actions">
         <button class="btn danger" id="btnReject">Reject</button>
-        <button class="btn success" id="btnApprove" ${status==='อนุมัติแล้ว'?'disabled':''}>${status==='อนุมัติแล้ว' ? 'Approved' : (currentIdx===STATUS_FLOW.length-2 ? 'Final Approve':'Approve / Next Step')}</button>
+        <button class="btn success" id="btnApprove">${currentIdx===STATUS_FLOW.length-2 ? 'Final Approve':'Approve / Next Step'}</button>
       </div>
     </div>
+    `}
 
     <div class="panel-title" style="margin:20px 0 10px;">ประวัติความเห็น</div>
     ${(d.comments||[]).slice().reverse().map(c=>`
@@ -673,10 +747,16 @@ function attachApprovalHandlers(){
     if(!actor){ errEl.textContent='กรอกชื่อผู้ดำเนินการก่อน'; errEl.style.display='block'; return; }
     const comment = document.getElementById('approvalComment').value.trim();
     const nextIdx = Math.min(currentIdx+1, STATUS_FLOW.length-1);
+    const now = Date.now();
     d.approvalStatus = STATUS_FLOW[nextIdx];
-    d.lastUpdated = Date.now();
+    d.lastUpdated = now;
     d.comments = d.comments || [];
-    d.comments.push({ by:actor, text: comment || `อนุมัติ → ${d.approvalStatus}`, time: Date.now() });
+    d.comments.push({ by:actor, text: comment || `อนุมัติ → ${d.approvalStatus}`, time: now });
+    if(d.approvalStatus==='อนุมัติแล้ว'){
+      d.approvedBy = actor;
+      d.approvedAt = now;
+      d.approvedComment = comment || '';
+    }
     render();
     await persistDocs();
   });
@@ -691,6 +771,7 @@ function attachApprovalHandlers(){
     d.lastUpdated = Date.now();
     d.comments = d.comments || [];
     d.comments.push({ by:actor, text:comment, time: Date.now() });
+    d.approvedBy = null; d.approvedAt = null; d.approvedComment = null;
     render();
     await persistDocs();
   });
@@ -723,9 +804,9 @@ function viewAudit(){
     </div>
     <div class="audit-cols" style="grid-template-columns:1fr 1fr 1fr;">
       <div><div class="audit-col-title">Documents</div>
-        ${docs.length ? docs.map(d=>`<div class="audit-link" data-open-doc="${d.id}"><span class="dot"></span>${d.id} ${d.name}</div>`).join('') : `<div style="color:var(--ink-400); font-size:12px;">—</div>`}</div>
+        ${docs.length ? docs.map(d=>`<div class="audit-link" data-open-doc="${d.id}"><span class="dot"></span>${d.id} ${cleanName(d)}</div>`).join('') : `<div style="color:var(--ink-400); font-size:12px;">—</div>`}</div>
       <div><div class="audit-col-title">Evidence / Support</div>
-        ${evidence.length ? evidence.map(d=>`<div class="audit-link" data-open-doc="${d.id}"><span class="dot"></span>${d.id} ${d.name}</div>`).join('') : `<div style="color:var(--ink-400); font-size:12px;">—</div>`}</div>
+        ${evidence.length ? evidence.map(d=>`<div class="audit-link" data-open-doc="${d.id}"><span class="dot"></span>${d.id} ${cleanName(d)}</div>`).join('') : `<div style="color:var(--ink-400); font-size:12px;">—</div>`}</div>
       <div><div class="audit-col-title">Related</div>
         ${related.map(r=>`<div class="audit-link" data-clause-jump-audit="${r.id}"><span class="dot"></span>${r.id} ${r.title}</div>`).join('') || `<div style="color:var(--ink-400); font-size:12px;">—</div>`}</div>
     </div>
@@ -820,7 +901,7 @@ function viewAuditTrail(){
   <div class="panel">
     <div class="panel-head"><div class="panel-title">Audit Trail</div><div style="font-size:11.5px; color:var(--ink-500);">${feed.length} entries</div></div>
     ${feed.length ? feed.map(a=>`
-      <div class="at-item">
+      <div class="at-item" data-open-doc="${a.docId}" style="cursor:pointer;">
         <div class="at-icon">${ic('history')}</div>
         <div class="at-main"><div class="at-title">${a.by} — ${a.docId}</div><div class="at-meta">${a.text}</div></div>
         <div class="at-time">${fmtDateTime(a.time)}</div>
