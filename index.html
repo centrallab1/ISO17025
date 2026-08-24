@@ -89,9 +89,10 @@
     <div id="chips" style="display:flex; flex-direction:column; gap:6px; position:sticky; top:1rem;"></div>
 
     <div id="mainContent" style="min-width:0;">
-      <div style="display:flex; gap:8px; margin-bottom:1rem;">
-        <button id="tabList" style="padding:6px 14px; font-size:13px;">รายการเอกสาร</button>
+      <div style="display:flex; gap:8px; margin-bottom:1rem; flex-wrap:wrap;">
         <button id="tabDashboard" style="padding:6px 14px; font-size:13px;">แดชบอร์ด</button>
+        <button id="tabList" style="padding:6px 14px; font-size:13px;">รายการเอกสาร</button>
+        <button id="tabApproval" style="padding:6px 14px; font-size:13px;">อนุมัติเอกสาร</button>
       </div>
 
       <div id="listView">
@@ -145,6 +146,24 @@
       </div>
 
       <div id="dashboardView" style="display:none;">
+        <div id="dashSummary" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; margin-bottom:1.25rem;"></div>
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:12px; margin-bottom:1.25rem;">
+          <div style="background:var(--surface-2); border:0.5px solid var(--border); border-radius:12px; padding:1rem;">
+            <p style="font-size:13px; font-weight:500; margin:0 0 10px;">ความสมบูรณ์ตามหมวดใหญ่</p>
+            <div id="complianceBars"></div>
+          </div>
+          <div style="background:var(--surface-2); border:0.5px solid var(--border); border-radius:12px; padding:1rem;">
+            <p style="font-size:13px; font-weight:500; margin:0 0 10px;">ต้องดำเนินการ</p>
+            <div id="actionRequired"></div>
+          </div>
+        </div>
+
+        <div style="background:var(--surface-2); border:0.5px solid var(--border); border-radius:12px; padding:1rem; margin-bottom:1.25rem;">
+          <p style="font-size:13px; font-weight:500; margin:0 0 10px;">เอกสารที่อัปเดตล่าสุด</p>
+          <div id="recentDocs"></div>
+        </div>
+
         <div id="dashStats" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; margin-bottom:1.25rem;"></div>
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:12px;">
           <div style="background:var(--surface-2); border:0.5px solid var(--border); border-radius:12px; padding:1rem;">
@@ -160,6 +179,12 @@
             <canvas id="chartDocType"></canvas>
           </div>
         </div>
+      </div>
+
+      <div id="approvalView" style="display:none;">
+        <input id="approvalSearch" type="text" placeholder="ค้นหาเอกสารที่จะอนุมัติ..." style="width:100%; margin-bottom:1rem;" />
+        <div id="approvalList" style="display:flex; flex-direction:column; gap:6px; margin-bottom:1.25rem;"></div>
+        <div id="approvalDetail" style="display:none; background:var(--surface-2); border:0.5px solid var(--border); border-radius:12px; padding:1.25rem;"></div>
       </div>
     </div>
   </div>
@@ -356,6 +381,19 @@ async function load() {
       '<p style="color:var(--text-danger); font-size:14px;">โหลดข้อมูลจาก Firebase ไม่สำเร็จ ตรวจสอบ firebaseConfig และ Firestore rules ในไฟล์นี้</p>';
     docs = [];
   }
+  // Backfill approval-workflow fields for records created before this feature existed.
+  let needsMigration = false;
+  docs.forEach(d => {
+    if (d.approvalStatus === undefined) {
+      d.approvalStatus = (d.note === 'ควบคุม' || d.note === 'แจกจ่าย') ? 'อนุมัติแล้ว' : 'ร่าง';
+      needsMigration = true;
+    }
+    if (d.reviewerName === undefined) { d.reviewerName = ''; needsMigration = true; }
+    if (d.approverName === undefined) { d.approverName = ''; needsMigration = true; }
+    if (!Array.isArray(d.comments)) { d.comments = []; needsMigration = true; }
+    if (d.lastUpdated === undefined) { d.lastUpdated = Date.now(); needsMigration = true; }
+  });
+  if (needsMigration) await persist();
   render();
 }
 
@@ -609,8 +647,17 @@ async function saveDoc() {
   if (editingId) {
     const d = docs.find(x => x.id === editingId);
     d.name = name; d.clause = clause; d.link = link; d.note = note;
+    d.lastUpdated = Date.now();
   } else {
-    docs.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2,7), name, clause, link, note });
+    docs.push({
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2,7),
+      name, clause, link, note,
+      approvalStatus: 'ร่าง',
+      reviewerName: '',
+      approverName: '',
+      comments: [],
+      lastUpdated: Date.now()
+    });
   }
   await persist();
   closeForm();
@@ -647,6 +694,18 @@ document.getElementById('fName').oninput = () => {
 };
 
 // ------------------------------------------------------------------
+// Approval workflow
+// ------------------------------------------------------------------
+const STATUS_FLOW = ['ร่าง', 'รอทบทวน', 'รออนุมัติ', 'อนุมัติแล้ว'];
+const APPROVAL_STATUS_COLOR = {
+  'ร่าง': { bg: 'var(--surface-1)', text: 'var(--text-secondary)' },
+  'รอทบทวน': { bg: 'var(--bg-warning)', text: 'var(--text-warning)' },
+  'รออนุมัติ': { bg: 'var(--bg-accent)', text: 'var(--text-accent)' },
+  'อนุมัติแล้ว': { bg: 'var(--bg-success)', text: 'var(--text-success)' },
+  'ไม่อนุมัติ': { bg: 'var(--bg-danger)', text: 'var(--text-danger)' }
+};
+
+// ------------------------------------------------------------------
 // Dashboard
 // ------------------------------------------------------------------
 const DOC_TYPE_MAP = {
@@ -675,15 +734,83 @@ function docTypeOf(d) {
 let chartGroupInstance = null, chartStatusInstance = null, chartDocTypeInstance = null;
 
 function renderDashboard() {
-  const dashStats = document.getElementById('dashStats');
   const total = docs.length;
-  const classified = docs.filter(d => d.clause).length;
-  const withLink = docs.filter(d => d.link).length;
-  dashStats.innerHTML = `
+  const approved = docs.filter(d => d.approvalStatus === 'อนุมัติแล้ว').length;
+  const pending = docs.filter(d => d.approvalStatus === 'รอทบทวน' || d.approvalStatus === 'รออนุมัติ').length;
+  const rejected = docs.filter(d => d.approvalStatus === 'ไม่อนุมัติ').length;
+
+  document.getElementById('dashSummary').innerHTML = `
     <div style="background:var(--surface-1); border-radius:var(--radius); padding:1rem;">
       <p style="font-size:13px; color:var(--text-secondary); margin:0 0 4px;">เอกสารทั้งหมด</p>
       <p style="font-size:24px; font-weight:500; margin:0;">${total}</p>
     </div>
+    <div style="background:var(--surface-1); border-radius:var(--radius); padding:1rem;">
+      <p style="font-size:13px; color:var(--text-success); margin:0 0 4px;">อนุมัติแล้ว</p>
+      <p style="font-size:24px; font-weight:500; margin:0;">${approved}</p>
+    </div>
+    <div style="background:var(--surface-1); border-radius:var(--radius); padding:1rem;">
+      <p style="font-size:13px; color:var(--text-warning); margin:0 0 4px;">รอดำเนินการ</p>
+      <p style="font-size:24px; font-weight:500; margin:0;">${pending}</p>
+    </div>
+    <div style="background:var(--surface-1); border-radius:var(--radius); padding:1rem;">
+      <p style="font-size:13px; color:var(--text-danger); margin:0 0 4px;">ไม่อนุมัติ</p>
+      <p style="font-size:24px; font-weight:500; margin:0;">${rejected}</p>
+    </div>
+  `;
+
+  // Compliance bars per major group — % of docs in that group that are อนุมัติแล้ว
+  const complianceEl = document.getElementById('complianceBars');
+  complianceEl.innerHTML = '';
+  GROUPS.forEach(([code, label, ramp]) => {
+    const inGroup = docs.filter(d => groupOf(d.clause) === code);
+    const groupApproved = inGroup.filter(d => d.approvalStatus === 'อนุมัติแล้ว').length;
+    const pct = inGroup.length ? Math.round((groupApproved / inGroup.length) * 100) : 0;
+    const row = document.createElement('div');
+    row.style.cssText = 'margin-bottom:10px;';
+    row.innerHTML = `
+      <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px;">
+        <span>${label}</span><span style="color:var(--text-secondary);">${pct}%</span>
+      </div>
+      <div style="height:6px; border-radius:4px; background:var(--surface-1); overflow:hidden;">
+        <div style="height:100%; width:${pct}%; background:${GROUP_HEX[ramp]};"></div>
+      </div>
+    `;
+    complianceEl.appendChild(row);
+  });
+
+  // Action required — docs not yet approved, sorted by status urgency
+  const actionEl = document.getElementById('actionRequired');
+  const needsAction = docs
+    .filter(d => d.approvalStatus !== 'อนุมัติแล้ว')
+    .sort((a, b) => STATUS_FLOW.indexOf(a.approvalStatus) - STATUS_FLOW.indexOf(b.approvalStatus))
+    .slice(0, 8);
+  if (needsAction.length === 0) {
+    actionEl.innerHTML = '<p style="font-size:13px; color:var(--text-muted); margin:0;">ไม่มีเอกสารที่ต้องดำเนินการ</p>';
+  } else {
+    actionEl.innerHTML = needsAction.map(d => {
+      const st = APPROVAL_STATUS_COLOR[d.approvalStatus] || APPROVAL_STATUS_COLOR['ร่าง'];
+      return `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:0.5px solid var(--border); font-size:13px;">
+        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${d.name}</span>
+        <span style="font-size:11px; padding:1px 8px; border-radius:999px; background:${st.bg}; color:${st.text}; flex-shrink:0;">${d.approvalStatus || 'ร่าง'}</span>
+      </div>`;
+    }).join('');
+  }
+
+  // Recently updated
+  const recentEl = document.getElementById('recentDocs');
+  const recent = [...docs].sort((a, b) => (b.lastUpdated || 0) - (a.lastUpdated || 0)).slice(0, 6);
+  recentEl.innerHTML = recent.map(d => {
+    const dt = d.lastUpdated ? new Date(d.lastUpdated).toLocaleDateString('th-TH') : '-';
+    return `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:0.5px solid var(--border); font-size:13px;">
+      <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${d.name}</span>
+      <span style="color:var(--text-muted); flex-shrink:0;">${dt}</span>
+    </div>`;
+  }).join('');
+
+  const dashStats = document.getElementById('dashStats');
+  const classified = docs.filter(d => d.clause).length;
+  const withLink = docs.filter(d => d.link).length;
+  dashStats.innerHTML = `
     <div style="background:var(--surface-1); border-radius:var(--radius); padding:1rem;">
       <p style="font-size:13px; color:var(--text-secondary); margin:0 0 4px;">จัดหมวดแล้ว</p>
       <p style="font-size:24px; font-weight:500; margin:0;">${classified} / ${total}</p>
@@ -738,15 +865,123 @@ function renderDashboard() {
   });
 }
 
-document.getElementById('tabList').onclick = () => {
-  document.getElementById('listView').style.display = 'block';
-  document.getElementById('dashboardView').style.display = 'none';
-};
-document.getElementById('tabDashboard').onclick = () => {
-  document.getElementById('listView').style.display = 'none';
-  document.getElementById('dashboardView').style.display = 'block';
-  renderDashboard();
-};
+// ------------------------------------------------------------------
+// Approval view
+// ------------------------------------------------------------------
+let selectedApprovalId = null;
+
+function renderApprovalList() {
+  const q = document.getElementById('approvalSearch').value.trim().toLowerCase();
+  const listEl = document.getElementById('approvalList');
+  const filtered = docs.filter(d => !q || d.name.toLowerCase().includes(q));
+  listEl.innerHTML = '';
+  filtered.slice(0, 50).forEach(d => {
+    const st = APPROVAL_STATUS_COLOR[d.approvalStatus] || APPROVAL_STATUS_COLOR['ร่าง'];
+    const row = document.createElement('button');
+    row.style.cssText = `width:100%; text-align:left; display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 10px; background:${selectedApprovalId === d.id ? 'var(--bg-accent)' : 'var(--surface-2)'}; border:0.5px solid ${selectedApprovalId === d.id ? 'var(--border-accent)' : 'var(--border)'};`;
+    row.innerHTML = `<span style="font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${d.name}</span>
+      <span style="font-size:11px; padding:1px 8px; border-radius:999px; background:${st.bg}; color:${st.text}; flex-shrink:0;">${d.approvalStatus || 'ร่าง'}</span>`;
+    row.onclick = () => { selectedApprovalId = d.id; renderApprovalList(); renderApprovalDetail(); };
+    listEl.appendChild(row);
+  });
+  if (filtered.length === 0) {
+    listEl.innerHTML = '<p style="font-size:13px; color:var(--text-muted);">ไม่พบเอกสาร</p>';
+  }
+}
+
+function renderApprovalDetail() {
+  const detailEl = document.getElementById('approvalDetail');
+  const d = docs.find(x => x.id === selectedApprovalId);
+  if (!d) { detailEl.style.display = 'none'; return; }
+  detailEl.style.display = 'block';
+
+  const status = d.approvalStatus || 'ร่าง';
+  const currentIdx = STATUS_FLOW.indexOf(status);
+  const isRejected = status === 'ไม่อนุมัติ';
+
+  const stepperHtml = STATUS_FLOW.map((s, i) => {
+    const done = !isRejected && i <= currentIdx;
+    return `<div style="flex:1; text-align:center;">
+      <div style="width:28px; height:28px; border-radius:50%; margin:0 auto 6px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:500;
+        background:${done ? 'var(--bg-success)' : 'var(--surface-1)'}; color:${done ? 'var(--text-success)' : 'var(--text-muted)'}; border:0.5px solid ${done ? 'var(--border-accent)' : 'var(--border)'};">${i + 1}</div>
+      <span style="font-size:11px; color:var(--text-secondary);">${s}</span>
+    </div>`;
+  }).join('<div style="flex:0.3; height:1px; background:var(--border); margin-top:14px;"></div>');
+
+  const commentsHtml = (d.comments || []).slice().reverse().map(c => `
+    <div style="border-bottom:0.5px solid var(--border); padding:8px 0; font-size:13px;">
+      <div style="display:flex; justify-content:space-between; color:var(--text-secondary); font-size:12px; margin-bottom:2px;">
+        <span>${c.by}</span><span>${new Date(c.time).toLocaleString('th-TH')}</span>
+      </div>
+      <div>${c.text}</div>
+    </div>
+  `).join('') || '<p style="font-size:13px; color:var(--text-muted);">ยังไม่มีความเห็น</p>';
+
+  detailEl.innerHTML = `
+    <p style="font-weight:500; font-size:15px; margin:0 0 4px;">${d.name}</p>
+    <p style="font-size:13px; color:var(--text-secondary); margin:0 0 16px;">ข้อกำหนด: ${clauseLabel(d.clause) || 'ไม่ระบุ'}</p>
+    <div style="display:flex; align-items:flex-start; margin-bottom:1.25rem;">${stepperHtml}</div>
+    <div style="margin-bottom:12px;">
+      <label style="font-size:13px; color:var(--text-secondary); display:block; margin-bottom:4px;">ชื่อผู้ดำเนินการ</label>
+      <input id="approvalActorName" type="text" placeholder="ชื่อ-นามสกุล" style="width:100%;" />
+    </div>
+    <div style="margin-bottom:12px;">
+      <label style="font-size:13px; color:var(--text-secondary); display:block; margin-bottom:4px;">ความเห็น (จำเป็นถ้ากด "ไม่อนุมัติ")</label>
+      <textarea id="approvalComment" rows="2" style="width:100%; font-family:inherit; font-size:14px; padding:8px 12px; border-radius:var(--radius); border:0.5px solid var(--border-strong); background:var(--surface-2); color:var(--text-primary);"></textarea>
+    </div>
+    <div id="approvalActionError" style="font-size:13px; color:var(--text-danger); display:none; margin-bottom:8px;"></div>
+    <div style="display:flex; gap:8px; margin-bottom:1.25rem;">
+      <button id="approveBtn" ${status === 'อนุมัติแล้ว' ? 'disabled' : ''}>${status === 'อนุมัติแล้ว' ? 'อนุมัติแล้ว' : (currentIdx === STATUS_FLOW.length - 2 ? 'อนุมัติขั้นสุดท้าย' : 'อนุมัติ / ผ่านขั้นถัดไป')}</button>
+      <button id="rejectBtn" style="color:var(--text-danger);">ไม่อนุมัติ</button>
+    </div>
+    <p style="font-size:13px; font-weight:500; margin:0 0 8px;">ประวัติความเห็น</p>
+    <div>${commentsHtml}</div>
+  `;
+
+  document.getElementById('approveBtn').onclick = async () => {
+    const actor = document.getElementById('approvalActorName').value.trim();
+    const errEl = document.getElementById('approvalActionError');
+    if (!actor) { errEl.textContent = 'กรอกชื่อผู้ดำเนินการก่อน'; errEl.style.display = 'block'; return; }
+    const comment = document.getElementById('approvalComment').value.trim();
+    const nextIdx = Math.min(currentIdx + 1, STATUS_FLOW.length - 1);
+    d.approvalStatus = STATUS_FLOW[nextIdx];
+    d.lastUpdated = Date.now();
+    d.comments = d.comments || [];
+    d.comments.push({ by: actor, text: comment || `อนุมัติ → ${d.approvalStatus}`, time: Date.now() });
+    await persist();
+    renderApprovalList();
+    renderApprovalDetail();
+  };
+
+  document.getElementById('rejectBtn').onclick = async () => {
+    const actor = document.getElementById('approvalActorName').value.trim();
+    const comment = document.getElementById('approvalComment').value.trim();
+    const errEl = document.getElementById('approvalActionError');
+    if (!actor) { errEl.textContent = 'กรอกชื่อผู้ดำเนินการก่อน'; errEl.style.display = 'block'; return; }
+    if (!comment) { errEl.textContent = 'กรอกความเห็นก่อนกด "ไม่อนุมัติ"'; errEl.style.display = 'block'; return; }
+    d.approvalStatus = 'ไม่อนุมัติ';
+    d.lastUpdated = Date.now();
+    d.comments = d.comments || [];
+    d.comments.push({ by: actor, text: comment, time: Date.now() });
+    await persist();
+    renderApprovalList();
+    renderApprovalDetail();
+  };
+}
+
+document.getElementById('approvalSearch').oninput = renderApprovalList;
+
+function setActiveTab(tab) {
+  document.getElementById('listView').style.display = tab === 'list' ? 'block' : 'none';
+  document.getElementById('dashboardView').style.display = tab === 'dashboard' ? 'block' : 'none';
+  document.getElementById('approvalView').style.display = tab === 'approval' ? 'block' : 'none';
+  if (tab === 'dashboard') renderDashboard();
+  if (tab === 'approval') { renderApprovalList(); renderApprovalDetail(); }
+}
+
+document.getElementById('tabList').onclick = () => setActiveTab('list');
+document.getElementById('tabDashboard').onclick = () => setActiveTab('dashboard');
+document.getElementById('tabApproval').onclick = () => setActiveTab('approval');
 
 load();
 
