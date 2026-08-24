@@ -111,6 +111,23 @@ function emptyState(title, sub){
   return `<div class="empty-state">${ic('empty')}<h3>${title}</h3><p>${sub}</p></div>`;
 }
 
+function pendingQueue(){
+  return DOCUMENTS.filter(d=> d.approvalStatus==='ร่าง' || d.approvalStatus==='รอทบทวน' || d.approvalStatus==='รออนุมัติ')
+    .sort((a,b)=> (a.lastUpdated||0)-(b.lastUpdated||0));
+}
+function nextRevNumber(currentRev){
+  const n = parseInt(currentRev, 10);
+  return isNaN(n) ? '1' : String(n+1);
+}
+function openModal(opts){ state.modal = opts; renderModalLayer(); }
+function closeModal(){ state.modal = null; renderModalLayer(); }
+function renderModalLayer(){
+  const layer = document.getElementById('modalLayer');
+  if(!layer) return;
+  layer.innerHTML = state.modal ? docModal() : '';
+  if(state.modal) wireModalControls();
+}
+
 // display-only: many document names already have the doc ID typed into
 // them (e.g. name="RDI-LM-01 คู่มือคุณภาพ"), which duplicates the ID
 // column/label everywhere id+name are shown together. Strip it for display.
@@ -171,7 +188,12 @@ function syncNavActive(){
 function wireNav(){
   document.querySelectorAll('.nav-item').forEach(btn=>{
     btn.addEventListener('click', ()=>{
-      const extra = btn.dataset.view==='documents' ? { docFilter:{ clause:'All', type:'All', status:'All', q:'', preset:'all' }, docPage:1 } : {};
+      let extra = {};
+      if(btn.dataset.view==='documents') extra = { docFilter:{ clause:'All', type:'All', status:'All', q:'', preset:'all' }, docPage:1 };
+      if(btn.dataset.view==='approval'){
+        const next = pendingQueue()[0];
+        if(next) extra = { selectedDoc: next.id };
+      }
       goTo(btn.dataset.view, extra);
     });
   });
@@ -212,7 +234,7 @@ function render(){
   switch(state.view){
     case 'dashboard': el.innerHTML = viewDashboard(); break;
     case 'iso': el.innerHTML = viewISO(); attachISOHandlers(); break;
-    case 'documents': renderDocumentsInto(); wireDocControls(); return;
+    case 'documents': renderDocumentsInto(); wireDocControls(); renderModalLayer(); return;
     case 'records': el.innerHTML = viewRecords(); break;
     case 'revision': el.innerHTML = viewRevision(); attachDocPicker('revision'); break;
     case 'approval': el.innerHTML = viewApproval(); attachApprovalHandlers(); break;
@@ -220,10 +242,11 @@ function render(){
     case 'calendar': el.innerHTML = viewCalendar(); attachCalHandlers(); break;
     case 'audittrail': el.innerHTML = viewAuditTrail(); break;
     case 'admin': el.innerHTML = viewAdmin(); attachAdminHandlers(); break;
-    case 'docdetail': el.innerHTML = viewDocDetail(state.selectedDoc); break;
+    case 'docdetail': el.innerHTML = viewDocDetail(state.selectedDoc); attachDetailActionHandlers(); break;
     default: el.innerHTML = viewDashboard();
   }
   attachGlobalRowHandlers();
+  renderModalLayer();
 }
 function attachGlobalRowHandlers(){
   document.querySelectorAll('[data-open-doc]').forEach(row=>{
@@ -453,7 +476,10 @@ function renderDocumentsInto(){
   el.innerHTML = `
   <div class="panel">
     <div class="panel-head"><div class="panel-title">Document List <span id="syncPill" class="sync-pill" style="margin-left:10px;"><span class="dot"></span>Synced with Firestore</span></div>
-      <button class="btn primary" id="btnNewDoc">${ic('plus')} New Document</button></div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn ghost" id="btnReviseDoc">${ic('history')} ขอปรับปรุง (Revision)</button>
+        <button class="btn primary" id="btnNewDoc">${ic('plus')} เอกสารใหม่</button>
+      </div></div>
     <div class="toolbar">
       <div class="search"><span>${ic('search')}</span><input id="docSearch" placeholder="Search documents..." value="${state.docFilter.q}"></div>
       <select class="select" id="fClause">${clauseOpts.map(([v,l])=>`<option value="${v}" ${v===state.docFilter.clause?'selected':''}>${l}</option>`).join('')}</select>
@@ -486,7 +512,6 @@ function renderDocumentsInto(){
       </div>
     </div>
   </div>
-  ${state.modal ? docModal() : ''}
   `;
 }
 function wireDocControls(){
@@ -504,42 +529,87 @@ function wireDocControls(){
   const prev = document.getElementById('pgPrev'); if(prev) prev.addEventListener('click', ()=>{ state.docPage=Math.max(1,state.docPage-1); renderDocumentsInto(); wireDocControls(); });
   const next = document.getElementById('pgNext'); if(next) next.addEventListener('click', ()=>{ state.docPage=state.docPage+1; renderDocumentsInto(); wireDocControls(); });
   const btnNew = document.getElementById('btnNewDoc');
-  if(btnNew) btnNew.addEventListener('click', ()=>{ state.modal = { mode:'new' }; renderDocumentsInto(); wireDocControls(); });
-  document.querySelectorAll('[data-edit]').forEach(b=> b.addEventListener('click', ()=>{ state.modal = { mode:'edit', id:b.dataset.edit }; renderDocumentsInto(); wireDocControls(); }));
+  if(btnNew) btnNew.addEventListener('click', ()=> openModal({ mode:'new' }));
+  const btnRevise = document.getElementById('btnReviseDoc');
+  if(btnRevise) btnRevise.addEventListener('click', ()=> openModal({ mode:'revise', id:null }));
+  document.querySelectorAll('[data-edit]').forEach(b=> b.addEventListener('click', ()=> openModal({ mode:'edit', id:b.dataset.edit })));
   document.querySelectorAll('[data-del]').forEach(b=> b.addEventListener('click', async ()=>{
     const d = DOCUMENTS.find(x=>x.id===b.dataset.del);
     if(!d) return;
-    if(!confirm(`ลบเอกสาร "${d.id} ${d.name}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
+    if(!confirm(`ลบเอกสาร "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
     DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
     await persistDocs();
     renderDocumentsInto(); wireDocControls();
   }));
-  wireModalControls();
   attachGlobalRowHandlers();
 }
 function docModal(){
-  const editing = state.modal.mode==='edit';
-  const d = editing ? DOCUMENTS.find(x=>x.id===state.modal.id) : { id:'', name:'', clause:'', link:'', note:'ควบคุม' };
+  const mode = state.modal.mode;
+
+  if(mode==='revise' && !state.modal.id){
+    // step 1 of the revision flow: pick which existing document to revise
+    return `
+    <div class="modal-backdrop" id="docModalBackdrop">
+      <div class="modal">
+        <div class="modal-head"><div class="modal-title">ขอปรับปรุงเอกสาร (Revision)</div><button class="modal-close" id="modalCloseBtn">✕</button></div>
+        <div class="modal-body">
+          <div class="field"><label>เลือกเอกสารที่ต้องการปรับปรุง</label>
+            <select id="mfReviseDocPicker">
+              <option value="">— เลือกเอกสาร —</option>
+              ${DOCUMENTS.slice().sort((a,b)=>a.id.localeCompare(b.id)).map(x=>`<option value="${x.id}">${x.id} — ${cleanName(x)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn ghost" id="modalCancelBtn">ยกเลิก</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  const editing = mode==='edit';
+  const revising = mode==='revise';
+  const d = (editing||revising) ? DOCUMENTS.find(x=>x.id===state.modal.id) : {
+    id:'', name:'', clause:'', link:'', note:'ว่าง', rev:'0', preparedBy:'', reviewerName:'', approverName:'',
+  };
+  if(!d) return `<div class="modal-backdrop" id="docModalBackdrop"><div class="modal"><div class="modal-body">${emptyState('ไม่พบเอกสาร','')}</div><div class="modal-actions"><button class="btn ghost" id="modalCancelBtn">ปิด</button></div></div></div>`;
+
+  const title = editing ? 'แก้ไขเอกสาร (แก้ไขข้อมูลที่นำเข้าให้ถูกต้อง)' : revising ? `ขอปรับปรุง — ${d.id}` : 'เอกสารใหม่';
+  const suggestedRev = revising ? nextRevNumber(d.rev) : (d.rev || '0');
+
   return `
   <div class="modal-backdrop" id="docModalBackdrop">
     <div class="modal">
-      <div class="modal-head"><div class="modal-title">${editing?'แก้ไขเอกสาร':'เอกสารใหม่'}</div><button class="modal-close" id="modalCloseBtn">✕</button></div>
+      <div class="modal-head"><div class="modal-title">${title}</div><button class="modal-close" id="modalCloseBtn">✕</button></div>
       <div class="modal-body">
+        ${revising ? `<div class="field"><label>Rev. ปัจจุบัน</label><input value="${d.rev || '—'}" disabled></div>` : ''}
         <div class="field"><label>รหัสเอกสาร (Document ID)</label>
-          <input id="mfId" value="${d.id}" placeholder="เช่น RDI-LF-074" ${editing?'disabled':''}></div>
+          <input id="mfId" value="${d.id}" placeholder="เช่น RDI-LF-074" ${(editing||revising)?'disabled':''}></div>
         <div class="field"><label>ชื่อเอกสาร</label>
-          <input id="mfName" value="${d.name.replace(/"/g,'&quot;')}" placeholder="ชื่อเอกสาร"></div>
+          <input id="mfName" value="${cleanName(d).replace(/"/g,'&quot;')}" placeholder="ชื่อเอกสาร"></div>
         <div class="field"><label>ข้อกำหนด ISO 17025</label>
           <select id="mfClause"><option value="">ไม่ระบุ</option>${CLAUSES.map(([c,l])=>`<option value="${c}" ${d.clause===c?'selected':''}>${l}</option>`).join('')}</select></div>
         <div class="field"><label>ลิงก์ SharePoint</label>
           <input id="mfLink" value="${d.link||''}" placeholder="https://mitrphol.sharepoint.com/..."></div>
         <div class="field"><label>สถานะเอกสาร</label>
           <select id="mfNote">${['ควบคุม','แจกจ่าย','สนับสนุน','ยกเลิก','ว่าง','ไม่พบ'].map(s=>`<option ${d.note===s?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div class="field"><label>${revising ? 'Rev. ใหม่ (เรียงต่ออัตโนมัติ แก้ไขได้)' : 'Rev.'}</label>
+          <input id="mfRev" value="${suggestedRev}" placeholder="0"></div>
+        ${revising ? `<div class="field"><label>ชื่อผู้ขอปรับปรุง</label><input id="mfActor" placeholder="ชื่อ-นามสกุล"></div>` : ''}
+        ${editing ? `
+        <div class="field"><label>วันที่จัดทำ</label><input id="mfCreated" type="date" value="${d.createdDate ? new Date(d.createdDate).toISOString().slice(0,10) : ''}"></div>
+        <div class="field"><label>วันที่ประกาศใช้</label><input id="mfEffective" type="date" value="${d.effectiveDate ? new Date(d.effectiveDate).toISOString().slice(0,10) : ''}"></div>
+        <div class="field"><label>ผู้จัดทำ</label><input id="mfPrep" value="${(d.preparedBy||'').replace(/"/g,'&quot;')}"></div>
+        <div class="field"><label>ผู้ทบทวน</label><input id="mfReviewer" value="${(d.reviewerName||'').replace(/"/g,'&quot;')}"></div>
+        <div class="field"><label>ผู้อนุมัติ</label><input id="mfApprover" value="${(d.approverName||'').replace(/"/g,'&quot;')}"></div>
+        <div class="field"><label>สถานะการอนุมัติ</label>
+          <select id="mfApprovalStatus">${[...STATUS_FLOW,'ไม่อนุมัติ'].map(s=>`<option ${((d.approvalStatus||'ร่าง')===s)?'selected':''}>${s}</option>`).join('')}</select></div>
+        ` : ''}
         <div class="field-error" id="mfError" style="display:none;"></div>
       </div>
       <div class="modal-actions">
         <button class="btn ghost" id="modalCancelBtn">ยกเลิก</button>
-        <button class="btn primary" id="modalSaveBtn">${editing?'บันทึกการแก้ไข':'สร้างเอกสาร'}</button>
+        <button class="btn primary" id="modalSaveBtn">${editing ? 'บันทึกการแก้ไข' : revising ? 'ส่งคำขอปรับปรุง' : 'สร้างเอกสาร'}</button>
       </div>
     </div>
   </div>`;
@@ -547,35 +617,68 @@ function docModal(){
 function wireModalControls(){
   const backdrop = document.getElementById('docModalBackdrop');
   if(!backdrop) return;
-  const close = ()=>{ state.modal = null; renderDocumentsInto(); wireDocControls(); };
-  document.getElementById('modalCloseBtn').addEventListener('click', close);
-  document.getElementById('modalCancelBtn').addEventListener('click', close);
-  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) close(); });
+  document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
+  document.getElementById('modalCancelBtn').addEventListener('click', closeModal);
+  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) closeModal(); });
 
-  document.getElementById('modalSaveBtn').addEventListener('click', async ()=>{
+  const picker = document.getElementById('mfReviseDocPicker');
+  if(picker) picker.addEventListener('change', e=>{
+    state.modal.id = e.target.value || null;
+    renderModalLayer();
+  });
+
+  const saveBtn = document.getElementById('modalSaveBtn');
+  if(!saveBtn) return;
+  saveBtn.addEventListener('click', async ()=>{
+    const mode = state.modal.mode;
     const id = document.getElementById('mfId').value.trim();
     const name = document.getElementById('mfName').value.trim();
     const clause = document.getElementById('mfClause').value;
     const link = document.getElementById('mfLink').value.trim();
     const note = document.getElementById('mfNote').value;
+    const rev = document.getElementById('mfRev').value.trim();
     const errEl = document.getElementById('mfError');
     if(!id || !name){ errEl.textContent = 'กรอกรหัสเอกสารและชื่อเอกสารให้ครบ'; errEl.style.display='block'; return; }
 
-    if(state.modal.mode==='new'){
+    if(mode==='new'){
       if(DOCUMENTS.some(x=>x.id===id)){ errEl.textContent = 'รหัสเอกสารนี้มีอยู่แล้ว'; errEl.style.display='block'; return; }
       DOCUMENTS.push({
-        id, name, clause, link, note,
-        approvalStatus: (note==='ควบคุม'||note==='แจกจ่าย') ? 'อนุมัติแล้ว' : 'ร่าง',
-        reviewerName:'', approverName:'', comments:[], lastUpdated: Date.now(),
+        id, name, clause, link, note, rev: rev || '0',
+        approvalStatus:'ร่าง', reviewerName:'', approverName:'', preparedBy:'',
+        comments:[], lastUpdated: Date.now(), createdDate:null, effectiveDate:null,
+        approvedBy:null, approvedAt:null, approvedComment:null, lastRequestType:'new',
       });
-    } else {
+    } else if(mode==='revise'){
+      const actor = document.getElementById('mfActor').value.trim();
+      if(!actor){ errEl.textContent = 'กรอกชื่อผู้ขอปรับปรุงก่อน'; errEl.style.display='block'; return; }
       const d = DOCUMENTS.find(x=>x.id===state.modal.id);
-      d.name = name; d.clause = clause; d.link = link; d.note = note; d.lastUpdated = Date.now();
+      const oldRev = d.rev;
+      d.name = name; d.clause = clause; d.link = link; d.note = note;
+      d.rev = rev || nextRevNumber(oldRev);
+      d.approvalStatus = 'รอทบทวน';
+      d.approvedBy = null; d.approvedAt = null; d.approvedComment = null;
+      d.lastRequestType = 'revision'; d.lastRequestFrom = oldRev || null;
+      d.comments = d.comments || [];
+      d.comments.push({ by:actor, text:`ขอปรับปรุงจาก Rev.${oldRev||'-'} เป็น Rev.${d.rev}`, time: Date.now() });
+      d.lastUpdated = Date.now();
+    } else {
+      // edit — direct correction, no workflow reset
+      const d = DOCUMENTS.find(x=>x.id===state.modal.id);
+      d.name = name; d.clause = clause; d.link = link; d.note = note; d.rev = rev || d.rev;
+      const created = document.getElementById('mfCreated');
+      const effective = document.getElementById('mfEffective');
+      if(created) d.createdDate = created.value ? new Date(created.value+'T00:00:00').getTime() : null;
+      if(effective) d.effectiveDate = effective.value ? new Date(effective.value+'T00:00:00').getTime() : null;
+      const prep = document.getElementById('mfPrep'); if(prep) d.preparedBy = prep.value.trim();
+      const rev2 = document.getElementById('mfReviewer'); if(rev2) d.reviewerName = rev2.value.trim();
+      const appr = document.getElementById('mfApprover'); if(appr) d.approverName = appr.value.trim();
+      const apStatus = document.getElementById('mfApprovalStatus'); if(apStatus) d.approvalStatus = apStatus.value;
+      d.lastUpdated = Date.now();
     }
-    state.modal = null;
-    renderDocumentsInto(); wireDocControls();
+    closeModal();
+    render();
     await persistDocs();
-    renderDocumentsInto(); wireDocControls();
+    render();
   });
 }
 
@@ -619,6 +722,9 @@ function viewDocDetail(docId){
           ${d.link ? `<a class="btn primary" href="${d.link}" target="_blank" rel="noopener">${ic('link')} Open in SharePoint</a>` : `<button class="btn ghost" disabled>${ic('link')} ยังไม่มีลิงก์ SharePoint</button>`}
           <button class="btn ghost" data-go="approval">${ic('check')} Approval</button>
           <button class="btn ghost" data-go="revision">${ic('history')} History</button>
+          <button class="btn ghost" id="btnDetailEdit">${ic('edit')} แก้ไขข้อมูล</button>
+          <button class="btn ghost" id="btnDetailRevise">${ic('history')} ขอปรับปรุง Rev.</button>
+          <button class="btn danger" id="btnDetailDelete">${ic('trash')} ลบเอกสาร</button>
         </div>
       </div>
       <div class="side-box" style="width:230px;">
@@ -631,6 +737,21 @@ function viewDocDetail(docId){
       ${(d.comments||[]).slice(-1).map(c=>`${c.by}: ${c.text} <span style="color:var(--ink-500);">(${fmtDateTime(c.time)})</span>`).join('') || 'ยังไม่มีความเห็น'}
     </div>
   </div>`;
+}
+function attachDetailActionHandlers(){
+  const editBtn = document.getElementById('btnDetailEdit');
+  if(editBtn) editBtn.addEventListener('click', ()=> openModal({ mode:'edit', id: state.selectedDoc }));
+  const reviseBtn = document.getElementById('btnDetailRevise');
+  if(reviseBtn) reviseBtn.addEventListener('click', ()=> openModal({ mode:'revise', id: state.selectedDoc }));
+  const delBtn = document.getElementById('btnDetailDelete');
+  if(delBtn) delBtn.addEventListener('click', async ()=>{
+    const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
+    if(!d) return;
+    if(!confirm(`ลบเอกสาร "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
+    DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
+    await persistDocs();
+    goBack();
+  });
 }
 
 // ============================================================
@@ -671,13 +792,16 @@ function viewRevision(){
 // APPROVAL VIEW (ported logic from previous app — actor name +
 // comment required, writes STATUS_FLOW transitions to Firestore)
 // ============================================================
+let lastActorName = '';
 function viewApproval(){
-  if(!state.selectedDoc) state.selectedDoc = DOCUMENTS[0] && DOCUMENTS[0].id;
+  const queue = pendingQueue();
+  if(!state.selectedDoc) state.selectedDoc = (queue[0] || DOCUMENTS[0] || {}).id;
   const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
   if(!d) return `<div class="panel">${emptyState('ยังไม่มีเอกสาร','No documents in the register yet.')}</div>`;
   const status = d.approvalStatus || 'ร่าง';
   const currentIdx = STATUS_FLOW.indexOf(status);
   const isRejected = status === 'ไม่อนุมัติ';
+  const queuePos = queue.findIndex(x=>x.id===d.id);
 
   const steps = STATUS_FLOW.map((s,i)=>{
     const done = !isRejected && i<=currentIdx;
@@ -692,14 +816,24 @@ function viewApproval(){
   const approvedBy = d.approvedBy || (lastComment ? lastComment.by : '');
   const approvedAt = d.approvedAt || (lastComment ? lastComment.time : d.lastUpdated);
   const approvedComment = d.approvedComment !== undefined ? d.approvedComment : (lastComment ? lastComment.text : '');
+  const requestLabel = d.lastRequestType==='new' ? 'เอกสารใหม่' : d.lastRequestType==='revision' ? `ปรับปรุง (Rev.${d.lastRequestFrom||'-'} → ${d.rev||'-'})` : null;
+
+  const queueBanner = queue.length ? `
+  <div class="panel" style="background:var(--blue-50); border-color:var(--blue-500); margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+    <div style="font-size:12.5px; font-weight:700; color:var(--blue-600);">
+      รายการรอดำเนินการ: ${queue.length} รายการ${queuePos>=0 ? ` (กำลังดู ${queuePos+1}/${queue.length})` : ''}
+    </div>
+    ${queue.length>1 ? `<button class="btn ghost" id="btnSkipQueue">ข้ามรายการนี้ ›</button>` : ''}
+  </div>` : '';
 
   return `
+  ${queueBanner}
   <div class="crumb" data-back="1">‹ Back</div>
   <div class="panel">
     <div class="panel-head">
       <div>
         <div class="panel-title">${d.id} ${cleanName(d)}</div>
-        <div style="font-size:12px; color:var(--ink-500); margin-top:3px; font-weight:600;">ข้อกำหนด: ${d.clause ? clauseLabel(d.clause) : 'ไม่ระบุ'}</div>
+        <div style="font-size:12px; color:var(--ink-500); margin-top:3px; font-weight:600;">ข้อกำหนด: ${d.clause ? clauseLabel(d.clause) : 'ไม่ระบุ'}${requestLabel ? ` · คำขอ: ${requestLabel}` : ''}</div>
       </div>
       <select class="select" id="apDocPicker">${DOCUMENTS.map(x=>`<option value="${x.id}" ${x.id===d.id?'selected':''}>${x.id}</option>`).join('')}</select>
     </div>
@@ -723,7 +857,7 @@ function viewApproval(){
       ${approvedComment ? `<div style="font-size:12.5px; color:var(--ink-700); margin-top:8px; padding-top:8px; border-top:1px solid var(--line);">${approvedComment}</div>` : ''}
     </div>
     ` : `
-    <div class="field" style="max-width:320px;"><label>ชื่อผู้ดำเนินการ</label><input id="approvalActor" placeholder="ชื่อ-นามสกุล"></div>
+    <div class="field" style="max-width:320px;"><label>ชื่อผู้ดำเนินการ</label><input id="approvalActor" placeholder="ชื่อ-นามสกุล" value="${lastActorName.replace(/"/g,'&quot;')}"></div>
     <div class="comment-box">
       <label style="font-size:12px; font-weight:700; color:var(--ink-700); display:block; margin-bottom:8px;">ความเห็น (จำเป็นถ้ากด "ไม่อนุมัติ")</label>
       <textarea id="approvalComment" placeholder="Enter comment..."></textarea>
@@ -746,6 +880,11 @@ function viewApproval(){
 function attachApprovalHandlers(){
   const picker = document.getElementById('apDocPicker');
   if(picker) picker.addEventListener('change', e=>{ state.selectedDoc = e.target.value; render(); });
+  const skipBtn = document.getElementById('btnSkipQueue');
+  if(skipBtn) skipBtn.addEventListener('click', ()=>{
+    const rest = pendingQueue().filter(x=>x.id!==state.selectedDoc);
+    if(rest.length){ state.selectedDoc = rest[0].id; render(); }
+  });
 
   const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
   if(!d) return;
@@ -757,6 +896,7 @@ function attachApprovalHandlers(){
     const actor = document.getElementById('approvalActor').value.trim();
     const errEl = document.getElementById('approvalError');
     if(!actor){ errEl.textContent='กรอกชื่อผู้ดำเนินการก่อน'; errEl.style.display='block'; return; }
+    lastActorName = actor;
     const comment = document.getElementById('approvalComment').value.trim();
     const nextIdx = Math.min(currentIdx+1, STATUS_FLOW.length-1);
     const now = Date.now();
@@ -769,6 +909,8 @@ function attachApprovalHandlers(){
       d.approvedAt = now;
       d.approvedComment = comment || '';
     }
+    const rest = pendingQueue().filter(x=>x.id!==d.id);
+    if(rest.length) state.selectedDoc = rest[0].id;
     render();
     await persistDocs();
   });
@@ -779,11 +921,14 @@ function attachApprovalHandlers(){
     const errEl = document.getElementById('approvalError');
     if(!actor){ errEl.textContent='กรอกชื่อผู้ดำเนินการก่อน'; errEl.style.display='block'; return; }
     if(!comment){ errEl.textContent='กรอกความเห็นก่อนกด "ไม่อนุมัติ"'; errEl.style.display='block'; return; }
+    lastActorName = actor;
     d.approvalStatus = 'ไม่อนุมัติ';
     d.lastUpdated = Date.now();
     d.comments = d.comments || [];
     d.comments.push({ by:actor, text:comment, time: Date.now() });
     d.approvedBy = null; d.approvedAt = null; d.approvedComment = null;
+    const rest = pendingQueue().filter(x=>x.id!==d.id);
+    if(rest.length) state.selectedDoc = rest[0].id;
     render();
     await persistDocs();
   });
