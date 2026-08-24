@@ -43,6 +43,7 @@ async function loadDocs(){
       if(d.approvedBy===undefined){ d.approvedBy=null; needsMigration = true; }
       if(d.approvedAt===undefined){ d.approvedAt=null; needsMigration = true; }
       if(d.approvedComment===undefined){ d.approvedComment=null; needsMigration = true; }
+      if(d.reviewCycleDays===undefined){ d.reviewCycleDays=DEFAULT_REVIEW_CYCLE_DAYS; needsMigration = true; }
     });
     DOCS_LOADED = true;
     DOCS_ERROR = null;
@@ -91,6 +92,7 @@ const state = {
   approvalTab: 'all',
   approvalPage: 1,
   approvalTypeFilter: 'All',
+  revFilter: { clause:'All', type:'All', status:'All', q:'' },
 };
 
 const ICONS = {
@@ -108,6 +110,10 @@ const ICONS = {
   edit: `<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>`,
   trash: `<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/>`,
   plus: `<path d="M12 5v14M5 12h14"/>`,
+  send: `<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>`,
+  chevronRight: `<path d="m9 18 6-6-6-6"/>`,
+  bell: `<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>`,
+  filter: `<path d="M4 4h16l-6 8v6l-4 2v-8L4 4Z"/>`,
 };
 function ic(name, cls=''){ return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||''}</svg>`; }
 
@@ -244,6 +250,7 @@ function wireNav(){
     btn.addEventListener('click', ()=>{
       let extra = {};
       if(btn.dataset.view==='documents') extra = { docFilter:{ clause:'All', type:'All', status:'All', q:'', preset:'all' }, docPage:1 };
+      if(btn.dataset.view==='revision') extra = { revFilter:{ clause:'All', type:'All', status:'All', q:'' } };
       if(btn.dataset.view==='approval'){
         const next = pendingQueue()[0];
         if(next) extra = { selectedDoc: next.id };
@@ -290,7 +297,8 @@ function render(){
     case 'iso': el.innerHTML = viewISO(); attachISOHandlers(); break;
     case 'documents': renderDocumentsInto(); wireDocControls(); renderModalLayer(); updateNotifBadge(); return;
     case 'records': el.innerHTML = viewEvidence(); attachEvidenceHandlers(); break;
-    case 'revision': el.innerHTML = viewRevision(); attachDocPicker('revision'); break;
+    case 'revision': el.innerHTML = viewRevisionDashboard(); attachRevisionDashboardHandlers(); break;
+    case 'revisiondetail': el.innerHTML = viewRevisionDetail(); attachDocPicker('revisiondetail'); break;
     case 'approval': el.innerHTML = viewApproval(); attachApprovalHandlers(); break;
     case 'audit': el.innerHTML = viewAudit(); attachAuditHandlers(); break;
     case 'calendar': el.innerHTML = viewCalendar(); attachCalHandlers(); break;
@@ -667,6 +675,7 @@ function docModal(){
         <div class="field"><label>ผู้อนุมัติ</label><input id="mfApprover" value="${(d.approverName||'').replace(/"/g,'&quot;')}"></div>
         <div class="field"><label>สถานะการอนุมัติ</label>
           <select id="mfApprovalStatus">${[...STATUS_FLOW,'ไม่อนุมัติ'].map(s=>`<option ${((d.approvalStatus||'ร่าง')===s)?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div class="field"><label>รอบทบทวน (วัน) — นับจากวันประกาศใช้</label><input id="mfReviewCycle" value="${d.reviewCycleDays || DEFAULT_REVIEW_CYCLE_DAYS}" placeholder="365"></div>
         ` : ''}
         <div class="field-error" id="mfError" style="display:none;"></div>
       </div>
@@ -736,6 +745,7 @@ function wireModalControls(){
       const rev2 = document.getElementById('mfReviewer'); if(rev2) d.reviewerName = rev2.value.trim();
       const appr = document.getElementById('mfApprover'); if(appr) d.approverName = appr.value.trim();
       const apStatus = document.getElementById('mfApprovalStatus'); if(apStatus) d.approvalStatus = apStatus.value;
+      const cycle = document.getElementById('mfReviewCycle'); if(cycle){ const n = parseInt(cycle.value,10); d.reviewCycleDays = isNaN(n) ? DEFAULT_REVIEW_CYCLE_DAYS : n; }
       d.lastUpdated = Date.now();
     }
     closeModal();
@@ -834,7 +844,7 @@ function viewDocDetail(docId){
         <div class="detail-actions">
           ${d.link ? `<a class="btn primary" href="${d.link}" target="_blank" rel="noopener">${ic('link')} Open in SharePoint</a>` : `<button class="btn ghost" disabled>${ic('link')} ยังไม่มีลิงก์</button>`}
           <button class="btn ghost" data-go="approval">${ic('check')} Approval</button>
-          <button class="btn ghost" data-go="revision">${ic('history')} History</button>
+          <button class="btn ghost" data-go="revisiondetail">${ic('history')} History</button>
         </div>
         <div class="detail-actions-label">จัดการเอกสาร</div>
         <div class="detail-actions">
@@ -900,47 +910,186 @@ function groupHistoryByRequest(d){
   }
   return groups.slice().reverse(); // newest request first
 }
-function viewRevision(){
+
+// classifies a comment/event into an icon + color + short Thai title for
+// the colored-icon timeline (revision history detail page + activity feed)
+function classifyEvent(text){
+  if(/^ไม่อนุมัติ|ไม่อนุมัติ$/.test(text) || (/ไม่อนุมัติ/.test(text) && !/→\s*อนุมัติแล้ว/.test(text))){
+    return { icon:'alert', bg:'--red-600', title:'ปฏิเสธเอกสาร' };
+  }
+  if(/ขอปรับปรุงจาก/.test(text)){
+    return { icon:'send', bg:'--amber-600', title:'ส่งคำขอปรับปรุง' };
+  }
+  if(/→\s*อนุมัติแล้ว$/.test(text)){
+    return { icon:'check', bg:'--green-600', title:'อนุมัติเอกสาร' };
+  }
+  return { icon:'edit', bg:'--blue-600', title:'อัปเดตสถานะเอกสาร' };
+}
+function eitem(opts){
+  // opts: { icon, bg, title, detail, actor, time }
+  return `
+  <div class="eitem">
+    <div class="eitem-icon" style="background:var(${opts.bg})">${ic(opts.icon)}</div>
+    <div class="eitem-body">
+      <div class="eitem-head"><div class="eitem-title">${opts.title}</div><div class="eitem-time">${fmtDateTime(opts.time)}</div></div>
+      <div class="eitem-detail">รายละเอียด: ${opts.detail}</div>
+      <div class="eitem-actor">ผู้ดำเนินการ: <span class="actor-pill">${opts.actor || 'ไม่ระบุ'}</span></div>
+    </div>
+  </div>`;
+}
+
+function viewRevisionDetail(){
   if(!state.selectedDoc) state.selectedDoc = DOCUMENTS[0] && DOCUMENTS[0].id;
   const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
   if(!d) return `<div class="panel">${emptyState('ยังไม่มีเอกสาร','No documents in the register yet.')}</div>`;
-  const groups = groupHistoryByRequest(d);
+
   const linkBtn = d.link
     ? `<a class="btn ghost" href="${d.link}" target="_blank" rel="noopener">${ic('link')} เปิดใน SharePoint</a>`
     : `<button class="btn ghost" disabled>${ic('link')} ยังไม่มีลิงก์</button>`;
 
+  const lastComment = (d.comments||[])[(d.comments||[]).length-1];
+  const items = [
+    eitem({ icon:'plus', bg:'--blue-600', title:'สร้าง/แก้ไขล่าสุด', time:d.lastUpdated,
+      detail:`สถานะปัจจุบัน: ${d.note} · การอนุมัติ: ${d.approvalStatus||'ร่าง'}`,
+      actor: lastComment ? lastComment.by : (d.preparedBy || '') }),
+    ...(d.comments||[]).slice().reverse().map(c=>{
+      const cls = classifyEvent(c.text);
+      return eitem({ icon:cls.icon, bg:cls.bg, title:cls.title, time:c.time, detail:c.text, actor:c.by });
+    }),
+    ...(d.createdDate ? [eitem({ icon:'send', bg:'--amber-600', title:'จัดทำเอกสาร', time:d.createdDate,
+      detail:'สร้างเอกสารเวอร์ชันแรก', actor:d.preparedBy || '' })] : []),
+  ];
+
   return `
-  <div class="crumb" data-back="1">‹ Back</div>
+  <div class="crumb" data-back="1">‹ Back to Revision</div>
   <div class="panel">
     <div class="panel-head">
-      <div class="panel-title">History — ${d.id} ${cleanName(d)}</div>
-      <select class="select" id="revDocPicker">${DOCUMENTS.map(x=>`<option value="${x.id}" ${x.id===d.id?'selected':''}>${x.id}</option>`).join('')}</select>
-    </div>
-    <div style="font-size:11.5px; color:var(--ink-500); margin-bottom:16px;">แยกตามรอบคำขอ (เอกสารเริ่มต้น / คำขอปรับปรุงแต่ละครั้ง) พร้อมลิงก์เอกสารปัจจุบัน</div>
-  </div>
-  ${groups.map(g=>{
-    const title = g.type==='revision' ? `คำขอปรับปรุง Rev.${g.fromRev||'-'} → Rev.${g.toRev||'-'}` : `เอกสารเริ่มต้น${g.toRev ? ` (Rev.${g.toRev})` : ''}`;
-    return `
-    <div class="hist-card">
-      <div class="hist-card-head">
-        <div>
-          <div class="hist-card-title">${title}</div>
-          <div class="hist-card-meta">ขอโดย ${g.requestedBy || 'ไม่ระบุ'} · ${fmtDateTime(g.requestedAt)}</div>
-        </div>
-        ${linkBtn}
+      <div>
+        <div class="panel-title">Revision History — ${d.id} ${cleanName(d)}</div>
+        <div style="font-size:11.5px; color:var(--ink-500); margin-top:3px;">ระบบนี้เก็บประวัติการแก้ไข/ขอปรับปรุงเอกสาร พร้อมลิงก์ ณ ขณะนั้น เพื่อความโปร่งใสและตรวจสอบข้อมูลย้อนหลังได้</div>
       </div>
-      ${g.events.length ? `
-      <div class="timeline">
-        ${g.events.map((e,i)=>`
-          <div class="tl-item ${i>0?'old':''}">
-            <div class="tl-dot"></div>
-            <div class="tl-head"><div class="tl-rev">${e.by}</div><div class="tl-date">${fmtDateTime(e.time)}</div></div>
-            <div class="tl-desc">${e.text}</div>
-          </div>`).join('')}
-      </div>` : `<div style="font-size:12px; color:var(--ink-400); margin-top:10px;">ยังไม่มีการดำเนินการเพิ่มเติมในรอบนี้</div>`}
-    </div>`;
-  }).join('')}
-  `;
+      <div style="display:flex; gap:8px; align-items:center;">
+        ${linkBtn}
+        <select class="select" id="revDocPicker">${DOCUMENTS.map(x=>`<option value="${x.id}" ${x.id===d.id?'selected':''}>${x.id}</option>`).join('')}</select>
+      </div>
+    </div>
+    ${items.join('')}
+  </div>`;
+}
+
+// ============================================================
+// REVISION DASHBOARD — landing page for "Revision" in the sidebar:
+// stat cards, filterable table of every document's revision/review
+// status, and a combined latest-activity feed.
+// ============================================================
+function viewRevisionDashboard(){
+  const total = DOCUMENTS.length;
+  const revised = DOCUMENTS.filter(d=>d.approvalStatus==='อนุมัติแล้ว').length;
+  const pendingApproval = DOCUMENTS.filter(d=>d.approvalStatus==='รออนุมัติ').length;
+  const inProgress = DOCUMENTS.filter(d=>d.approvalStatus==='ร่าง'||d.approvalStatus==='รอทบทวน').length;
+  const overdue = DOCUMENTS.filter(d=> nextReviewDate(d) < Date.now()).length;
+
+  let list = DOCUMENTS.slice();
+  if(state.revFilter.clause!=='All') list = list.filter(d=>(d.clause||'')===state.revFilter.clause);
+  if(state.revFilter.type!=='All') list = list.filter(d=>docTypeCode(d)===state.revFilter.type);
+  if(state.revFilter.status!=='All') list = list.filter(d=>d.approvalStatus===state.revFilter.status);
+  if(state.revFilter.q){
+    const q = state.revFilter.q.toLowerCase();
+    list = list.filter(d=> d.id.toLowerCase().includes(q) || d.name.toLowerCase().includes(q));
+  }
+  list = list.slice().sort((a,b)=>(b.lastUpdated||0)-(a.lastUpdated||0));
+  const pageItems = list.slice(0,5);
+
+  const clauseOpts = [['All','ทุกข้อกำหนด'], ['','ไม่ระบุ'], ...CLAUSES];
+  const typeOpts = [['All','ทุกประเภท'], ...Object.entries(DOC_TYPE_MAP)];
+  const statusOpts = [['All','ทุกสถานะ'], ...[...STATUS_FLOW,'ไม่อนุมัติ'].map(s=>[s,s])];
+
+  // latest activity feed: real comment events across all docs + real overdue alerts
+  const commentEvents = DOCUMENTS.flatMap(d=> (d.comments||[]).map(c=>{
+    const cls = classifyEvent(c.text);
+    return { ...cls, time:c.time, by:c.by, docId:d.id, docName:cleanName(d), detail:c.text };
+  }));
+  const overdueEvents = DOCUMENTS.filter(d=> nextReviewDate(d) < Date.now()).map(d=>({
+    icon:'bell', bg:'--red-600', title:'แก้ไขเกินกำหนด', time: nextReviewDate(d), by:'',
+    docId:d.id, docName:cleanName(d), detail:`กำหนดทบทวน: ${fmtDate(nextReviewDate(d))}`,
+  }));
+  const feed = [...commentEvents, ...overdueEvents].sort((a,b)=>(b.time||0)-(a.time||0)).slice(0,4);
+
+  return `
+  <div class="panel">
+    <div class="panel-title">Revision</div>
+    <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">ติดตามการแก้ไขและประวัติการอนุมัติเอกสาร</div>
+  </div>
+  <div class="stat-row-5">
+    <div class="stat-card"><div class="stat-icon blue">${ic('doc')}</div><div><div class="stat-num">${total}</div><div class="stat-label">เอกสารทั้งหมด</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">${ic('check')}</div><div><div class="stat-num">${revised}</div><div class="stat-label">แก้ไขแล้ว</div></div></div>
+    <div class="stat-card"><div class="stat-icon amber">${ic('send')}</div><div><div class="stat-num">${pendingApproval}</div><div class="stat-label">รออนุมัติ</div></div></div>
+    <div class="stat-card"><div class="stat-icon purple">${ic('clock')}</div><div><div class="stat-num">${inProgress}</div><div class="stat-label">ร่าง/แก้ไขล่าสุด</div></div></div>
+    <div class="stat-card"><div class="stat-icon red">${ic('bell')}</div><div><div class="stat-num">${overdue}</div><div class="stat-label">แก้ไขเกินกำหนด</div></div></div>
+  </div>
+
+  <div class="panel">
+    <div class="toolbar">
+      <div class="search"><span>${ic('search')}</span><input id="revSearch" placeholder="ค้นหาเอกสาร..." value="${state.revFilter.q}"></div>
+      <select class="select" id="revFClause">${clauseOpts.map(([v,l])=>`<option value="${v}" ${v===state.revFilter.clause?'selected':''}>${l}</option>`).join('')}</select>
+      <select class="select" id="revFType">${typeOpts.map(([v,l])=>`<option value="${v}" ${v===state.revFilter.type?'selected':''}>${l}</option>`).join('')}</select>
+      <select class="select" id="revFStatus">${statusOpts.map(([v,l])=>`<option value="${v}" ${v===state.revFilter.status?'selected':''}>${l}</option>`).join('')}</select>
+    </div>
+    <div class="table-wrap"><table class="dtable">
+      <thead><tr><th>เอกสาร</th><th>ข้อกำหนด</th><th>เวอร์ชันปัจจุบัน</th><th>สถานะ</th><th>แก้ไขล่าสุด</th><th>ถัดไป (ทบทวนภายใน)</th><th></th></tr></thead>
+      <tbody>
+        ${pageItems.length ? pageItems.map(d=>{
+          const nrd = nextReviewDate(d);
+          const days = daysUntil(nrd);
+          const isOverdue = days < 0;
+          return `
+        <tr data-open-rev="${d.id}">
+          <td class="mono">${d.id}<div class="name" title="${cleanName(d).replace(/"/g,'&quot;')}" style="max-width:220px;">${cleanName(d)}</div></td>
+          <td>${d.clause || '<span style="color:var(--ink-400);">—</span>'}</td>
+          <td>${d.rev || '—'}</td>
+          <td>${approvalBadge(d.approvalStatus)}</td>
+          <td>${fmtDateTime(d.lastUpdated)}</td>
+          <td><div class="next-review" style="color:${isOverdue?'var(--red-600)':'var(--ink-700)'}">${fmtDate(nrd)}<div class="rel" style="color:${isOverdue?'var(--red-600)':'var(--ink-500)'}">${isOverdue ? `เกินกำหนด ${Math.abs(days)} วัน` : `อีก ${days} วัน`}</div></div></td>
+          <td><button class="chev-btn" data-open-rev-btn="${d.id}">${ic('chevronRight')}</button></td>
+        </tr>`;
+        }).join('') : `<tr><td colspan="7" style="text-align:center; padding:40px 0; color:var(--ink-500);">ไม่มีเอกสารตรงตามเงื่อนไข</td></tr>`}
+      </tbody>
+    </table></div>
+    <div style="margin-top:14px;"><a class="panel-link" style="cursor:pointer;" data-go="documents">ดูเอกสารทั้งหมด →</a></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">กิจกรรมล่าสุด (Latest Activity)</div><a class="panel-link" style="cursor:pointer;" data-go="audittrail">ดูทั้งหมด →</a></div>
+    <div class="activity-grid">
+      ${feed.length ? feed.map(a=>`
+        <div class="activity-card">
+          <div class="ac-icon" style="background:var(${a.bg})">${ic(a.icon)}</div>
+          <div class="ac-title">${a.title}</div>
+          <div class="ac-sub">${a.docId} ${a.docName}</div>
+          <div class="ac-meta">${a.by ? `โดย ${a.by} · ` : ''}${fmtDateTime(a.time)}</div>
+        </div>`).join('') : `<div style="grid-column:1/-1; color:var(--ink-500); font-size:12.5px; text-align:center; padding:20px;">ยังไม่มีกิจกรรม</div>`}
+    </div>
+  </div>`;
+}
+function attachRevisionDashboardHandlers(){
+  const search = document.getElementById('revSearch');
+  if(search) search.addEventListener('input', e=>{
+    const cursorPos = e.target.selectionStart;
+    state.revFilter.q = e.target.value;
+    render();
+    const refreshed = document.getElementById('revSearch');
+    if(refreshed){ refreshed.focus(); refreshed.setSelectionRange(cursorPos, cursorPos); }
+  });
+  const fc = document.getElementById('revFClause'); if(fc) fc.addEventListener('change', e=>{ state.revFilter.clause = e.target.value; render(); });
+  const ft = document.getElementById('revFType'); if(ft) ft.addEventListener('change', e=>{ state.revFilter.type = e.target.value; render(); });
+  const fs = document.getElementById('revFStatus'); if(fs) fs.addEventListener('change', e=>{ state.revFilter.status = e.target.value; render(); });
+  document.querySelectorAll('[data-open-rev],[data-open-rev-btn]').forEach(elx=>{
+    elx.addEventListener('click', e=>{
+      e.stopPropagation();
+      const id = elx.dataset.openRev || elx.dataset.openRevBtn;
+      goTo('revisiondetail', { selectedDoc: id });
+    });
+  });
 }
 
 // ============================================================
@@ -1196,26 +1345,65 @@ function viewAudit(){
 
   return `
   <div class="panel">
-    <div class="clause-select-row">
-      <div class="panel-title">Select Clause</div>
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">Audit View</div>
+        <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">ภาพรวมสถานข้อกำหนด ISO/IEC 17025</div>
+      </div>
+      <button class="btn ghost" data-go="iso">${ic('doc')} View All Clauses</button>
+    </div>
+    <div class="clause-select-row" style="margin-top:8px;">
+      <div class="panel-title" style="font-size:12.5px;">Select Clause</div>
       <select class="select" id="auditClausePicker">
         <option value="">ไม่ระบุข้อกำหนด</option>
         ${CLAUSES.map(([c,l])=>`<option value="${c}" ${c===clause?'selected':''}>${l}</option>`).join('')}
       </select>
     </div>
-    <div class="audit-stat-grid">
-      <div class="audit-stat"><div class="num">${docs.length}</div><div class="lbl">Documents</div></div>
-      <div class="audit-stat"><div class="num">${approvedCount}</div><div class="lbl">Approved</div></div>
-      <div class="audit-stat"><div class="num">${evidence.length}</div><div class="lbl">Evidence/Support</div></div>
-      <div class="audit-stat"><div class="num">${related.length}</div><div class="lbl">Related Clauses</div></div>
+  </div>
+
+  <div class="stat-row">
+    <div class="stat-card clickable" data-audit-clause="${clause}">
+      <div class="stat-icon blue">${ic('doc')}</div>
+      <div><div class="stat-num">${docs.length}</div><div class="stat-label">Documents<br>เอกสารที่เกี่ยวข้อง</div><a class="stat-card-link">View details →</a></div>
     </div>
+    <div class="stat-card clickable" data-audit-scroll="auditColDocs">
+      <div class="stat-icon green">${ic('check')}</div>
+      <div><div class="stat-num">${approvedCount}</div><div class="stat-label">Approved<br>อนุมัติแล้ว</div><a class="stat-card-link">View details →</a></div>
+    </div>
+    <div class="stat-card clickable" data-go="records">
+      <div class="stat-icon purple">${ic('user')}</div>
+      <div><div class="stat-num">${evidence.length}</div><div class="stat-label">Evidence / Support<br>หลักฐาน / ข้อมูลสนับสนุน</div><a class="stat-card-link">View details →</a></div>
+    </div>
+    <div class="stat-card clickable" data-audit-scroll="auditColRelated">
+      <div class="stat-icon amber">${ic('link')}</div>
+      <div><div class="stat-num">${related.length}</div><div class="stat-label">Related Clauses<br>ข้อกำหนดที่เกี่ยวข้อง</div><a class="stat-card-link">View details →</a></div>
+    </div>
+  </div>
+
+  <div class="panel">
     <div class="audit-cols" style="grid-template-columns:1fr 1fr 1fr;">
-      <div><div class="audit-col-title">Documents</div>
-        ${docs.length ? docs.map(d=>`<div class="audit-link" data-open-doc="${d.id}"><span class="dot"></span>${d.id} ${cleanName(d)}</div>`).join('') : `<div style="color:var(--ink-400); font-size:12px;">—</div>`}</div>
-      <div><div class="audit-col-title">Evidence / Support</div>
-        ${evidence.length ? evidence.map(d=>`<div class="audit-link" data-open-doc="${d.id}"><span class="dot"></span>${d.id} ${cleanName(d)}</div>`).join('') : `<div style="color:var(--ink-400); font-size:12px;">—</div>`}</div>
-      <div><div class="audit-col-title">Related</div>
-        ${related.map(r=>`<div class="audit-link" data-clause-jump-audit="${r.id}"><span class="dot"></span>${r.id} ${r.title}</div>`).join('') || `<div style="color:var(--ink-400); font-size:12px;">—</div>`}</div>
+      <div class="audit-col-panel" id="auditColDocs">
+        <div class="audit-col-head">${ic('doc')}<span class="audit-col-title" style="margin-bottom:0;">Documents</span></div>
+        <div class="audit-col-body">
+          ${docs.length ? docs.slice(0,6).map(d=>`<div class="audit-link" data-open-doc="${d.id}"><span class="dot"></span>${d.id} ${cleanName(d)}</div>`).join('') : `<div style="color:var(--ink-400); font-size:12px;">—</div>`}
+        </div>
+        <div class="audit-col-foot"><a data-go="documents" data-preset="all">View all documents →</a></div>
+      </div>
+      <div class="audit-col-panel">
+        <div class="audit-col-head">${ic('user')}<span class="audit-col-title" style="margin-bottom:0;">Evidence / Support</span></div>
+        <div class="audit-col-body">
+          ${evidence.length ? evidence.slice(0,6).map(d=>`<div class="audit-link" data-open-doc="${d.id}"><span class="dot"></span>${d.id} ${cleanName(d)}</div>`).join('') : `
+          <div class="audit-empty">${ic('search')}<p>ยังไม่มีข้อมูล</p></div>`}
+        </div>
+        <div class="audit-col-foot"><a data-go="records">View all evidence →</a></div>
+      </div>
+      <div class="audit-col-panel" id="auditColRelated">
+        <div class="audit-col-head">${ic('link')}<span class="audit-col-title" style="margin-bottom:0;">Related Clauses</span></div>
+        <div class="audit-col-body">
+          ${related.length ? related.slice(0,6).map(r=>`<div class="audit-link" data-clause-jump-audit="${r.id}"><span class="dot"></span>${r.id} ${r.title}</div>`).join('') : `<div style="color:var(--ink-400); font-size:12px;">—</div>`}
+        </div>
+        <div class="audit-col-foot"><a data-go="iso">View all related clauses →</a></div>
+      </div>
     </div>
   </div>`;
 }
@@ -1225,13 +1413,23 @@ function attachAuditHandlers(){
   document.querySelectorAll('[data-clause-jump-audit]').forEach(elx=>{
     elx.addEventListener('click', ()=>{ state.selectedClause = elx.dataset.clauseJumpAudit; render(); });
   });
+  document.querySelectorAll('[data-audit-scroll]').forEach(elx=>{
+    elx.addEventListener('click', ()=>{
+      const target = document.getElementById(elx.dataset.auditScroll);
+      if(target) target.scrollIntoView({ behavior:'smooth', block:'center' });
+    });
+  });
+  const docsCard = document.querySelector('[data-audit-clause]');
+  if(docsCard) docsCard.addEventListener('click', ()=>{
+    goTo('documents', { docFilter:{ clause: state.selectedClause, type:'All', status:'All', q:'', preset:'all' }, docPage:1 });
+  });
 }
 
 // ============================================================
 // DOC PICKER (shared by revision/approval views)
 // ============================================================
 function attachDocPicker(view){
-  const el = document.getElementById(view==='revision'?'revDocPicker':'apDocPicker');
+  const el = document.getElementById(view==='revisiondetail'?'revDocPicker':'apDocPicker');
   if(el) el.addEventListener('change', e=>{ state.selectedDoc = e.target.value; render(); });
 }
 
