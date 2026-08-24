@@ -36,6 +36,13 @@ async function loadDocs(){
       if(d.approverName===undefined){ d.approverName=''; needsMigration = true; }
       if(!Array.isArray(d.comments)){ d.comments=[]; needsMigration = true; }
       if(d.lastUpdated===undefined){ d.lastUpdated = Date.now(); needsMigration = true; }
+      if(d.preparedBy===undefined){ d.preparedBy=''; needsMigration = true; }
+      if(d.rev===undefined){ d.rev=null; needsMigration = true; }
+      if(d.createdDate===undefined){ d.createdDate=null; needsMigration = true; }
+      if(d.effectiveDate===undefined){ d.effectiveDate=null; needsMigration = true; }
+      if(d.approvedBy===undefined){ d.approvedBy=null; needsMigration = true; }
+      if(d.approvedAt===undefined){ d.approvedAt=null; needsMigration = true; }
+      if(d.approvedComment===undefined){ d.approvedComment=null; needsMigration = true; }
     });
     DOCS_LOADED = true;
     DOCS_ERROR = null;
@@ -212,7 +219,7 @@ function render(){
     case 'audit': el.innerHTML = viewAudit(); attachAuditHandlers(); break;
     case 'calendar': el.innerHTML = viewCalendar(); attachCalHandlers(); break;
     case 'audittrail': el.innerHTML = viewAuditTrail(); break;
-    case 'admin': el.innerHTML = viewAdmin(); break;
+    case 'admin': el.innerHTML = viewAdmin(); attachAdminHandlers(); break;
     case 'docdetail': el.innerHTML = viewDocDetail(state.selectedDoc); break;
     default: el.innerHTML = viewDashboard();
   }
@@ -600,9 +607,12 @@ function viewDocDetail(docId){
       <div class="doc-thumb">${ic('pdf')}<span>${docTypeCode(d)}</span></div>
       <div style="flex:1;">
         <div class="detail-title-row"><div class="detail-title">${d.id}</div>${statusBadge(d.note)}${approvalBadge(d.approvalStatus)}</div>
-        <div class="detail-sub">${cleanName(d)}</div>
+        <div class="detail-sub">${cleanName(d)}${d.rev ? ` <span style="color:var(--ink-500); font-weight:600;">· Rev.${d.rev}</span>` : ''}</div>
         <div class="kv-row"><div class="k">ประเภท</div><div class="v">${docTypeLabel(d)}</div></div>
+        <div class="kv-row"><div class="k">วันที่จัดทำ</div><div class="v">${d.createdDate ? fmtDate(d.createdDate) : '—'}</div></div>
+        <div class="kv-row"><div class="k">วันที่ประกาศใช้</div><div class="v">${d.effectiveDate ? fmtDate(d.effectiveDate) : '—'}</div></div>
         <div class="kv-row"><div class="k">อัปเดตล่าสุด</div><div class="v">${fmtDateTime(d.lastUpdated)}</div></div>
+        <div class="kv-row"><div class="k">ผู้จัดทำ</div><div class="v">${d.preparedBy || '—'}</div></div>
         <div class="kv-row"><div class="k">ผู้ทบทวน</div><div class="v">${d.reviewerName || '—'}</div></div>
         <div class="kv-row"><div class="k">ผู้อนุมัติ</div><div class="v">${d.approverName || '—'}</div></div>
         <div class="detail-actions">
@@ -635,7 +645,9 @@ function viewRevision(){
   const timeline = [
     { label:'สร้าง/แก้ไขล่าสุด', date:d.lastUpdated, desc:`สถานะปัจจุบัน: ${d.note} · การอนุมัติ: ${d.approvalStatus}` },
     ...(d.comments||[]).slice().reverse().map(c=>({ label:c.by, date:c.time, desc:c.text })),
-  ];
+    ...(d.effectiveDate ? [{ label:'ประกาศใช้', date:d.effectiveDate, desc:`ผู้อนุมัติ: ${d.approverName || 'ไม่ระบุ'}` }] : []),
+    ...(d.createdDate ? [{ label:'จัดทำเอกสาร', date:d.createdDate, desc:`ผู้จัดทำ: ${d.preparedBy || 'ไม่ระบุ'}` }] : []),
+  ].sort((a,b)=> (b.date||0)-(a.date||0));
   return `
   <div class="crumb" data-back="1">‹ Back</div>
   <div class="panel">
@@ -910,9 +922,76 @@ function viewAuditTrail(){
 }
 
 // ============================================================
+// MASTER LIST IMPORT — merges MASTER_LIST (parsed from MPIR's
+// SharePoint master list export) into DOCUMENTS by matching on id.
+// Updates name/link/dates/rev/note and maps role codes (LM/TM/QM/DC)
+// to real names for preparedBy/reviewerName/approverName.
+// ============================================================
+function toEpoch(isoDateStr){
+  if(!isoDateStr) return null;
+  const t = new Date(isoDateStr + 'T00:00:00').getTime();
+  return isNaN(t) ? null : t;
+}
+function applyMasterListRow(row, d){
+  d.name = row.name || d.name;
+  d.rev = row.rev || d.rev || null;
+  if(row.link) d.link = row.link;
+  if(row.note) d.note = row.note;
+  d.createdDate = toEpoch(row.created) || d.createdDate || null;
+  d.effectiveDate = toEpoch(row.effective) || d.effectiveDate || null;
+  d.preparedBy = roleName(row.prep) || d.preparedBy || '';
+  d.reviewerName = roleName(row.reviewer) || d.reviewerName || '';
+  d.approverName = roleName(row.approver) || d.approverName || '';
+  if(d.note==='ควบคุม' || d.note==='แจกจ่าย'){
+    d.approvalStatus = 'อนุมัติแล้ว';
+    if(!d.approvedBy){
+      d.approvedBy = d.approverName || '';
+      d.approvedAt = d.effectiveDate || d.lastUpdated || Date.now();
+    }
+  }
+  d.lastUpdated = Date.now();
+}
+async function runMasterListImport(){
+  if(typeof MASTER_LIST === 'undefined'){
+    alert('ไม่พบไฟล์ masterlist.js');
+    return;
+  }
+  let updated = 0, created = 0;
+  MASTER_LIST.forEach(row=>{
+    let d = DOCUMENTS.find(x=>x.id===row.id);
+    if(d){
+      applyMasterListRow(row, d);
+      updated++;
+    } else {
+      d = {
+        id: row.id, name: row.name, clause:'', link: row.link || '', note: row.note || 'ว่าง',
+        approvalStatus:'ร่าง', reviewerName:'', approverName:'', preparedBy:'', comments:[],
+        lastUpdated: Date.now(), rev:null, createdDate:null, effectiveDate:null,
+      };
+      applyMasterListRow(row, d);
+      DOCUMENTS.push(d);
+      created++;
+    }
+  });
+  await persistDocs();
+  alert(`นำเข้าเสร็จแล้ว — อัปเดต ${updated} รายการ, เพิ่มใหม่ ${created} รายการ`);
+  render();
+}
+function attachAdminHandlers(){
+  const btn = document.getElementById('btnImportMasterList');
+  if(btn) btn.addEventListener('click', async ()=>{
+    const n = (typeof MASTER_LIST!=='undefined') ? MASTER_LIST.length : 0;
+    if(!confirm(`นำเข้า/อัปเดตข้อมูลจาก Master List (${n} รายการ)?\n\nจะอัปเดตชื่อ, ลิงก์, วันที่, สถานะ, และชื่อผู้จัดทำ/ทบทวน/อนุมัติ (จากรหัสตำแหน่ง LM/TM/QM/DC) ของเอกสารที่ตรงกัน — และเพิ่มเอกสารใหม่ถ้ายังไม่มีในระบบ`)) return;
+    btn.disabled = true; btn.textContent = 'กำลังนำเข้า…';
+    await runMasterListImport();
+  });
+}
+
+// ============================================================
 // ADMINISTRATION
 // ============================================================
 function viewAdmin(){
+  const n = (typeof MASTER_LIST!=='undefined') ? MASTER_LIST.length : 0;
   return `
   <div class="panel">
     <div class="panel-head"><div class="panel-title">Administration</div></div>
@@ -921,6 +1000,13 @@ function viewAdmin(){
       <div class="side-box"><div class="side-box-title">SharePoint</div><div style="font-size:12.5px; color:var(--ink-700);">mitrphol.sharepoint.com/sites/ServiceLab</div></div>
       <div class="side-box"><div class="side-box-title">Document Types</div><div style="font-size:12.5px; color:var(--ink-700);">${Object.entries(DOC_TYPE_MAP).map(([k,v])=>`${k}: ${v}`).join('<br>')}</div></div>
     </div>
+  </div>
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">Import Master List</div></div>
+    <div style="font-size:12.5px; color:var(--ink-700); margin-bottom:14px;">
+      อัปเดตชื่อ, ลิงก์ SharePoint, วันที่จัดทำ/ประกาศใช้, Revision, สถานะ และชื่อผู้จัดทำ/ทบทวน/อนุมัติ (แปลงรหัสตำแหน่ง LM=รัตนา, TM=พิสิทธินี, QM/DC=พิมพ์ชนก เป็นชื่อจริง) จากไฟล์ Master List ที่โหลดไว้ (${n} รายการ) — จับคู่ตามรหัสเอกสาร เอกสารที่ไม่มีในระบบจะถูกเพิ่มใหม่
+    </div>
+    <button class="btn primary" id="btnImportMasterList">${ic('doc')} นำเข้า/อัปเดตจาก Master List</button>
   </div>`;
 }
 

@@ -115,6 +115,14 @@ function approvalBadge(status){
   return `<span class="badge ${APPROVAL_STATUS_STYLE[s]||'draft'}">${s}</span>`;
 }
 
+// role code → real name, as used in the ผู้จัดทำ/ผู้ทบทวน/ผู้อนุมัติ columns
+// of the master list (LM/TM/QM/DC)
+const ROLE_NAMES = { LM:'รัตนา', TM:'พิสิทธินี', QM:'พิมพ์ชนก', DC:'พิมพ์ชนก' };
+function roleName(code){
+  if(!code) return '';
+  return ROLE_NAMES[code] || code;
+}
+
 // ============================================================
 // LIVE DOCUMENT STORE
 // Populated at runtime from Firestore (see app.js). Starts empty —
