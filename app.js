@@ -143,6 +143,15 @@ function updateNotifBadge(){
   const n = pendingQueue().length;
   dot.style.display = n>0 ? 'block' : 'none';
 }
+function wireBackButton(){
+  const btn = document.getElementById('topBackBtn');
+  if(btn) btn.addEventListener('click', goBack);
+}
+function updateBackButton(){
+  const btn = document.getElementById('topBackBtn');
+  if(!btn) return;
+  btn.style.display = navStack.length>0 ? 'flex' : 'none';
+}
 function renderNotifPanel(){
   const wrap = document.getElementById('notifPanel');
   if(!wrap) return;
@@ -214,6 +223,7 @@ async function boot(){
   wireNav();
   wireGlobalSearch();
   wireNotifBell();
+  wireBackButton();
   render();
 }
 function renderBootScreen(text){
@@ -295,7 +305,7 @@ function render(){
   switch(state.view){
     case 'dashboard': el.innerHTML = viewDashboard(); break;
     case 'iso': el.innerHTML = viewISO(); attachISOHandlers(); break;
-    case 'documents': renderDocumentsInto(); wireDocControls(); renderModalLayer(); updateNotifBadge(); return;
+    case 'documents': renderDocumentsInto(); wireDocControls(); renderModalLayer(); updateNotifBadge(); updateBackButton(); return;
     case 'records': el.innerHTML = viewEvidence(); attachEvidenceHandlers(); break;
     case 'revision': el.innerHTML = viewRevisionDashboard(); attachRevisionDashboardHandlers(); break;
     case 'revisiondetail': el.innerHTML = viewRevisionDetail(); attachDocPicker('revisiondetail'); break;
@@ -310,6 +320,7 @@ function render(){
   attachGlobalRowHandlers();
   renderModalLayer();
   updateNotifBadge();
+  updateBackButton();
 }
 function attachGlobalRowHandlers(){
   document.querySelectorAll('[data-open-doc]').forEach(row=>{
@@ -1122,6 +1133,7 @@ function viewApproval(){
   const queue = pendingQueue();
   if(!state.selectedDoc) state.selectedDoc = (queue[0] || DOCUMENTS[0] || {}).id;
 
+  const countDraft = DOCUMENTS.filter(x=>x.approvalStatus==='ร่าง'||!x.approvalStatus).length;
   const countReview = DOCUMENTS.filter(x=>x.approvalStatus==='รอทบทวน').length;
   const countWaitApprove = DOCUMENTS.filter(x=>x.approvalStatus==='รออนุมัติ').length;
   const countApproved = DOCUMENTS.filter(x=>x.approvalStatus==='อนุมัติแล้ว').length;
@@ -1129,12 +1141,13 @@ function viewApproval(){
 
   const tabs = [
     { key:'all', label:'ทั้งหมด', n: total },
+    { key:'ร่าง', label:'ร่าง', n: countDraft },
     { key:'รอทบทวน', label:'รอทบทวน', n: countReview },
     { key:'รออนุมัติ', label:'รออนุมัติ', n: countWaitApprove },
     { key:'อนุมัติแล้ว', label:'อนุมัติแล้ว', n: countApproved },
   ];
 
-  let filtered = state.approvalTab==='all' ? DOCUMENTS.slice() : DOCUMENTS.filter(x=>x.approvalStatus===state.approvalTab);
+  let filtered = state.approvalTab==='all' ? DOCUMENTS.slice() : DOCUMENTS.filter(x=> state.approvalTab==='ร่าง' ? (x.approvalStatus==='ร่าง'||!x.approvalStatus) : x.approvalStatus===state.approvalTab);
   if(state.approvalTypeFilter!=='All') filtered = filtered.filter(x=>docTypeCode(x)===state.approvalTypeFilter);
   filtered = filtered.slice().sort((a,b)=> (b.lastUpdated||0)-(a.lastUpdated||0));
 
@@ -1146,9 +1159,11 @@ function viewApproval(){
   const typeOpts = [['All','ทุกประเภท'], ...Object.entries(DOC_TYPE_MAP)];
 
   return `
-  <div class="stat-row">
+  <div class="stat-row-5">
     <div class="stat-card"><div class="stat-icon blue">${ic('doc')}</div>
       <div><div class="stat-num">${total}</div><div class="stat-label">รายการทั้งหมด</div></div></div>
+    <div class="stat-card"><div class="stat-icon purple">${ic('edit')}</div>
+      <div><div class="stat-num">${countDraft}</div><div class="stat-label">ร่าง</div></div></div>
     <div class="stat-card"><div class="stat-icon amber">${ic('clock')}</div>
       <div><div class="stat-num">${countReview}</div><div class="stat-label">รอทบทวน</div></div></div>
     <div class="stat-card"><div class="stat-icon blue">${ic('clock')}</div>
