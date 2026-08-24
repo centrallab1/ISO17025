@@ -106,7 +106,7 @@ const STATUS_FLOW = ['ร่าง','รอทบทวน','รออนุม�
 const APPROVAL_STATUS_STYLE = {
   'ร่าง':       'draft',
   'รอทบทวน':    'review',
-  'รออนุมัติ':   'review',
+  'รออนุมัติ':   'pending',
   'อนุมัติแล้ว': 'active',
   'ไม่อนุมัติ':  'overdue',
 };

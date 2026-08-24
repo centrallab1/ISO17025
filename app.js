@@ -87,6 +87,7 @@ const state = {
   calMonth: new Date().getMonth(),
   calYear: new Date().getFullYear(),
   modal: null, // { mode:'new'|'edit', id }
+  queueListOpen: false,
 };
 
 const ICONS = {
@@ -395,7 +396,7 @@ function docTable(docs){
   return `<div class="table-wrap"><table class="dtable">
     <thead><tr><th>Document ID</th><th>Document Name</th><th>Type</th><th>Status</th><th>Approval</th><th>Last Updated</th></tr></thead>
     <tbody>${docs.map(d=>`<tr data-open-doc="${d.id}">
-      <td class="mono">${d.id}</td><td class="name">${cleanName(d)}</td><td>${docTypeLabel(d)}</td>
+      <td class="mono">${d.id}</td><td class="name" title="${cleanName(d).replace(/"/g,'&quot;')}">${cleanName(d)}</td><td>${docTypeLabel(d)}</td>
       <td>${statusBadge(d.note)}</td><td>${approvalBadge(d.approvalStatus)}</td><td>${fmtDate(d.lastUpdated)}</td>
     </tr>`).join('')}</tbody>
   </table></div>`;
@@ -494,7 +495,7 @@ function renderDocumentsInto(){
       <tbody>
         ${pageItems.length ? pageItems.map(d=>`
         <tr data-open-doc="${d.id}">
-          <td class="mono">${d.id}</td><td class="name">${cleanName(d)}</td><td>${d.clause || '<span style="color:var(--ink-400);">—</span>'}</td>
+          <td class="mono">${d.id}</td><td class="name" title="${cleanName(d).replace(/"/g,'&quot;')}">${cleanName(d)}</td><td>${d.clause || '<span style="color:var(--ink-400);">—</span>'}</td>
           <td>${docTypeLabel(d)}</td><td>${statusBadge(d.note)}</td><td>${approvalBadge(d.approvalStatus)}</td><td>${fmtDate(d.lastUpdated)}</td>
           <td><div class="row-actions" onclick="event.stopPropagation()">
             <button data-edit="${d.id}" title="Edit">${ic('edit')}</button>
@@ -719,12 +720,15 @@ function viewDocDetail(docId){
         <div class="kv-row"><div class="k">ผู้ทบทวน</div><div class="v">${d.reviewerName || '—'}</div></div>
         <div class="kv-row"><div class="k">ผู้อนุมัติ</div><div class="v">${d.approverName || '—'}</div></div>
         <div class="detail-actions">
-          ${d.link ? `<a class="btn primary" href="${d.link}" target="_blank" rel="noopener">${ic('link')} Open in SharePoint</a>` : `<button class="btn ghost" disabled>${ic('link')} ยังไม่มีลิงก์ SharePoint</button>`}
+          ${d.link ? `<a class="btn primary" href="${d.link}" target="_blank" rel="noopener">${ic('link')} Open in SharePoint</a>` : `<button class="btn ghost" disabled>${ic('link')} ยังไม่มีลิงก์</button>`}
           <button class="btn ghost" data-go="approval">${ic('check')} Approval</button>
           <button class="btn ghost" data-go="revision">${ic('history')} History</button>
-          <button class="btn ghost" id="btnDetailEdit">${ic('edit')} แก้ไขข้อมูล</button>
-          <button class="btn ghost" id="btnDetailRevise">${ic('history')} ขอปรับปรุง Rev.</button>
-          <button class="btn danger" id="btnDetailDelete">${ic('trash')} ลบเอกสาร</button>
+        </div>
+        <div class="detail-actions-label">จัดการเอกสาร</div>
+        <div class="detail-actions">
+          <button class="btn ghost" id="btnDetailEdit">${ic('edit')} แก้ไข</button>
+          <button class="btn ghost" id="btnDetailRevise">${ic('history')} ปรับปรุง Rev.</button>
+          <button class="btn danger" id="btnDetailDelete">${ic('trash')} ลบ</button>
         </div>
       </div>
       <div class="side-box" style="width:230px;">
@@ -818,12 +822,32 @@ function viewApproval(){
   const approvedComment = d.approvedComment !== undefined ? d.approvedComment : (lastComment ? lastComment.text : '');
   const requestLabel = d.lastRequestType==='new' ? 'เอกสารใหม่' : d.lastRequestType==='revision' ? `ปรับปรุง (Rev.${d.lastRequestFrom||'-'} → ${d.rev||'-'})` : null;
 
+  const countDraft = queue.filter(x=>x.approvalStatus==='ร่าง').length;
+  const countReview = queue.filter(x=>x.approvalStatus==='รอทบทวน').length;
+  const countApprove = queue.filter(x=>x.approvalStatus==='รออนุมัติ').length;
+
   const queueBanner = queue.length ? `
-  <div class="panel" style="background:var(--blue-50); border-color:var(--blue-500); margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-    <div style="font-size:12.5px; font-weight:700; color:var(--blue-600);">
-      รายการรอดำเนินการ: ${queue.length} รายการ${queuePos>=0 ? ` (กำลังดู ${queuePos+1}/${queue.length})` : ''}
+  <div class="panel" style="background:var(--blue-50); border-color:var(--blue-500); margin-bottom:16px;">
+    <div class="queue-summary">
+      <div style="font-size:12.5px; font-weight:700; color:var(--blue-600);">
+        รอดำเนินการทั้งหมด ${queue.length} รายการ${queuePos>=0 ? ` · กำลังดู ${queuePos+1}/${queue.length}` : ''}
+      </div>
+      <span class="queue-count-chip" style="color:var(--ink-500);">ร่าง <span class="n">${countDraft}</span></span>
+      <span class="queue-count-chip" style="color:var(--amber-600);">รอทบทวน <span class="n">${countReview}</span></span>
+      <span class="queue-count-chip" style="color:var(--blue-600);">รออนุมัติ <span class="n">${countApprove}</span></span>
+      <div class="spacer"></div>
+      <button class="queue-toggle" id="btnToggleQueueList">${state.queueListOpen ? 'ซ่อนรายการ ▲' : 'ดูรายการทั้งหมด ▼'}</button>
+      ${queue.length>1 ? `<button class="btn ghost" id="btnSkipQueue">ข้ามรายการนี้ ›</button>` : ''}
     </div>
-    ${queue.length>1 ? `<button class="btn ghost" id="btnSkipQueue">ข้ามรายการนี้ ›</button>` : ''}
+    ${state.queueListOpen ? `
+    <div class="queue-list">
+      ${queue.map(x=>`
+        <div class="queue-item ${x.id===d.id?'current':''}" data-jump-queue="${x.id}">
+          <span class="qi-id">${x.id}</span>
+          <span class="qi-name">${cleanName(x)}</span>
+          ${approvalBadge(x.approvalStatus)}
+        </div>`).join('')}
+    </div>` : ''}
   </div>` : '';
 
   return `
@@ -832,7 +856,7 @@ function viewApproval(){
   <div class="panel">
     <div class="panel-head">
       <div>
-        <div class="panel-title">${d.id} ${cleanName(d)}</div>
+        <div class="panel-title" style="display:flex; align-items:center; gap:9px; flex-wrap:wrap;">${d.id} ${cleanName(d)} ${approvalBadge(status)}</div>
         <div style="font-size:12px; color:var(--ink-500); margin-top:3px; font-weight:600;">ข้อกำหนด: ${d.clause ? clauseLabel(d.clause) : 'ไม่ระบุ'}${requestLabel ? ` · คำขอ: ${requestLabel}` : ''}</div>
       </div>
       <select class="select" id="apDocPicker">${DOCUMENTS.map(x=>`<option value="${x.id}" ${x.id===d.id?'selected':''}>${x.id}</option>`).join('')}</select>
@@ -884,6 +908,11 @@ function attachApprovalHandlers(){
   if(skipBtn) skipBtn.addEventListener('click', ()=>{
     const rest = pendingQueue().filter(x=>x.id!==state.selectedDoc);
     if(rest.length){ state.selectedDoc = rest[0].id; render(); }
+  });
+  const toggleBtn = document.getElementById('btnToggleQueueList');
+  if(toggleBtn) toggleBtn.addEventListener('click', ()=>{ state.queueListOpen = !state.queueListOpen; render(); });
+  document.querySelectorAll('[data-jump-queue]').forEach(elx=>{
+    elx.addEventListener('click', ()=>{ state.selectedDoc = elx.dataset.jumpQueue; render(); });
   });
 
   const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
