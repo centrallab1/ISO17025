@@ -699,7 +699,7 @@ function docModal(){
           </select></div>` : ''}
         <div class="field"><label>รหัสเอกสาร (Document ID)</label>
           <div style="display:flex; gap:8px;">
-            <input id="mfId" value="${d.id}" placeholder="เช่น RDI-LF-074" style="flex:1;" ${(editing||revising)?'disabled':''}>
+            <input id="mfId" value="${d.id}" placeholder="เช่น MPIR-LF-074-00" style="flex:1;" ${(editing||revising)?'disabled':''}>
             ${creatingNew ? `<button type="button" class="btn ghost" id="btnAutoNumber" style="flex-shrink:0; white-space:nowrap;">ออกเลขอัตโนมัติ</button>` : ''}
           </div>
           ${creatingNew ? `<div style="font-size:11px; color:var(--ink-500); margin-top:5px;">เลือกประเภทด้านบนเพื่อออกเลขอัตโนมัติ — ระบบจะเติมเลขที่ยังว่างอยู่ก่อนเสมอ (เช่น ถ้า 050 ยังไม่มีแต่ 054 มีแล้ว จะออกเลข 050 ให้ก่อน)</div>` : ''}
@@ -1018,6 +1018,9 @@ function groupHistoryByRequest(d){
 // classifies a comment/event into an icon + color + short Thai title for
 // the colored-icon timeline (revision history detail page + activity feed)
 function classifyEvent(text){
+  if(/เปลี่ยนรหัสเอกสารจาก/.test(text)){
+    return { icon:'edit', bg:'--blue-600', title:'เปลี่ยนรหัสเอกสาร' };
+  }
   if(/ขอขึ้นทะเบียนเอกสารใหม่/.test(text)){
     return { icon:'plus', bg:'--blue-600', title:'ขอขึ้นทะเบียนเอกสารใหม่' };
   }
@@ -1571,6 +1574,16 @@ function attachApprovalHandlers(){
       if(d.lastRequestType==='review'){
         d.lastReviewedAt = now;
         d.lastReviewedBy = actor;
+      }
+      // per lab decision: an approved revision is the trigger point to
+      // migrate an old RDI- id to the new MPIR-xx-###-rr format
+      if(d.lastRequestType==='revision' && !/^MPIR-/i.test(d.id)){
+        const typeCode = docTypeCode(d);
+        const oldId = d.id;
+        const newId = toMpirId(oldId, typeCode, d.rev);
+        d.id = newId;
+        d.comments.push({ by:actor, text:`เปลี่ยนรหัสเอกสารจาก ${oldId} เป็น ${newId} ตามรูปแบบใหม่`, time: now });
+        state.selectedDoc = newId;
       }
     }
     if(['อนุมัติแล้ว','ไม่อนุมัติ'].includes(d.approvalStatus)){
