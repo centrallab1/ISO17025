@@ -93,6 +93,7 @@ const state = {
   approvalPage: 1,
   approvalTypeFilter: 'All',
   revFilter: { clause:'All', type:'All', status:'All', q:'' },
+  revPage: 1,
 };
 
 const ICONS = {
@@ -261,7 +262,7 @@ function wireNav(){
     btn.addEventListener('click', ()=>{
       let extra = {};
       if(btn.dataset.view==='documents') extra = { docFilter:{ clause:'All', type:'All', status:'All', q:'', preset:'all' }, docPage:1 };
-      if(btn.dataset.view==='revision') extra = { revFilter:{ clause:'All', type:'All', status:'All', q:'' } };
+      if(btn.dataset.view==='revision') extra = { revFilter:{ clause:'All', type:'All', status:'All', q:'' }, revPage:1 };
       if(btn.dataset.view==='approval'){
         const next = pendingQueue()[0];
         if(next) extra = { selectedDoc: next.id };
@@ -1080,7 +1081,11 @@ function viewRevisionDashboard(){
     list = list.filter(d=> d.id.toLowerCase().includes(q) || d.name.toLowerCase().includes(q));
   }
   list = list.slice().sort((a,b)=>(b.lastUpdated||0)-(a.lastUpdated||0));
-  const pageItems = list.slice(0,5);
+  const pageSize = 10;
+  const pages = Math.max(1, Math.ceil(list.length/pageSize));
+  state.revPage = Math.min(state.revPage||1, pages);
+  const start = (state.revPage-1)*pageSize;
+  const pageItems = list.slice(start, start+pageSize);
   if(!state.selectedDoc || !DOCUMENTS.some(x=>x.id===state.selectedDoc)) state.selectedDoc = (list[0] || DOCUMENTS[0] || {}).id;
   const selectedDoc = DOCUMENTS.find(x=>x.id===state.selectedDoc);
 
@@ -1139,7 +1144,14 @@ function viewRevisionDashboard(){
         }).join('') : `<tr><td colspan="7" style="text-align:center; padding:40px 0; color:var(--ink-500);">ไม่มีเอกสารตรงตามเงื่อนไข</td></tr>`}
       </tbody>
     </table></div>
-    <div style="margin-top:14px;"><a class="panel-link" style="cursor:pointer;" data-go="documents">ดูเอกสารทั้งหมด →</a></div>
+    <div class="pagination">
+      <div>แสดง ${pageItems.length?start+1:0}–${start+pageItems.length} จาก ${list.length} รายการ</div>
+      <div class="pg-btns">
+        <button ${state.revPage===1?'disabled':''} id="revPgPrev">‹</button>
+        ${Array.from({length:pages}).map((_,i)=>`<button class="${i+1===state.revPage?'active':''}" data-revpg="${i+1}">${i+1}</button>`).join('')}
+        <button ${state.revPage===pages?'disabled':''} id="revPgNext">›</button>
+      </div>
+    </div>
   </div>
 
   ${selectedDoc ? viewRevisionDetailInline(selectedDoc) : ''}
@@ -1162,13 +1174,17 @@ function attachRevisionDashboardHandlers(){
   if(search) search.addEventListener('input', e=>{
     const cursorPos = e.target.selectionStart;
     state.revFilter.q = e.target.value;
+    state.revPage = 1;
     render();
     const refreshed = document.getElementById('revSearch');
     if(refreshed){ refreshed.focus(); refreshed.setSelectionRange(cursorPos, cursorPos); }
   });
-  const fc = document.getElementById('revFClause'); if(fc) fc.addEventListener('change', e=>{ state.revFilter.clause = e.target.value; render(); });
-  const ft = document.getElementById('revFType'); if(ft) ft.addEventListener('change', e=>{ state.revFilter.type = e.target.value; render(); });
-  const fs = document.getElementById('revFStatus'); if(fs) fs.addEventListener('change', e=>{ state.revFilter.status = e.target.value; render(); });
+  const fc = document.getElementById('revFClause'); if(fc) fc.addEventListener('change', e=>{ state.revFilter.clause = e.target.value; state.revPage=1; render(); });
+  const ft = document.getElementById('revFType'); if(ft) ft.addEventListener('change', e=>{ state.revFilter.type = e.target.value; state.revPage=1; render(); });
+  const fs = document.getElementById('revFStatus'); if(fs) fs.addEventListener('change', e=>{ state.revFilter.status = e.target.value; state.revPage=1; render(); });
+  document.querySelectorAll('[data-revpg]').forEach(b=>b.addEventListener('click', ()=>{ state.revPage=parseInt(b.dataset.revpg,10); render(); }));
+  const revPgPrev = document.getElementById('revPgPrev'); if(revPgPrev) revPgPrev.addEventListener('click', ()=>{ state.revPage=Math.max(1,state.revPage-1); render(); });
+  const revPgNext = document.getElementById('revPgNext'); if(revPgNext) revPgNext.addEventListener('click', ()=>{ state.revPage=state.revPage+1; render(); });
   document.querySelectorAll('[data-open-rev],[data-open-rev-btn]').forEach(elx=>{
     elx.addEventListener('click', e=>{
       e.stopPropagation();
