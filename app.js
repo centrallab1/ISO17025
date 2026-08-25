@@ -91,7 +91,7 @@ const state = {
   calYear: new Date().getFullYear(),
   modal: null, // { mode:'new'|'edit', id }
   queueListOpen: false,
-  approvalTab: 'all',
+  approvalTab: 'active',
   approvalPage: 1,
   approvalTypeFilter: 'All',
   revFilter: { clause:'All', type:'All', status:'All', q:'' },
@@ -183,7 +183,7 @@ function renderNotifPanel(){
       e.stopPropagation();
       notifOpen = false;
       renderNotifPanel();
-      goTo('approval', { selectedDoc: elx.dataset.notifDoc });
+      goTo('approval', { selectedDoc: elx.dataset.notifDoc, approvalTab:'active', approvalPage:1 });
     });
   });
 }
@@ -268,7 +268,8 @@ function wireNav(){
       if(btn.dataset.view==='revision') extra = { revFilter:{ clause:'All', type:'All', status:'All', q:'' }, revPage:1, revisionDetailOpen:false };
       if(btn.dataset.view==='approval'){
         const next = pendingQueue()[0];
-        if(next) extra = { selectedDoc: next.id };
+        extra = { approvalTab:'active', approvalPage:1 };
+        if(next) extra.selectedDoc = next.id;
       }
       goTo(btn.dataset.view, extra);
     });
@@ -916,7 +917,6 @@ function viewDocDetail(docId){
         <div class="kv-row"><div class="k">ผู้อนุมัติ</div><div class="v">${d.approverName || '—'}</div></div>
         <div class="detail-actions">
           ${d.link ? `<a class="btn primary" href="${d.link}" target="_blank" rel="noopener">${ic('link')} Open in SharePoint</a>` : `<button class="btn ghost" disabled>${ic('link')} ยังไม่มีลิงก์</button>`}
-          <button class="btn ghost" data-go="approval">${ic('check')} Approval</button>
           <button class="btn ghost" data-go-revision-history="1">${ic('history')} History</button>
         </div>
         <div class="detail-actions-label">จัดการเอกสาร</div>
@@ -1223,7 +1223,11 @@ function attachRevisionDashboardHandlers(){
   const reviseBtn = document.getElementById('revDetailRevise');
   if(reviseBtn) reviseBtn.addEventListener('click', ()=> openModal({ mode:'revise', id: state.selectedDoc }));
   const approvalBtn = document.getElementById('revDetailApproval');
-  if(approvalBtn) approvalBtn.addEventListener('click', ()=> goTo('approval', { selectedDoc: state.selectedDoc }));
+  if(approvalBtn) approvalBtn.addEventListener('click', ()=>{
+    const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
+    const tab = d && ['อนุมัติแล้ว','ไม่อนุมัติ'].includes(d.approvalStatus) ? 'history' : 'active';
+    goTo('approval', { selectedDoc: state.selectedDoc, approvalTab: tab, approvalPage: 1 });
+  });
   const delBtn = document.getElementById('revDetailDelete');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
@@ -1287,17 +1291,19 @@ function viewApproval(){
   const countReview = DOCUMENTS.filter(x=>x.approvalStatus==='รอทบทวน').length;
   const countWaitApprove = DOCUMENTS.filter(x=>x.approvalStatus==='รออนุมัติ').length;
   const countApproved = DOCUMENTS.filter(x=>x.approvalStatus==='อนุมัติแล้ว').length;
+  const countRejected = DOCUMENTS.filter(x=>x.approvalStatus==='ไม่อนุมัติ').length;
   const total = DOCUMENTS.length;
+  const activeCount = countDraft + countReview + countWaitApprove;
+  const historyCount = countApproved + countRejected;
 
   const tabs = [
-    { key:'all', label:'ทั้งหมด', n: total },
-    { key:'ร่าง', label:'ร่าง', n: countDraft },
-    { key:'รอทบทวน', label:'รอทบทวน', n: countReview },
-    { key:'รออนุมัติ', label:'รออนุมัติ', n: countWaitApprove },
-    { key:'อนุมัติแล้ว', label:'อนุมัติแล้ว', n: countApproved },
+    { key:'active', label:'คำขอที่กำลังดำเนินการ', n: activeCount },
+    { key:'history', label:'ประวัติ', n: historyCount },
   ];
 
-  let filtered = state.approvalTab==='all' ? DOCUMENTS.slice() : DOCUMENTS.filter(x=> state.approvalTab==='ร่าง' ? (x.approvalStatus==='ร่าง'||!x.approvalStatus) : x.approvalStatus===state.approvalTab);
+  let filtered = state.approvalTab==='history'
+    ? DOCUMENTS.filter(x=> x.approvalStatus==='อนุมัติแล้ว' || x.approvalStatus==='ไม่อนุมัติ')
+    : DOCUMENTS.filter(x=> !x.approvalStatus || x.approvalStatus==='ร่าง' || x.approvalStatus==='รอทบทวน' || x.approvalStatus==='รออนุมัติ');
   if(state.approvalTypeFilter!=='All') filtered = filtered.filter(x=>docTypeCode(x)===state.approvalTypeFilter);
   filtered = filtered.slice().sort((a,b)=> (b.lastUpdated||0)-(a.lastUpdated||0));
 
@@ -1399,6 +1405,15 @@ function viewApprovalDetail(){
       <button class="btn ghost" data-go="docdetail">${ic('doc')} ดูรายละเอียดเอกสาร</button>
     </div>
 
+    <div class="grid grid-3" style="margin-bottom:18px;">
+      <div class="side-box"><div class="side-box-title">ผู้จัดทำ / ผู้ร่าง</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.preparedBy || '—'}</div></div>
+      <div class="side-box"><div class="side-box-title">ผู้ทบทวน</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.reviewerName || '—'}</div></div>
+      <div class="side-box"><div class="side-box-title">ผู้อนุมัติ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.approverName || d.approvedBy || '—'}</div></div>
+      <div class="side-box"><div class="side-box-title">วันที่จัดทำ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.createdDate ? fmtDate(d.createdDate) : '—'}</div></div>
+      <div class="side-box"><div class="side-box-title">วันที่ประกาศใช้</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.effectiveDate ? fmtDate(d.effectiveDate) : '—'}</div></div>
+      <div class="side-box"><div class="side-box-title">อัปเดตล่าสุด</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${fmtDateTime(d.lastUpdated)}</div></div>
+    </div>
+
     <div class="approval-flow">
       ${steps.map((s,i)=>`
         ${i>0?`<div class="af-line ${steps[i-1].cls==='done'?'done':''}"></div>`:''}
@@ -1477,10 +1492,8 @@ function attachApprovalHandlers(){
       d.approvedAt = now;
       d.approvedComment = comment || '';
     }
-    // keep the document visible & selected after its status changes — switch
-    // the active tab to match, so it doesn't seem to vanish from the table
-    if(state.approvalTab!=='all' && state.approvalTab!==d.approvalStatus){
-      state.approvalTab = d.approvalStatus;
+    if(['อนุมัติแล้ว','ไม่อนุมัติ'].includes(d.approvalStatus)){
+      state.approvalTab = 'history';
       state.approvalPage = 1;
     }
     render();
@@ -1499,10 +1512,8 @@ function attachApprovalHandlers(){
     d.comments = d.comments || [];
     d.comments.push({ by:actor, text:comment, time: Date.now() });
     d.approvedBy = null; d.approvedAt = null; d.approvedComment = null;
-    if(state.approvalTab!=='all' && state.approvalTab!==d.approvalStatus){
-      state.approvalTab = d.approvalStatus;
-      state.approvalPage = 1;
-    }
+    state.approvalTab = 'history';
+    state.approvalPage = 1;
     render();
     await persistDocs();
   });
