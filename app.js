@@ -44,6 +44,8 @@ async function loadDocs(){
       if(d.approvedAt===undefined){ d.approvedAt=null; needsMigration = true; }
       if(d.approvedComment===undefined){ d.approvedComment=null; needsMigration = true; }
       if(d.reviewCycleDays===undefined){ d.reviewCycleDays=DEFAULT_REVIEW_CYCLE_DAYS; needsMigration = true; }
+      if(d.lastReviewedAt===undefined){ d.lastReviewedAt=null; needsMigration = true; }
+      if(d.lastReviewedBy===undefined){ d.lastReviewedBy=''; needsMigration = true; }
     });
     DOCS_LOADED = true;
     DOCS_ERROR = null;
@@ -94,6 +96,7 @@ const state = {
   approvalTypeFilter: 'All',
   revFilter: { clause:'All', type:'All', status:'All', q:'' },
   revPage: 1,
+  revisionDetailOpen: false,
 };
 
 const ICONS = {
@@ -262,7 +265,7 @@ function wireNav(){
     btn.addEventListener('click', ()=>{
       let extra = {};
       if(btn.dataset.view==='documents') extra = { docFilter:{ clause:'All', type:'All', status:'All', q:'', preset:'all' }, docPage:1 };
-      if(btn.dataset.view==='revision') extra = { revFilter:{ clause:'All', type:'All', status:'All', q:'' }, revPage:1 };
+      if(btn.dataset.view==='revision') extra = { revFilter:{ clause:'All', type:'All', status:'All', q:'' }, revPage:1, revisionDetailOpen:false };
       if(btn.dataset.view==='approval'){
         const next = pendingQueue()[0];
         if(next) extra = { selectedDoc: next.id };
@@ -940,7 +943,7 @@ function attachDetailActionHandlers(){
   const reviseBtn = document.getElementById('btnDetailRevise');
   if(reviseBtn) reviseBtn.addEventListener('click', ()=> openModal({ mode:'revise', id: state.selectedDoc }));
   const historyBtn = document.querySelector('[data-go-revision-history]');
-  if(historyBtn) historyBtn.addEventListener('click', ()=> goTo('revision', { selectedDoc: state.selectedDoc }));
+  if(historyBtn) historyBtn.addEventListener('click', ()=> goTo('revision', { selectedDoc: state.selectedDoc, revisionDetailOpen: true }));
   const delBtn = document.getElementById('btnDetailDelete');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
@@ -986,6 +989,9 @@ function groupHistoryByRequest(d){
 // classifies a comment/event into an icon + color + short Thai title for
 // the colored-icon timeline (revision history detail page + activity feed)
 function classifyEvent(text){
+  if(/ทบทวนประจำปี/.test(text)){
+    return { icon:'check', bg:'--green-600', title:'ยืนยันการทบทวนประจำปี' };
+  }
   if(/^ไม่อนุมัติ|ไม่อนุมัติ$/.test(text) || (/ไม่อนุมัติ/.test(text) && !/→\s*อนุมัติแล้ว/.test(text))){
     return { icon:'alert', bg:'--red-600', title:'ปฏิเสธเอกสาร' };
   }
@@ -1010,7 +1016,7 @@ function eitem(opts){
   </div>`;
 }
 
-function viewRevisionDetailInline(d){
+function viewRevisionDetailInline(d, standalone){
   const linkBtn = d.link
     ? `<a class="btn ghost" href="${d.link}" target="_blank" rel="noopener">${ic('link')} เปิดใน SharePoint</a>`
     : `<button class="btn ghost" disabled>${ic('link')} ยังไม่มีลิงก์</button>`;
@@ -1032,6 +1038,7 @@ function viewRevisionDetailInline(d){
   ];
 
   return `
+  ${standalone ? `<div class="crumb" data-back="1">‹ กลับไปที่รายการ</div>` : ''}
   <div class="panel">
     <div class="panel-head">
       <div>
@@ -1054,6 +1061,19 @@ function viewRevisionDetailInline(d){
       <div class="side-box"><div class="side-box-title">ผู้จัดทำ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.preparedBy || '—'}</div></div>
       <div class="side-box"><div class="side-box-title">ผู้ทบทวน</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.reviewerName || '—'}</div></div>
       <div class="side-box"><div class="side-box-title">ผู้อนุมัติ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.approverName || d.approvedBy || '—'}</div></div>
+    </div>
+
+    <div class="side-box" style="border-color:var(--green-600); background:var(--green-50); margin-bottom:18px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+        <div>
+          <div style="font-size:12.5px; font-weight:800; color:var(--green-600);">การทบทวนประจำปี (ยืนยันโดยไม่ต้องแก้ไขเอกสาร)</div>
+          <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">${d.lastReviewedAt ? `ทบทวนล่าสุดโดย ${d.lastReviewedBy||'ไม่ระบุ'} เมื่อ ${fmtDate(d.lastReviewedAt)}` : 'ยังไม่เคยยืนยันการทบทวนประจำปีสำหรับเอกสารนี้'}</div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <input id="revReviewerName" placeholder="ชื่อผู้ทบทวน" style="border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px; width:160px;">
+          <button class="btn success" id="btnConfirmReview">${ic('check')} ยืนยันทบทวนแล้ว</button>
+        </div>
+      </div>
     </div>
 
     ${items.join('')}
@@ -1088,6 +1108,12 @@ function viewRevisionDashboard(){
   const pageItems = list.slice(start, start+pageSize);
   if(!state.selectedDoc || !DOCUMENTS.some(x=>x.id===state.selectedDoc)) state.selectedDoc = (list[0] || DOCUMENTS[0] || {}).id;
   const selectedDoc = DOCUMENTS.find(x=>x.id===state.selectedDoc);
+
+  // "page 2" of Revision: showing one document's detail replaces the list
+  // entirely (not appended below it) — navigate back to return to the list.
+  if(state.revisionDetailOpen && selectedDoc){
+    return viewRevisionDetailInline(selectedDoc, true);
+  }
 
   const clauseOpts = [['All','ทุกข้อกำหนด'], ['','ไม่ระบุ'], ...CLAUSES];
   const typeOpts = [['All','ทุกประเภท'], ...Object.entries(DOC_TYPE_MAP)];
@@ -1154,7 +1180,7 @@ function viewRevisionDashboard(){
     </div>
   </div>
 
-  ${selectedDoc ? viewRevisionDetailInline(selectedDoc) : ''}
+
 
   <div class="panel">
     <div class="panel-head"><div class="panel-title">กิจกรรมล่าสุด (Latest Activity)</div><a class="panel-link" style="cursor:pointer;" data-go="audittrail">ดูทั้งหมด →</a></div>
@@ -1189,8 +1215,7 @@ function attachRevisionDashboardHandlers(){
     elx.addEventListener('click', e=>{
       e.stopPropagation();
       const id = elx.dataset.openRev || elx.dataset.openRevBtn;
-      state.selectedDoc = id;
-      render();
+      goTo('revision', { selectedDoc: id, revisionDetailOpen: true });
     });
   });
   const editBtn = document.getElementById('revDetailEdit');
@@ -1206,8 +1231,25 @@ function attachRevisionDashboardHandlers(){
     if(!confirm(`ลบเอกสาร "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
     DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
     state.selectedDoc = null;
+    state.revisionDetailOpen = false;
     await persistDocs();
+    goBack();
+  });
+  const confirmReviewBtn = document.getElementById('btnConfirmReview');
+  if(confirmReviewBtn) confirmReviewBtn.addEventListener('click', async ()=>{
+    const nameInput = document.getElementById('revReviewerName');
+    const actor = nameInput ? nameInput.value.trim() : '';
+    if(!actor){ alert('กรอกชื่อผู้ทบทวนก่อน'); return; }
+    const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
+    if(!d) return;
+    const now = Date.now();
+    d.lastReviewedAt = now;
+    d.lastReviewedBy = actor;
+    d.comments = d.comments || [];
+    d.comments.push({ by:actor, text:'ทบทวนประจำปี — ไม่มีการแก้ไขเอกสาร', time: now });
+    d.lastUpdated = now;
     render();
+    await persistDocs();
   });
 }
 
