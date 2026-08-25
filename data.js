@@ -78,7 +78,7 @@ const DOC_TYPE_MAP = {
 };
 function docTypeCode(d){
   const src = (d.id||'') + ' ' + (d.name||'');
-  const m = src.match(/RDI-([A-Z]+)-/);
+  const m = src.match(/(?:RDI|MPIR)-([A-Z]+)-/);
   if(m && DOC_TYPE_MAP[m[1]]) return m[1];
   return 'อื่นๆ';
 }
@@ -136,9 +136,40 @@ function suggestClause(name){
 
 const SUPPORT_KEYWORDS = ['ใบรับรอง', 'ประกาศ', 'มาตรฐานอ้างอิง', 'ใบเซอร์', 'ใบประกาศ'];
 function isLikelySupportDoc(id, name){
-  if(id && /^RDI-LS/i.test(id)) return true;
+  if(id && /^(RDI|MPIR)-LS/i.test(id)) return true;
   if(!name) return false;
   return SUPPORT_KEYWORDS.some(kw=> name.includes(kw));
+}
+
+// Auto-number a new document within its <PREFIX>-#### series (checking both
+// the old RDI- ids and the new MPIR- ids so numbers never collide across the
+// transition), filling the lowest unused/missing number first — e.g. if 050
+// was skipped and 054 already exists, the next auto-issued number is 050,
+// not 055 — matching how the lab's paper register has always numbered
+// documents. New documents are issued directly in the new MPIR-xx-###-00
+// format; existing RDI- documents convert to this format when they go
+// through an approved revision request (see app.js).
+function nextAvailableNumber(prefix){
+  const re = new RegExp('^(?:RDI|MPIR)-'+prefix+'-(\\d+)', 'i');
+  const nums = [];
+  DOCUMENTS.forEach(d=>{
+    const m = (d.id||'').match(re);
+    if(m) nums.push(parseInt(m[1],10));
+  });
+  const used = new Set(nums);
+  let n = 1;
+  while(used.has(n)) n++;
+  return `MPIR-${prefix}-${String(n).padStart(3,'0')}-00`;
+}
+
+// Converts an old RDI-xx-### id to the new MPIR-xx-###-rr format, reusing
+// the existing document number and stamping the current revision.
+function toMpirId(oldId, typeCode, revNumber){
+  const m = (oldId||'').match(/(\d+)(?!.*\d)/);
+  const num = m ? parseInt(m[1],10) : 0;
+  const revInt = parseInt(revNumber,10);
+  const revStr = isNaN(revInt) ? '00' : String(revInt).padStart(2,'0');
+  return `MPIR-${typeCode}-${String(num).padStart(3,'0')}-${revStr}`;
 }
 
 // "note" = document status as used across the lab's document register
