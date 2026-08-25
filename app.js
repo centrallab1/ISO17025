@@ -92,6 +92,7 @@ const state = {
   modal: null, // { mode:'new'|'edit', id }
   queueListOpen: false,
   approvalTab: 'active',
+  approvalDetailOpen: false,
   approvalPage: 1,
   approvalTypeFilter: 'All',
   revFilter: { clause:'All', type:'All', status:'All', q:'' },
@@ -167,7 +168,7 @@ function renderNotifPanel(){
   wrap.innerHTML = `
     <div class="notif-head">คำขอรอดำเนินการ (${queue.length})</div>
     ${queue.length ? queue.map(d=>{
-      const label = d.lastRequestType==='new' ? 'คำขอเอกสารใหม่' : d.lastRequestType==='revision' ? `คำขอปรับปรุง Rev.${d.lastRequestFrom||'-'} → ${d.rev||'-'}` : 'รอดำเนินการ';
+      const label = d.lastRequestType==='new' ? 'คำขอเอกสารใหม่' : d.lastRequestType==='revision' ? `คำขอปรับปรุง Rev.${d.lastRequestFrom||'-'} → ${d.rev||'-'}` : d.lastRequestType==='review' ? 'คำขอทบทวนประจำปี' : 'รอดำเนินการ';
       return `
       <div class="notif-item" data-notif-doc="${d.id}">
         <div class="notif-icon">${ic('clock')}</div>
@@ -183,7 +184,7 @@ function renderNotifPanel(){
       e.stopPropagation();
       notifOpen = false;
       renderNotifPanel();
-      goTo('approval', { selectedDoc: elx.dataset.notifDoc, approvalTab:'active', approvalPage:1 });
+      goTo('approval', { selectedDoc: elx.dataset.notifDoc, approvalTab:'active', approvalPage:1, approvalDetailOpen:true });
     });
   });
 }
@@ -268,7 +269,7 @@ function wireNav(){
       if(btn.dataset.view==='revision') extra = { revFilter:{ clause:'All', type:'All', status:'All', q:'' }, revPage:1, revisionDetailOpen:false };
       if(btn.dataset.view==='approval'){
         const next = pendingQueue()[0];
-        extra = { approvalTab:'active', approvalPage:1 };
+        extra = { approvalTab:'active', approvalPage:1, approvalDetailOpen:false };
         if(next) extra.selectedDoc = next.id;
       }
       goTo(btn.dataset.view, extra);
@@ -989,8 +990,8 @@ function groupHistoryByRequest(d){
 // classifies a comment/event into an icon + color + short Thai title for
 // the colored-icon timeline (revision history detail page + activity feed)
 function classifyEvent(text){
-  if(/ทบทวนประจำปี/.test(text)){
-    return { icon:'check', bg:'--green-600', title:'ยืนยันการทบทวนประจำปี' };
+  if(/ขอทบทวนประจำปี/.test(text)){
+    return { icon:'send', bg:'--amber-600', title:'ขอทบทวนประจำปี' };
   }
   if(/^ไม่อนุมัติ|ไม่อนุมัติ$/.test(text) || (/ไม่อนุมัติ/.test(text) && !/→\s*อนุมัติแล้ว/.test(text))){
     return { icon:'alert', bg:'--red-600', title:'ปฏิเสธเอกสาร' };
@@ -1023,6 +1024,7 @@ function viewRevisionDetailInline(d, standalone){
   const nrd = nextReviewDate(d);
   const days = daysUntil(nrd);
   const isOverdue = days < 0;
+  const reviewPending = d.lastRequestType==='review' && ['ร่าง','รอทบทวน','รออนุมัติ'].includes(d.approvalStatus);
 
   const lastComment = (d.comments||[])[(d.comments||[]).length-1];
   const items = [
@@ -1066,12 +1068,18 @@ function viewRevisionDetailInline(d, standalone){
     <div class="side-box" style="border-color:var(--green-600); background:var(--green-50); margin-bottom:18px;">
       <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
         <div>
-          <div style="font-size:12.5px; font-weight:800; color:var(--green-600);">การทบทวนประจำปี (ยืนยันโดยไม่ต้องแก้ไขเอกสาร)</div>
-          <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">${d.lastReviewedAt ? `ทบทวนล่าสุดโดย ${d.lastReviewedBy||'ไม่ระบุ'} เมื่อ ${fmtDate(d.lastReviewedAt)}` : 'ยังไม่เคยยืนยันการทบทวนประจำปีสำหรับเอกสารนี้'}</div>
+          <div style="font-size:12.5px; font-weight:800; color:var(--green-600);">การทบทวนประจำปี (ผ่านขั้นตอนอนุมัติเหมือนคำขอเอกสารใหม่ ตาม SOP)</div>
+          <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">
+            ${reviewPending
+              ? `มีคำขอทบทวนประจำปีกำลังดำเนินการอยู่ (สถานะ: ${d.approvalStatus})`
+              : d.lastReviewedAt ? `ทบทวนล่าสุดโดย ${d.lastReviewedBy||'ไม่ระบุ'} เมื่อ ${fmtDate(d.lastReviewedAt)}` : 'ยังไม่เคยทบทวนประจำปีสำหรับเอกสารนี้'}
+          </div>
         </div>
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-          <input id="revReviewerName" placeholder="ชื่อผู้ทบทวน" style="border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px; width:160px;">
-          <button class="btn success" id="btnConfirmReview">${ic('check')} ยืนยันทบทวนแล้ว</button>
+          ${reviewPending
+            ? `<button class="btn ghost" id="btnGoReviewApproval">${ic('check')} ไปที่ Approval</button>`
+            : `<input id="revReviewerName" placeholder="ชื่อผู้ขอทบทวน" style="border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px; width:160px;">
+               <button class="btn success" id="btnConfirmReview">${ic('send')} ขอทบทวนประจำปี</button>`}
         </div>
       </div>
     </div>
@@ -1226,7 +1234,7 @@ function attachRevisionDashboardHandlers(){
   if(approvalBtn) approvalBtn.addEventListener('click', ()=>{
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
     const tab = d && ['อนุมัติแล้ว','ไม่อนุมัติ'].includes(d.approvalStatus) ? 'history' : 'active';
-    goTo('approval', { selectedDoc: state.selectedDoc, approvalTab: tab, approvalPage: 1 });
+    goTo('approval', { selectedDoc: state.selectedDoc, approvalTab: tab, approvalPage: 1, approvalDetailOpen: true });
   });
   const delBtn = document.getElementById('revDetailDelete');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
@@ -1243,17 +1251,25 @@ function attachRevisionDashboardHandlers(){
   if(confirmReviewBtn) confirmReviewBtn.addEventListener('click', async ()=>{
     const nameInput = document.getElementById('revReviewerName');
     const actor = nameInput ? nameInput.value.trim() : '';
-    if(!actor){ alert('กรอกชื่อผู้ทบทวนก่อน'); return; }
+    if(!actor){ alert('กรอกชื่อผู้ขอทบทวนก่อน'); return; }
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
     if(!d) return;
     const now = Date.now();
-    d.lastReviewedAt = now;
-    d.lastReviewedBy = actor;
+    // send it through the same approval workflow as a revision request —
+    // the review isn't official until it's approved through all steps
+    d.approvalStatus = 'รอทบทวน';
+    d.lastRequestType = 'review';
+    d.lastRequestFrom = d.rev || null;
+    d.approvedBy = null; d.approvedAt = null; d.approvedComment = null;
     d.comments = d.comments || [];
-    d.comments.push({ by:actor, text:'ทบทวนประจำปี — ไม่มีการแก้ไขเอกสาร', time: now });
+    d.comments.push({ by:actor, text:'ขอทบทวนประจำปี — ไม่มีการแก้ไขเอกสาร', time: now });
     d.lastUpdated = now;
-    render();
     await persistDocs();
+    goTo('approval', { selectedDoc: d.id, approvalTab:'active', approvalPage:1, approvalDetailOpen:true });
+  });
+  const goReviewApprovalBtn = document.getElementById('btnGoReviewApproval');
+  if(goReviewApprovalBtn) goReviewApprovalBtn.addEventListener('click', ()=>{
+    goTo('approval', { selectedDoc: state.selectedDoc, approvalTab:'active', approvalPage:1, approvalDetailOpen:true });
   });
 }
 
@@ -1286,6 +1302,13 @@ function initials(name){
 function viewApproval(){
   const queue = pendingQueue();
   if(!state.selectedDoc) state.selectedDoc = (queue[0] || DOCUMENTS[0] || {}).id;
+
+  // "page 2" of Approval: showing one document's detail replaces the list
+  // entirely (not appended below it) — navigate back to return to the list.
+  if(state.approvalDetailOpen){
+    const selectedDoc = DOCUMENTS.find(x=>x.id===state.selectedDoc);
+    if(selectedDoc) return `<div class="crumb" data-back="1">‹ กลับไปที่รายการ</div>${viewApprovalDetail()}`;
+  }
 
   const countDraft = DOCUMENTS.filter(x=>x.approvalStatus==='ร่าง'||!x.approvalStatus).length;
   const countReview = DOCUMENTS.filter(x=>x.approvalStatus==='รอทบทวน').length;
@@ -1370,8 +1393,6 @@ function viewApproval(){
       </div>
     </div>
   </div>
-
-  ${viewApprovalDetail()}
   `;
 }
 
@@ -1393,7 +1414,7 @@ function viewApprovalDetail(){
   const approvedBy = d.approvedBy || (lastComment ? lastComment.by : '');
   const approvedAt = d.approvedAt || (lastComment ? lastComment.time : d.lastUpdated);
   const approvedComment = d.approvedComment !== undefined ? d.approvedComment : (lastComment ? lastComment.text : '');
-  const requestLabel = d.lastRequestType==='new' ? 'เอกสารใหม่' : d.lastRequestType==='revision' ? `ปรับปรุง (Rev.${d.lastRequestFrom||'-'} → ${d.rev||'-'})` : null;
+  const requestLabel = d.lastRequestType==='new' ? 'เอกสารใหม่' : d.lastRequestType==='revision' ? `ปรับปรุง (Rev.${d.lastRequestFrom||'-'} → ${d.rev||'-'})` : d.lastRequestType==='review' ? 'ทบทวนประจำปี (ไม่มีการแก้ไข)' : null;
 
   return `
   <div class="panel">
@@ -1466,7 +1487,7 @@ function attachApprovalHandlers(){
   const pgPrev = document.getElementById('apPgPrev'); if(pgPrev) pgPrev.addEventListener('click', ()=>{ state.approvalPage=Math.max(1,state.approvalPage-1); render(); });
   const pgNext = document.getElementById('apPgNext'); if(pgNext) pgNext.addEventListener('click', ()=>{ state.approvalPage=state.approvalPage+1; render(); });
   document.querySelectorAll('[data-select-approval]').forEach(row=>{
-    row.addEventListener('click', ()=>{ state.selectedDoc = row.dataset.selectApproval; render(); });
+    row.addEventListener('click', ()=>{ goTo('approval', { selectedDoc: row.dataset.selectApproval, approvalDetailOpen: true }); });
   });
 
   const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
@@ -1491,6 +1512,10 @@ function attachApprovalHandlers(){
       d.approvedBy = actor;
       d.approvedAt = now;
       d.approvedComment = comment || '';
+      if(d.lastRequestType==='review'){
+        d.lastReviewedAt = now;
+        d.lastReviewedBy = actor;
+      }
     }
     if(['อนุมัติแล้ว','ไม่อนุมัติ'].includes(d.approvalStatus)){
       state.approvalTab = 'history';
