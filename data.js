@@ -77,7 +77,7 @@ const DOC_TYPE_MAP = {
   'LS': 'เอกสารสนับสนุน (Support)',
 };
 function docTypeCode(d){
-  const src = (d.id||'') + ' ' + (d.name||'');
+  const src = String((d && d.id) || '') + ' ' + String((d && d.name) || '');
   const m = src.match(/(?:RDI|MPIR)-([A-Z]+)-/);
   if(m && DOC_TYPE_MAP[m[1]]) return m[1];
   return 'อื่นๆ';
@@ -136,9 +136,9 @@ function suggestClause(name){
 
 const SUPPORT_KEYWORDS = ['ใบรับรอง', 'ประกาศ', 'มาตรฐานอ้างอิง', 'ใบเซอร์', 'ใบประกาศ'];
 function isLikelySupportDoc(id, name){
-  if(id && /^(RDI|MPIR)-LS/i.test(id)) return true;
+  if(id && /^(RDI|MPIR)-LS/i.test(String(id))) return true;
   if(!name) return false;
-  return SUPPORT_KEYWORDS.some(kw=> name.includes(kw));
+  return SUPPORT_KEYWORDS.some(kw=> String(name).includes(kw));
 }
 
 // Auto-number a new document within its <PREFIX>-#### series (checking both
@@ -153,7 +153,8 @@ function nextAvailableNumber(prefix){
   const re = new RegExp('^(?:RDI|MPIR)-'+prefix+'-(\\d+)', 'i');
   const nums = [];
   DOCUMENTS.forEach(d=>{
-    const m = (d.id||'').match(re);
+    const idStr = String(d && d.id || '');
+    const m = idStr.match(re);
     if(m) nums.push(parseInt(m[1],10));
   });
   const used = new Set(nums);
