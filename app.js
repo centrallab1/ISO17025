@@ -93,11 +93,13 @@ const state = {
   queueListOpen: false,
   approvalTab: 'active',
   approvalDetailOpen: false,
+  approvalCommentsExpanded: false,
   approvalPage: 1,
   approvalTypeFilter: 'All',
   revFilter: { clause:'All', type:'All', status:'All', q:'' },
   revPage: 1,
   revisionDetailOpen: false,
+  revisionTimelineExpanded: false,
 };
 
 const ICONS = {
@@ -184,7 +186,7 @@ function renderNotifPanel(){
       e.stopPropagation();
       notifOpen = false;
       renderNotifPanel();
-      goTo('approval', { selectedDoc: elx.dataset.notifDoc, approvalTab:'active', approvalPage:1, approvalDetailOpen:true });
+      goTo('approval', { selectedDoc: elx.dataset.notifDoc, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false });
     });
   });
 }
@@ -675,6 +677,7 @@ function docModal(){
 
   const editing = mode==='edit';
   const revising = mode==='revise';
+  const creatingNew = mode==='new';
   const d = (editing||revising) ? DOCUMENTS.find(x=>x.id===state.modal.id) : {
     id:'', name:'', clause: state.modal.presetClause || '', link:'', note: state.modal.presetNote || 'ว่าง', rev:'0', preparedBy:'', reviewerName:'', approverName:'',
   };
@@ -689,8 +692,18 @@ function docModal(){
       <div class="modal-head"><div class="modal-title">${title}</div><button class="modal-close" id="modalCloseBtn">✕</button></div>
       <div class="modal-body">
         ${revising ? `<div class="field"><label>Rev. ปัจจุบัน</label><input value="${d.rev || '—'}" disabled></div>` : ''}
+        ${creatingNew ? `<div class="field"><label>ประเภทเอกสาร</label>
+          <select id="mfTypePrefix">
+            <option value="">— เลือกประเภท —</option>
+            ${Object.entries(DOC_TYPE_MAP).map(([k,v])=>`<option value="${k}">${k} — ${v}</option>`).join('')}
+          </select></div>` : ''}
         <div class="field"><label>รหัสเอกสาร (Document ID)</label>
-          <input id="mfId" value="${d.id}" placeholder="เช่น RDI-LF-074" ${(editing||revising)?'disabled':''}></div>
+          <div style="display:flex; gap:8px;">
+            <input id="mfId" value="${d.id}" placeholder="เช่น RDI-LF-074" style="flex:1;" ${(editing||revising)?'disabled':''}>
+            ${creatingNew ? `<button type="button" class="btn ghost" id="btnAutoNumber" style="flex-shrink:0; white-space:nowrap;">ออกเลขอัตโนมัติ</button>` : ''}
+          </div>
+          ${creatingNew ? `<div style="font-size:11px; color:var(--ink-500); margin-top:5px;">เลือกประเภทด้านบนเพื่อออกเลขอัตโนมัติ — ระบบจะเติมเลขที่ยังว่างอยู่ก่อนเสมอ (เช่น ถ้า 050 ยังไม่มีแต่ 054 มีแล้ว จะออกเลข 050 ให้ก่อน)</div>` : ''}
+        </div>
         <div class="field"><label>ชื่อเอกสาร</label>
           <input id="mfName" value="${cleanName(d).replace(/"/g,'&quot;')}" placeholder="ชื่อเอกสาร"></div>
         <div class="field"><label>ข้อกำหนด ISO 17025</label>
@@ -706,6 +719,7 @@ function docModal(){
         <div class="field"><label>${revising ? 'Rev. ใหม่ (เรียงต่ออัตโนมัติ แก้ไขได้)' : 'Rev.'}</label>
           <input id="mfRev" value="${suggestedRev}" placeholder="0"></div>
         ${revising ? `<div class="field"><label>ชื่อผู้ขอปรับปรุง</label><input id="mfActor" placeholder="ชื่อ-นามสกุล"></div>` : ''}
+        ${creatingNew ? `<div class="field"><label>ชื่อผู้จัดทำ / ผู้ขอขึ้นทะเบียน</label><input id="mfActor" placeholder="ชื่อ-นามสกุล"></div>` : ''}
         ${editing ? `
         <div class="field"><label>วันที่จัดทำ</label><input id="mfCreated" type="date" value="${d.createdDate ? new Date(d.createdDate).toISOString().slice(0,10) : ''}"></div>
         <div class="field"><label>วันที่ประกาศใช้</label><input id="mfEffective" type="date" value="${d.effectiveDate ? new Date(d.effectiveDate).toISOString().slice(0,10) : ''}"></div>
@@ -774,6 +788,17 @@ function wireModalControls(){
   if(idInput) idInput.addEventListener('input', refreshSuggestions);
   refreshSuggestions();
 
+  const typePrefixSel = document.getElementById('mfTypePrefix');
+  const autoNumBtn = document.getElementById('btnAutoNumber');
+  function doAutoNumber(){
+    const prefix = typePrefixSel ? typePrefixSel.value : '';
+    if(!prefix) return;
+    if(idInput) idInput.value = nextAvailableNumber(prefix);
+    refreshSuggestions();
+  }
+  if(typePrefixSel) typePrefixSel.addEventListener('change', doAutoNumber);
+  if(autoNumBtn) autoNumBtn.addEventListener('click', doAutoNumber);
+
   const saveBtn = document.getElementById('modalSaveBtn');
   if(!saveBtn) return;
   saveBtn.addEventListener('click', async ()=>{
@@ -789,10 +814,13 @@ function wireModalControls(){
 
     if(mode==='new'){
       if(DOCUMENTS.some(x=>x.id===id)){ errEl.textContent = 'รหัสเอกสารนี้มีอยู่แล้ว'; errEl.style.display='block'; return; }
+      const actor = document.getElementById('mfActor').value.trim();
+      if(!actor){ errEl.textContent = 'กรอกชื่อผู้จัดทำก่อน'; errEl.style.display='block'; return; }
+      const now = Date.now();
       DOCUMENTS.push({
         id, name, clause, link, note, rev: rev || '0',
-        approvalStatus:'ร่าง', reviewerName:'', approverName:'', preparedBy:'',
-        comments:[], lastUpdated: Date.now(), createdDate:null, effectiveDate:null,
+        approvalStatus:'ร่าง', reviewerName:'', approverName:'', preparedBy:actor,
+        comments:[{ by:actor, text:'ขอขึ้นทะเบียนเอกสารใหม่', time: now }], lastUpdated: now, createdDate: now, effectiveDate:null,
         approvedBy:null, approvedAt:null, approvedComment:null, lastRequestType:'new',
       });
     } else if(mode==='revise'){
@@ -944,7 +972,7 @@ function attachDetailActionHandlers(){
   const reviseBtn = document.getElementById('btnDetailRevise');
   if(reviseBtn) reviseBtn.addEventListener('click', ()=> openModal({ mode:'revise', id: state.selectedDoc }));
   const historyBtn = document.querySelector('[data-go-revision-history]');
-  if(historyBtn) historyBtn.addEventListener('click', ()=> goTo('revision', { selectedDoc: state.selectedDoc, revisionDetailOpen: true }));
+  if(historyBtn) historyBtn.addEventListener('click', ()=> goTo('revision', { selectedDoc: state.selectedDoc, revisionDetailOpen: true, revisionTimelineExpanded: false }));
   const delBtn = document.getElementById('btnDetailDelete');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
@@ -990,6 +1018,9 @@ function groupHistoryByRequest(d){
 // classifies a comment/event into an icon + color + short Thai title for
 // the colored-icon timeline (revision history detail page + activity feed)
 function classifyEvent(text){
+  if(/ขอขึ้นทะเบียนเอกสารใหม่/.test(text)){
+    return { icon:'plus', bg:'--blue-600', title:'ขอขึ้นทะเบียนเอกสารใหม่' };
+  }
   if(/ขอทบทวนประจำปี/.test(text)){
     return { icon:'send', bg:'--amber-600', title:'ขอทบทวนประจำปี' };
   }
@@ -1038,6 +1069,7 @@ function viewRevisionDetailInline(d, standalone){
     ...(d.createdDate ? [eitem({ icon:'send', bg:'--amber-600', title:'จัดทำเอกสาร', time:d.createdDate,
       detail:'สร้างเอกสารเวอร์ชันแรก', actor:d.preparedBy || '' })] : []),
   ];
+  const shownItems = state.revisionTimelineExpanded ? items : items.slice(0,5);
 
   return `
   ${standalone ? `<div class="crumb" data-back="1">‹ กลับไปที่รายการ</div>` : ''}
@@ -1084,7 +1116,11 @@ function viewRevisionDetailInline(d, standalone){
       </div>
     </div>
 
-    ${items.join('')}
+    <div class="panel-head" style="margin-bottom:10px;">
+      <div class="panel-title" style="margin:0;">ไทม์ไลน์ ${items.length ? `<span style="color:var(--ink-500); font-weight:600; font-size:12px;">(${items.length})</span>` : ''}</div>
+      ${items.length > 5 ? `<button class="panel-link" id="btnToggleRevTimeline" style="cursor:pointer;">${state.revisionTimelineExpanded ? 'ย่อ ▲' : `แสดงทั้งหมด (${items.length}) ▼`}</button>` : ''}
+    </div>
+    ${shownItems.join('')}
   </div>`;
 }
 
@@ -1223,9 +1259,11 @@ function attachRevisionDashboardHandlers(){
     elx.addEventListener('click', e=>{
       e.stopPropagation();
       const id = elx.dataset.openRev || elx.dataset.openRevBtn;
-      goTo('revision', { selectedDoc: id, revisionDetailOpen: true });
+      goTo('revision', { selectedDoc: id, revisionDetailOpen: true, revisionTimelineExpanded: false });
     });
   });
+  const toggleTimelineBtn = document.getElementById('btnToggleRevTimeline');
+  if(toggleTimelineBtn) toggleTimelineBtn.addEventListener('click', ()=>{ state.revisionTimelineExpanded = !state.revisionTimelineExpanded; render(); });
   const editBtn = document.getElementById('revDetailEdit');
   if(editBtn) editBtn.addEventListener('click', ()=> openModal({ mode:'edit', id: state.selectedDoc }));
   const reviseBtn = document.getElementById('revDetailRevise');
@@ -1234,7 +1272,7 @@ function attachRevisionDashboardHandlers(){
   if(approvalBtn) approvalBtn.addEventListener('click', ()=>{
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
     const tab = d && ['อนุมัติแล้ว','ไม่อนุมัติ'].includes(d.approvalStatus) ? 'history' : 'active';
-    goTo('approval', { selectedDoc: state.selectedDoc, approvalTab: tab, approvalPage: 1, approvalDetailOpen: true });
+    goTo('approval', { selectedDoc: state.selectedDoc, approvalTab: tab, approvalPage: 1, approvalDetailOpen: true, approvalCommentsExpanded: false });
   });
   const delBtn = document.getElementById('revDetailDelete');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
@@ -1265,11 +1303,11 @@ function attachRevisionDashboardHandlers(){
     d.comments.push({ by:actor, text:'ขอทบทวนประจำปี — ไม่มีการแก้ไขเอกสาร', time: now });
     d.lastUpdated = now;
     await persistDocs();
-    goTo('approval', { selectedDoc: d.id, approvalTab:'active', approvalPage:1, approvalDetailOpen:true });
+    goTo('approval', { selectedDoc: d.id, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false });
   });
   const goReviewApprovalBtn = document.getElementById('btnGoReviewApproval');
   if(goReviewApprovalBtn) goReviewApprovalBtn.addEventListener('click', ()=>{
-    goTo('approval', { selectedDoc: state.selectedDoc, approvalTab:'active', approvalPage:1, approvalDetailOpen:true });
+    goTo('approval', { selectedDoc: state.selectedDoc, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false });
   });
 }
 
@@ -1415,6 +1453,8 @@ function viewApprovalDetail(){
   const approvedAt = d.approvedAt || (lastComment ? lastComment.time : d.lastUpdated);
   const approvedComment = d.approvedComment !== undefined ? d.approvedComment : (lastComment ? lastComment.text : '');
   const requestLabel = d.lastRequestType==='new' ? 'เอกสารใหม่' : d.lastRequestType==='revision' ? `ปรับปรุง (Rev.${d.lastRequestFrom||'-'} → ${d.rev||'-'})` : d.lastRequestType==='review' ? 'ทบทวนประจำปี (ไม่มีการแก้ไข)' : null;
+  const allComments = (d.comments||[]).slice().reverse();
+  const shownComments = state.approvalCommentsExpanded ? allComments : allComments.slice(0,5);
 
   return `
   <div class="panel">
@@ -1466,12 +1506,15 @@ function viewApprovalDetail(){
     </div>
     `}
 
-    <div class="panel-title" style="margin:20px 0 10px;">ประวัติความเห็น</div>
-    ${(d.comments||[]).slice().reverse().map(c=>`
+    <div class="panel-head" style="margin:20px 0 10px;">
+      <div class="panel-title" style="margin:0;">ประวัติความเห็น ${allComments.length ? `<span style="color:var(--ink-500); font-weight:600; font-size:12px;">(${allComments.length})</span>` : ''}</div>
+      ${allComments.length > 5 ? `<button class="panel-link" id="btnToggleComments" style="cursor:pointer;">${state.approvalCommentsExpanded ? 'ย่อ ▲' : `แสดงทั้งหมด (${allComments.length}) ▼`}</button>` : ''}
+    </div>
+    ${shownComments.length ? shownComments.map(c=>`
       <div class="at-item"><div class="at-icon">${ic('user')}</div>
         <div class="at-main"><div class="at-title">${c.by}</div><div class="at-meta">${c.text}</div></div>
         <div class="at-time">${fmtDateTime(c.time)}</div>
-      </div>`).join('') || `<div style="color:var(--ink-500); font-size:12.5px;">ยังไม่มีความเห็น</div>`}
+      </div>`).join('') : `<div style="color:var(--ink-500); font-size:12.5px;">ยังไม่มีความเห็น</div>`}
   </div>`;
 }
 
@@ -1487,13 +1530,16 @@ function attachApprovalHandlers(){
   const pgPrev = document.getElementById('apPgPrev'); if(pgPrev) pgPrev.addEventListener('click', ()=>{ state.approvalPage=Math.max(1,state.approvalPage-1); render(); });
   const pgNext = document.getElementById('apPgNext'); if(pgNext) pgNext.addEventListener('click', ()=>{ state.approvalPage=state.approvalPage+1; render(); });
   document.querySelectorAll('[data-select-approval]').forEach(row=>{
-    row.addEventListener('click', ()=>{ goTo('approval', { selectedDoc: row.dataset.selectApproval, approvalDetailOpen: true }); });
+    row.addEventListener('click', ()=>{ goTo('approval', { selectedDoc: row.dataset.selectApproval, approvalDetailOpen: true, approvalCommentsExpanded: false }); });
   });
 
   const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
   if(!d) return;
   const status = d.approvalStatus || 'ร่าง';
   const currentIdx = STATUS_FLOW.indexOf(status);
+
+  const toggleCommentsBtn = document.getElementById('btnToggleComments');
+  if(toggleCommentsBtn) toggleCommentsBtn.addEventListener('click', ()=>{ state.approvalCommentsExpanded = !state.approvalCommentsExpanded; render(); });
 
   const approveBtn = document.getElementById('btnApprove');
   if(approveBtn) approveBtn.addEventListener('click', async ()=>{
@@ -1508,10 +1554,20 @@ function attachApprovalHandlers(){
     d.lastUpdated = now;
     d.comments = d.comments || [];
     d.comments.push({ by:actor, text: comment || `อนุมัติ → ${d.approvalStatus}`, time: now });
+    // record the reviewer/approver names on the document's formal record —
+    // only for actual new-document or revision-update requests, per SOP
+    // (annual review confirmations don't touch these role fields)
+    const isFormalRequest = d.lastRequestType==='new' || d.lastRequestType==='revision';
+    if(isFormalRequest && d.approvalStatus==='รออนุมัติ'){
+      d.reviewerName = actor;
+    }
     if(d.approvalStatus==='อนุมัติแล้ว'){
       d.approvedBy = actor;
       d.approvedAt = now;
       d.approvedComment = comment || '';
+      if(isFormalRequest){
+        d.approverName = actor;
+      }
       if(d.lastRequestType==='review'){
         d.lastReviewedAt = now;
         d.lastReviewedBy = actor;
