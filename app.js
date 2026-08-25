@@ -670,11 +670,15 @@ function docModal(){
         <div class="field"><label>ชื่อเอกสาร</label>
           <input id="mfName" value="${cleanName(d).replace(/"/g,'&quot;')}" placeholder="ชื่อเอกสาร"></div>
         <div class="field"><label>ข้อกำหนด ISO 17025</label>
-          <select id="mfClause"><option value="">ไม่ระบุ</option>${CLAUSES.map(([c,l])=>`<option value="${c}" ${d.clause===c?'selected':''}>${l}</option>`).join('')}</select></div>
+          <select id="mfClause"><option value="">ไม่ระบุ</option>${CLAUSES.map(([c,l])=>`<option value="${c}" ${d.clause===c?'selected':''}>${l}</option>`).join('')}</select>
+          <div id="clauseSuggest" class="suggest-hint"></div>
+        </div>
         <div class="field"><label>ลิงก์ SharePoint</label>
           <input id="mfLink" value="${d.link||''}" placeholder="https://mitrphol.sharepoint.com/..."></div>
         <div class="field"><label>สถานะเอกสาร</label>
-          <select id="mfNote">${['ควบคุม','แจกจ่าย','สนับสนุน','ยกเลิก','ว่าง','ไม่พบ'].map(s=>`<option ${d.note===s?'selected':''}>${s}</option>`).join('')}</select></div>
+          <select id="mfNote">${['ควบคุม','แจกจ่าย','สนับสนุน','ยกเลิก','ว่าง','ไม่พบ'].map(s=>`<option ${d.note===s?'selected':''}>${s}</option>`).join('')}</select>
+          <div id="noteSuggest" class="suggest-hint"></div>
+        </div>
         <div class="field"><label>${revising ? 'Rev. ใหม่ (เรียงต่ออัตโนมัติ แก้ไขได้)' : 'Rev.'}</label>
           <input id="mfRev" value="${suggestedRev}" placeholder="0"></div>
         ${revising ? `<div class="field"><label>ชื่อผู้ขอปรับปรุง</label><input id="mfActor" placeholder="ชื่อ-นามสกุล"></div>` : ''}
@@ -709,6 +713,42 @@ function wireModalControls(){
     state.modal.id = e.target.value || null;
     renderModalLayer();
   });
+
+  // live auto-classification suggestions (name/id → clause, name/id → support)
+  const nameInput = document.getElementById('mfName');
+  const idInput = document.getElementById('mfId');
+  const clauseSel = document.getElementById('mfClause');
+  const noteSel = document.getElementById('mfNote');
+  function refreshSuggestions(){
+    const name = nameInput ? nameInput.value.trim() : '';
+    const idVal = idInput ? idInput.value.trim() : '';
+    const clauseHint = document.getElementById('clauseSuggest');
+    const noteHint = document.getElementById('noteSuggest');
+
+    if(clauseHint){
+      const suggested = suggestClause(name);
+      if(suggested && clauseSel && clauseSel.value !== suggested){
+        clauseHint.innerHTML = `💡 แนะนำ: ${clauseLabel(suggested)} <button type="button" class="suggest-accept" id="acceptClauseSuggest">ใช้คำแนะนำนี้</button>`;
+        const btn = document.getElementById('acceptClauseSuggest');
+        if(btn) btn.addEventListener('click', ()=>{ clauseSel.value = suggested; refreshSuggestions(); });
+      } else {
+        clauseHint.innerHTML = '';
+      }
+    }
+    if(noteHint){
+      const likelySupport = isLikelySupportDoc(idVal, name);
+      if(likelySupport && noteSel && noteSel.value !== 'สนับสนุน'){
+        noteHint.innerHTML = `💡 เอกสารนี้อาจเข้าข่ายหลักฐาน/สนับสนุน <button type="button" class="suggest-accept" id="acceptNoteSuggest">ตั้งเป็นสนับสนุน</button>`;
+        const btn = document.getElementById('acceptNoteSuggest');
+        if(btn) btn.addEventListener('click', ()=>{ noteSel.value = 'สนับสนุน'; refreshSuggestions(); });
+      } else {
+        noteHint.innerHTML = '';
+      }
+    }
+  }
+  if(nameInput) nameInput.addEventListener('input', refreshSuggestions);
+  if(idInput) idInput.addEventListener('input', refreshSuggestions);
+  refreshSuggestions();
 
   const saveBtn = document.getElementById('modalSaveBtn');
   if(!saveBtn) return;
