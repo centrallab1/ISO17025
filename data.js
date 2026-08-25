@@ -195,12 +195,13 @@ function fmtDateTime(ms){
   return new Date(ms).toLocaleString('th-TH', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
 }
 
-// next scheduled review = effective date (or last update, if no effective date
-// is set) + review cycle length in days. Cycle length defaults to 365 days
+// next scheduled review = the most recent of (a) a periodic-review
+// confirmation with no changes, or (b) the effective date / last update,
+// plus a review cycle length in days. Cycle length defaults to 365 days
 // (a common periodic-review interval) and is editable per document.
 const DEFAULT_REVIEW_CYCLE_DAYS = 365;
 function nextReviewDate(d){
-  const base = d.effectiveDate || d.lastUpdated || Date.now();
+  const base = d.lastReviewedAt || d.effectiveDate || d.lastUpdated || Date.now();
   const cycle = d.reviewCycleDays || DEFAULT_REVIEW_CYCLE_DAYS;
   return base + cycle*86400000;
 }
