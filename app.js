@@ -793,8 +793,14 @@ function wireModalControls(){
   function doAutoNumber(){
     const prefix = typePrefixSel ? typePrefixSel.value : '';
     if(!prefix) return;
-    if(idInput) idInput.value = nextAvailableNumber(prefix);
-    refreshSuggestions();
+    try{
+      const generated = nextAvailableNumber(prefix);
+      if(idInput) idInput.value = generated;
+      refreshSuggestions();
+    } catch(err){
+      console.error('doAutoNumber failed:', err);
+      alert('ออกเลขอัตโนมัติไม่สำเร็จ: ' + (err && err.message ? err.message : err) + '\n\nกรุณากรอกรหัสเอกสารเอง หรือแจ้งข้อความนี้เพื่อแก้ไข');
+    }
   }
   if(typePrefixSel) typePrefixSel.addEventListener('change', doAutoNumber);
   if(autoNumBtn) autoNumBtn.addEventListener('click', doAutoNumber);
