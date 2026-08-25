@@ -224,6 +224,7 @@ async function boot(){
   wireGlobalSearch();
   wireNotifBell();
   wireBackButton();
+  wireSidebarToggle();
   render();
 }
 function renderBootScreen(text){
@@ -269,6 +270,23 @@ function wireNav(){
     });
   });
 }
+function openSidebar(){
+  document.querySelector('.sidebar').classList.add('open');
+  document.getElementById('sidebarBackdrop').classList.add('open');
+}
+function closeSidebar(){
+  document.querySelector('.sidebar').classList.remove('open');
+  document.getElementById('sidebarBackdrop').classList.remove('open');
+}
+function wireSidebarToggle(){
+  const toggle = document.getElementById('menuToggle');
+  const backdrop = document.getElementById('sidebarBackdrop');
+  if(toggle) toggle.addEventListener('click', ()=>{
+    const sidebar = document.querySelector('.sidebar');
+    if(sidebar.classList.contains('open')) closeSidebar(); else openSidebar();
+  });
+  if(backdrop) backdrop.addEventListener('click', closeSidebar);
+}
 function goTo(view, extra={}){
   navStack.push(snapshotState());
   Object.assign(state, extra);
@@ -276,6 +294,7 @@ function goTo(view, extra={}){
   syncNavActive();
   render();
   window.scrollTo({top:0, behavior:'instant'});
+  closeSidebar();
 }
 function goBack(){
   if(navStack.length){
@@ -308,7 +327,6 @@ function render(){
     case 'documents': renderDocumentsInto(); wireDocControls(); renderModalLayer(); updateNotifBadge(); updateBackButton(); return;
     case 'records': el.innerHTML = viewEvidence(); attachEvidenceHandlers(); break;
     case 'revision': el.innerHTML = viewRevisionDashboard(); attachRevisionDashboardHandlers(); break;
-    case 'revisiondetail': el.innerHTML = viewRevisionDetail(); attachDocPicker('revisiondetail'); break;
     case 'approval': el.innerHTML = viewApproval(); attachApprovalHandlers(); break;
     case 'audit': el.innerHTML = viewAudit(); attachAuditHandlers(); break;
     case 'calendar': el.innerHTML = viewCalendar(); attachCalHandlers(); break;
@@ -895,7 +913,7 @@ function viewDocDetail(docId){
         <div class="detail-actions">
           ${d.link ? `<a class="btn primary" href="${d.link}" target="_blank" rel="noopener">${ic('link')} Open in SharePoint</a>` : `<button class="btn ghost" disabled>${ic('link')} ยังไม่มีลิงก์</button>`}
           <button class="btn ghost" data-go="approval">${ic('check')} Approval</button>
-          <button class="btn ghost" data-go="revisiondetail">${ic('history')} History</button>
+          <button class="btn ghost" data-go-revision-history="1">${ic('history')} History</button>
         </div>
         <div class="detail-actions-label">จัดการเอกสาร</div>
         <div class="detail-actions">
@@ -920,6 +938,8 @@ function attachDetailActionHandlers(){
   if(editBtn) editBtn.addEventListener('click', ()=> openModal({ mode:'edit', id: state.selectedDoc }));
   const reviseBtn = document.getElementById('btnDetailRevise');
   if(reviseBtn) reviseBtn.addEventListener('click', ()=> openModal({ mode:'revise', id: state.selectedDoc }));
+  const historyBtn = document.querySelector('[data-go-revision-history]');
+  if(historyBtn) historyBtn.addEventListener('click', ()=> goTo('revision', { selectedDoc: state.selectedDoc }));
   const delBtn = document.getElementById('btnDetailDelete');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
@@ -989,14 +1009,13 @@ function eitem(opts){
   </div>`;
 }
 
-function viewRevisionDetail(){
-  if(!state.selectedDoc) state.selectedDoc = DOCUMENTS[0] && DOCUMENTS[0].id;
-  const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
-  if(!d) return `<div class="panel">${emptyState('ยังไม่มีเอกสาร','No documents in the register yet.')}</div>`;
-
+function viewRevisionDetailInline(d){
   const linkBtn = d.link
     ? `<a class="btn ghost" href="${d.link}" target="_blank" rel="noopener">${ic('link')} เปิดใน SharePoint</a>`
     : `<button class="btn ghost" disabled>${ic('link')} ยังไม่มีลิงก์</button>`;
+  const nrd = nextReviewDate(d);
+  const days = daysUntil(nrd);
+  const isOverdue = days < 0;
 
   const lastComment = (d.comments||[])[(d.comments||[]).length-1];
   const items = [
@@ -1012,18 +1031,30 @@ function viewRevisionDetail(){
   ];
 
   return `
-  <div class="crumb" data-back="1">‹ Back to Revision</div>
   <div class="panel">
     <div class="panel-head">
       <div>
-        <div class="panel-title">Revision History — ${d.id} ${cleanName(d)}</div>
-        <div style="font-size:11.5px; color:var(--ink-500); margin-top:3px;">ระบบนี้เก็บประวัติการแก้ไข/ขอปรับปรุงเอกสาร พร้อมลิงก์ ณ ขณะนั้น เพื่อความโปร่งใสและตรวจสอบข้อมูลย้อนหลังได้</div>
+        <div class="panel-title" style="display:flex; align-items:center; gap:9px; flex-wrap:wrap;">${d.id} ${cleanName(d)} ${statusBadge(d.note)} ${approvalBadge(d.approvalStatus)}</div>
+        <div style="font-size:11.5px; color:var(--ink-500); margin-top:3px;">ประวัติการแก้ไข/ขอปรับปรุงเอกสาร พร้อมลิงก์ ณ ขณะนั้น เพื่อความโปร่งใสและตรวจสอบข้อมูลย้อนหลังได้</div>
       </div>
-      <div style="display:flex; gap:8px; align-items:center;">
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
         ${linkBtn}
-        <select class="select" id="revDocPicker">${DOCUMENTS.map(x=>`<option value="${x.id}" ${x.id===d.id?'selected':''}>${x.id}</option>`).join('')}</select>
+        <button class="btn ghost" id="revDetailEdit">${ic('edit')} แก้ไข</button>
+        <button class="btn ghost" id="revDetailRevise">${ic('history')} ปรับปรุง Rev.</button>
+        <button class="btn ghost" id="revDetailApproval">${ic('check')} Approval</button>
+        <button class="btn danger" id="revDetailDelete">${ic('trash')} ลบ</button>
       </div>
     </div>
+
+    <div class="grid grid-3" style="margin-bottom:18px;">
+      <div class="side-box"><div class="side-box-title">ข้อกำหนด ISO</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.clause ? clauseLabel(d.clause) : 'ไม่ระบุ'}</div></div>
+      <div class="side-box"><div class="side-box-title">ประเภท / Rev.</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${docTypeLabel(d)} · Rev.${d.rev||'—'}</div></div>
+      <div class="side-box"><div class="side-box-title">ทบทวนครั้งถัดไป</div><div style="font-size:12.5px; font-weight:700; color:${isOverdue?'var(--red-600)':'var(--ink-900)'};">${fmtDate(nrd)} (${isOverdue?`เกินกำหนด ${Math.abs(days)} วัน`:`อีก ${days} วัน`})</div></div>
+      <div class="side-box"><div class="side-box-title">ผู้จัดทำ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.preparedBy || '—'}</div></div>
+      <div class="side-box"><div class="side-box-title">ผู้ทบทวน</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.reviewerName || '—'}</div></div>
+      <div class="side-box"><div class="side-box-title">ผู้อนุมัติ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.approverName || d.approvedBy || '—'}</div></div>
+    </div>
+
     ${items.join('')}
   </div>`;
 }
@@ -1050,6 +1081,8 @@ function viewRevisionDashboard(){
   }
   list = list.slice().sort((a,b)=>(b.lastUpdated||0)-(a.lastUpdated||0));
   const pageItems = list.slice(0,5);
+  if(!state.selectedDoc || !DOCUMENTS.some(x=>x.id===state.selectedDoc)) state.selectedDoc = (list[0] || DOCUMENTS[0] || {}).id;
+  const selectedDoc = DOCUMENTS.find(x=>x.id===state.selectedDoc);
 
   const clauseOpts = [['All','ทุกข้อกำหนด'], ['','ไม่ระบุ'], ...CLAUSES];
   const typeOpts = [['All','ทุกประเภท'], ...Object.entries(DOC_TYPE_MAP)];
@@ -1094,7 +1127,7 @@ function viewRevisionDashboard(){
           const days = daysUntil(nrd);
           const isOverdue = days < 0;
           return `
-        <tr data-open-rev="${d.id}">
+        <tr class="${d.id===state.selectedDoc?'current-row':''}" data-open-rev="${d.id}">
           <td class="mono">${d.id}<div class="name" title="${cleanName(d).replace(/"/g,'&quot;')}" style="max-width:220px;">${cleanName(d)}</div></td>
           <td>${d.clause || '<span style="color:var(--ink-400);">—</span>'}</td>
           <td>${d.rev || '—'}</td>
@@ -1108,6 +1141,8 @@ function viewRevisionDashboard(){
     </table></div>
     <div style="margin-top:14px;"><a class="panel-link" style="cursor:pointer;" data-go="documents">ดูเอกสารทั้งหมด →</a></div>
   </div>
+
+  ${selectedDoc ? viewRevisionDetailInline(selectedDoc) : ''}
 
   <div class="panel">
     <div class="panel-head"><div class="panel-title">กิจกรรมล่าสุด (Latest Activity)</div><a class="panel-link" style="cursor:pointer;" data-go="audittrail">ดูทั้งหมด →</a></div>
@@ -1138,8 +1173,25 @@ function attachRevisionDashboardHandlers(){
     elx.addEventListener('click', e=>{
       e.stopPropagation();
       const id = elx.dataset.openRev || elx.dataset.openRevBtn;
-      goTo('revisiondetail', { selectedDoc: id });
+      state.selectedDoc = id;
+      render();
     });
+  });
+  const editBtn = document.getElementById('revDetailEdit');
+  if(editBtn) editBtn.addEventListener('click', ()=> openModal({ mode:'edit', id: state.selectedDoc }));
+  const reviseBtn = document.getElementById('revDetailRevise');
+  if(reviseBtn) reviseBtn.addEventListener('click', ()=> openModal({ mode:'revise', id: state.selectedDoc }));
+  const approvalBtn = document.getElementById('revDetailApproval');
+  if(approvalBtn) approvalBtn.addEventListener('click', ()=> goTo('approval', { selectedDoc: state.selectedDoc }));
+  const delBtn = document.getElementById('revDetailDelete');
+  if(delBtn) delBtn.addEventListener('click', async ()=>{
+    const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
+    if(!d) return;
+    if(!confirm(`ลบเอกสาร "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
+    DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
+    state.selectedDoc = null;
+    await persistDocs();
+    render();
   });
 }
 
@@ -1367,6 +1419,12 @@ function attachApprovalHandlers(){
       d.approvedAt = now;
       d.approvedComment = comment || '';
     }
+    // keep the document visible & selected after its status changes — switch
+    // the active tab to match, so it doesn't seem to vanish from the table
+    if(state.approvalTab!=='all' && state.approvalTab!==d.approvalStatus){
+      state.approvalTab = d.approvalStatus;
+      state.approvalPage = 1;
+    }
     render();
     await persistDocs();
   });
@@ -1383,6 +1441,10 @@ function attachApprovalHandlers(){
     d.comments = d.comments || [];
     d.comments.push({ by:actor, text:comment, time: Date.now() });
     d.approvedBy = null; d.approvedAt = null; d.approvedComment = null;
+    if(state.approvalTab!=='all' && state.approvalTab!==d.approvalStatus){
+      state.approvalTab = d.approvalStatus;
+      state.approvalPage = 1;
+    }
     render();
     await persistDocs();
   });
@@ -1483,10 +1545,6 @@ function attachAuditHandlers(){
 // ============================================================
 // DOC PICKER (shared by revision/approval views)
 // ============================================================
-function attachDocPicker(view){
-  const el = document.getElementById(view==='revisiondetail'?'revDocPicker':'apDocPicker');
-  if(el) el.addEventListener('change', e=>{ state.selectedDoc = e.target.value; render(); });
-}
 
 // ============================================================
 // REVIEW CALENDAR — real activity calendar built from lastUpdated
