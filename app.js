@@ -980,6 +980,7 @@ function attachEvidenceHandlers(){
 // no document-number scheme, just a title + category + link, with a
 // single DC-verification step before an item counts as confirmed.
 // ============================================================
+const THAI_MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
 function archiveStatusBadge(status){
   const cls = status==='ยืนยันแล้ว' ? 'active' : 'review';
   return `<span class="badge ${cls}">${status||'รอตรวจสอบ'}</span>`;
@@ -1002,12 +1003,25 @@ function viewArchive(){
     const q = state.archiveFilter.q.toLowerCase();
     list = list.filter(a=> (a.title||'').toLowerCase().includes(q) || (a.category||'').toLowerCase().includes(q));
   }
-  list = list.slice().sort((a,b)=>(b.uploadedAt||0)-(a.uploadedAt||0));
+
+  // folder-style grouping: หมวดหมู่ (category) → ปี (year) → เดือน (month)
+  const tree = {};
+  list.forEach(a=>{
+    const cat = a.category || 'ไม่ระบุหมวดหมู่';
+    const dt = new Date(a.uploadedAt || Date.now());
+    const year = dt.getFullYear() + 543;
+    const month = dt.getMonth();
+    tree[cat] = tree[cat] || {};
+    tree[cat][year] = tree[cat][year] || {};
+    tree[cat][year][month] = tree[cat][year][month] || [];
+    tree[cat][year][month].push(a);
+  });
+  const categoryOrder = [...ARCHIVE_CATEGORY_SUGGESTIONS.filter(c=>tree[c]), ...Object.keys(tree).filter(c=>!ARCHIVE_CATEGORY_SUGGESTIONS.includes(c) && c!=='ไม่ระบุหมวดหมู่').sort(), ...(tree['ไม่ระบุหมวดหมู่']?['ไม่ระบุหมวดหมู่']:[])];
 
   return `
   <div class="panel">
     <div class="panel-title">คลังเอกสาร</div>
-    <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">เก็บเอกสารทั่วไปที่ไม่ใช่เอกสารควบคุมของระบบ ISO เช่น สรุปประชุม, เอกสารสอบเทียบ, ใบรับรองจากภายนอก — ต้องผ่านการตรวจสอบยืนยันจาก DC ก่อนจึงจะถือว่าสมบูรณ์</div>
+    <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">เก็บเอกสารทั่วไปที่ไม่ใช่เอกสารควบคุมของระบบ ISO เช่น สรุปประชุม, เอกสารสอบเทียบ, ใบรับรองจากภายนอก — ต้องผ่านการตรวจสอบยืนยันจาก DC ก่อนจึงจะถือว่าสมบูรณ์ · จัดกลุ่มเป็นโฟลเดอร์ตามหมวดหมู่ → ปี → เดือน</div>
   </div>
   <div class="grid grid-3">
     <div class="stat-card"><div class="stat-icon blue">${ic('doc')}</div><div><div class="stat-num">${total}</div><div class="stat-label">เอกสารทั้งหมด</div></div></div>
@@ -1032,25 +1046,44 @@ function viewArchive(){
         <option ${state.archiveFilter.status==='ยืนยันแล้ว'?'selected':''}>ยืนยันแล้ว</option>
       </select>
     </div>
-    <div class="table-wrap"><table class="dtable">
-      <thead><tr><th>ชื่อเอกสาร</th><th>หมวดหมู่</th><th>สถานะ</th><th>อัปโหลดโดย</th><th>วันที่</th><th></th></tr></thead>
-      <tbody>
-        ${list.length ? list.map(a=>`
-        <tr>
-          <td class="name">${a.link ? `<a href="${a.link}" target="_blank" rel="noopener" style="color:var(--blue-600); text-decoration:none;">${a.title}</a>` : a.title}</td>
-          <td>${a.category||'—'}</td>
-          <td>${archiveStatusBadge(a.status)}</td>
-          <td>${a.uploadedBy||'—'}</td>
-          <td>${fmtDate(a.uploadedAt)}</td>
-          <td><div class="row-actions">
-            ${a.status!=='ยืนยันแล้ว' ? `<button data-verify="${a.id}" title="ยืนยัน (DC)">${ic('check')}</button>` : ''}
-            <button data-archive-edit="${a.id}" title="แก้ไข">${ic('edit')}</button>
-            <button data-archive-del="${a.id}" class="del" title="ลบ">${ic('trash')}</button>
-          </div></td>
-        </tr>`).join('') : `<tr><td colspan="6" style="text-align:center; padding:40px 0; color:var(--ink-500);">ยังไม่มีเอกสารในคลัง</td></tr>`}
-      </tbody>
-    </table></div>
-  </div>`;
+  </div>
+
+  ${categoryOrder.length ? categoryOrder.map(cat=>{
+    const years = Object.keys(tree[cat]).map(Number).sort((a,b)=>b-a);
+    const catCount = years.reduce((s,y)=> s + Object.values(tree[cat][y]).reduce((s2,items)=>s2+items.length,0), 0);
+    return `
+    <div class="panel">
+      <div class="panel-title" style="margin-bottom:14px; display:flex; align-items:center; gap:8px;">${ic('doc','sm-icon')} ${cat} <span style="color:var(--ink-500); font-weight:600; font-size:12px;">(${catCount})</span></div>
+      ${years.map(year=>{
+        const months = Object.keys(tree[cat][year]).map(Number).sort((a,b)=>b-a);
+        return `
+        <div style="margin-bottom:16px;">
+          <div style="font-size:13px; font-weight:800; color:var(--ink-900); padding-bottom:6px; margin-bottom:8px; border-bottom:2px solid var(--line);">ปี ${year}</div>
+          ${months.map(month=>`
+            <div style="margin-bottom:6px; margin-left:8px;">
+              <div style="font-size:11px; font-weight:700; color:var(--ink-500); text-transform:uppercase; letter-spacing:.3px; margin-bottom:2px;">${THAI_MONTHS[month]}</div>
+              <div style="display:flex; flex-direction:column;">
+                ${tree[cat][year][month].map(a=>`
+                <div class="evidence-item">
+                  <div class="file-ic">${ic('file')}</div>
+                  <div class="evi-main">
+                    ${a.link ? `<a class="evi-name" href="${a.link}" target="_blank" rel="noopener">${a.title}</a>` : `<span class="evi-name evi-nolink">${a.title}</span>`}
+                    <div class="evi-sub">อัปโหลดโดย ${a.uploadedBy||'—'} · ยืนยันโดย ${a.verifiedBy ? `<b style="color:var(--green-600);">${a.verifiedBy}</b>` : 'ยังไม่ยืนยัน'} · ${fmtDate(a.uploadedAt)}</div>
+                  </div>
+                  ${archiveStatusBadge(a.status)}
+                  <div class="row-actions" style="margin-left:10px;">
+                    ${a.status!=='ยืนยันแล้ว' ? `<button data-verify="${a.id}" title="ยืนยัน (DC)">${ic('check')}</button>` : ''}
+                    <button data-archive-edit="${a.id}" title="แก้ไข">${ic('edit')}</button>
+                    <button data-archive-del="${a.id}" class="del" title="ลบ">${ic('trash')}</button>
+                  </div>
+                </div>`).join('')}
+              </div>
+            </div>`).join('')}
+        </div>`;
+      }).join('')}
+    </div>`;
+  }).join('') : `<div class="panel">${emptyState('ยังไม่มีเอกสารในคลัง','เพิ่มรายการแรกได้จากปุ่ม "เพิ่มเอกสาร" ด้านบน')}</div>`}
+  `;
 }
 function attachArchiveHandlers(){
   const search = document.getElementById('archiveSearch');
