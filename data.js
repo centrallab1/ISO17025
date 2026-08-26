@@ -245,16 +245,18 @@ function daysUntil(ms){
 // DERIVED STATS (all computed live from DOCUMENTS — nothing fabricated)
 // ============================================================
 function computeStats(){
-  const total = DOCUMENTS.length;
-  const active = DOCUMENTS.filter(d=> d.note==='ควบคุม' || d.note==='แจกจ่าย').length;
-  const pending = DOCUMENTS.filter(d=> d.approvalStatus==='รอทบทวน' || d.approvalStatus==='รออนุมัติ').length;
-  const attention = DOCUMENTS.filter(d=> d.note==='ไม่พบ' || d.approvalStatus==='ไม่อนุมัติ').length;
+  const docs = visibleDocuments();
+  const total = docs.length;
+  const active = docs.filter(d=> d.note==='ควบคุม' || d.note==='แจกจ่าย').length;
+  const pending = docs.filter(d=> d.approvalStatus==='รอทบทวน' || d.approvalStatus==='รออนุมัติ').length;
+  const attention = docs.filter(d=> d.note==='ไม่พบ' || d.approvalStatus==='ไม่อนุมัติ').length;
   return { total, active, pending, attention };
 }
 
 function complianceByGroup(){
+  const all = visibleDocuments();
   return GROUPS.map(([gid,glabel])=>{
-    const docs = DOCUMENTS.filter(d=> groupOf(d.clause)===gid);
+    const docs = all.filter(d=> groupOf(d.clause)===gid);
     const approved = docs.filter(d=> d.approvalStatus==='อนุมัติแล้ว').length;
     const pct = docs.length ? Math.round((approved/docs.length)*100) : 0;
     return { id:gid, label: glabel.replace(/^\d+\.\s*/,''), n: docs.length, pct };
@@ -262,5 +264,40 @@ function complianceByGroup(){
 }
 
 function unclassifiedDocs(){
-  return DOCUMENTS.filter(d=> !d.clause);
+  return visibleDocuments().filter(d=> !d.clause);
 }
+
+// ============================================================
+// PUBLICATION GATING — a brand-new document (created via the "New
+// Document" flow) stays invisible in every browsable list until it has
+// been approved AND Document Control has pasted the published link.
+// This does NOT apply to legacy/imported documents (they have no
+// lastRequestType==='new' origin) or to documents already published
+// once before (a revision-in-progress keeps showing its last published
+// link/version until the new revision's own publish step completes).
+// ============================================================
+function isHiddenFromLists(d){
+  return d.lastRequestType==='new' && !d.publishedLink;
+}
+function visibleDocuments(){
+  return DOCUMENTS.filter(d=> !isHiddenFromLists(d));
+}
+// the link to actually show/open for a document — always the latest
+// published link once one exists, falling back to the working/draft
+// link before first publication.
+function displayLink(d){
+  return d.publishedLink || d.link || '';
+}
+
+// ============================================================
+// ARCHIVE — a separate, lightweight store for general documents that
+// aren't part of the controlled ISO document register (meeting minutes,
+// calibration certificates, external reports, etc). No document-number
+// scheme and no multi-step approval — just a single DC verification step.
+// Stored in its own Firestore doc (iso17025/archive) so it never mixes
+// with the controlled DOCUMENTS array.
+// ============================================================
+const ARCHIVE_CATEGORY_SUGGESTIONS = ['สรุปประชุม', 'เอกสารสอบเทียบ', 'ใบรับรอง/Certificate', 'รายงานผลทดสอบภายนอก', 'อื่นๆ'];
+var ARCHIVE_ITEMS = [];
+var ARCHIVE_LOADED = false;
+var ARCHIVE_ERROR = null;

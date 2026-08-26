@@ -19,6 +19,7 @@ const firebaseConfig = {
 const firebaseApp = initializeApp(firebaseConfig);
 const dbFirestore = getFirestore(firebaseApp);
 const docRef = doc(dbFirestore, "iso17025", "documents");
+const archiveDocRef = doc(dbFirestore, "iso17025", "archive");
 
 async function loadDocs(){
   try{
@@ -46,6 +47,8 @@ async function loadDocs(){
       if(d.reviewCycleDays===undefined){ d.reviewCycleDays=DEFAULT_REVIEW_CYCLE_DAYS; needsMigration = true; }
       if(d.lastReviewedAt===undefined){ d.lastReviewedAt=null; needsMigration = true; }
       if(d.lastReviewedBy===undefined){ d.lastReviewedBy=''; needsMigration = true; }
+      if(d.publishedLink===undefined){ d.publishedLink=null; needsMigration = true; }
+      if(!Array.isArray(d.linkHistory)){ d.linkHistory=[]; needsMigration = true; }
     });
     DOCS_LOADED = true;
     DOCS_ERROR = null;
@@ -77,6 +80,30 @@ function updateSyncPill(){
   p.innerHTML = `<span class="dot"></span>${saving ? 'กำลังบันทึก…' : 'Synced with Firestore'}`;
 }
 
+async function loadArchive(){
+  try{
+    const snap = await getDoc(archiveDocRef);
+    ARCHIVE_ITEMS = (snap.exists() && Array.isArray(snap.data().items)) ? snap.data().items : [];
+    ARCHIVE_LOADED = true;
+    ARCHIVE_ERROR = null;
+  } catch(e){
+    console.error('archive load failed', e);
+    ARCHIVE_ERROR = e.message || String(e);
+    ARCHIVE_LOADED = false;
+  }
+}
+let archiveSaving = false;
+async function persistArchive(){
+  archiveSaving = true;
+  try{
+    await setDoc(archiveDocRef, { items: ARCHIVE_ITEMS, updatedAt: Date.now() });
+  } catch(e){
+    console.error('archive save failed', e);
+    alert('บันทึกคลังเอกสารไม่สำเร็จ: ' + e.message);
+  }
+  archiveSaving = false;
+}
+
 // ============================================================
 // APP STATE
 // ============================================================
@@ -94,6 +121,9 @@ const state = {
   approvalTab: 'active',
   approvalDetailOpen: false,
   approvalCommentsExpanded: false,
+  dcPublishEditing: false,
+  archiveFilter: { category:'All', status:'All', q:'' },
+  archiveModal: null, // { mode:'new'|'edit'|'verify', id }
   approvalPage: 1,
   approvalTypeFilter: 'All',
   revFilter: { clause:'All', type:'All', status:'All', q:'' },
@@ -199,9 +229,18 @@ function closeModal(){ state.modal = null; renderModalLayer(); }
 function renderModalLayer(){
   const layer = document.getElementById('modalLayer');
   if(!layer) return;
-  layer.innerHTML = state.modal ? docModal() : '';
-  if(state.modal) wireModalControls();
+  if(state.modal){
+    layer.innerHTML = docModal();
+    wireModalControls();
+  } else if(state.archiveModal){
+    layer.innerHTML = archiveModal();
+    wireArchiveModalControls();
+  } else {
+    layer.innerHTML = '';
+  }
 }
+function openArchiveModal(opts){ state.archiveModal = opts; renderModalLayer(); }
+function closeArchiveModal(){ state.archiveModal = null; renderModalLayer(); }
 
 // display-only: many document names already have the doc ID typed into
 // them (e.g. name="RDI-LM-01 คู่มือคุณภาพ"), which duplicates the ID
@@ -226,6 +265,7 @@ async function boot(){
     renderBootError(DOCS_ERROR);
     return;
   }
+  loadArchive().then(()=>{ if(state.view==='archive') render(); }); // best-effort, non-blocking — Archive is a separate store
   removeBootScreen();
   wireNav();
   wireGlobalSearch();
@@ -334,6 +374,7 @@ function render(){
     case 'iso': el.innerHTML = viewISO(); attachISOHandlers(); break;
     case 'documents': renderDocumentsInto(); wireDocControls(); renderModalLayer(); updateNotifBadge(); updateBackButton(); return;
     case 'records': el.innerHTML = viewEvidence(); attachEvidenceHandlers(); break;
+    case 'archive': el.innerHTML = viewArchive(); attachArchiveHandlers(); break;
     case 'revision': el.innerHTML = viewRevisionDashboard(); attachRevisionDashboardHandlers(); break;
     case 'approval': el.innerHTML = viewApproval(); attachApprovalHandlers(); break;
     case 'audit': el.innerHTML = viewAudit(); attachAuditHandlers(); break;
@@ -372,7 +413,7 @@ function attachGlobalRowHandlers(){
 function viewDashboard(){
   const s = computeStats();
   const comp = complianceByGroup();
-  const recent = [...DOCUMENTS].sort((a,b)=> (b.lastUpdated||0)-(a.lastUpdated||0)).slice(0,5);
+  const recent = [...visibleDocuments()].sort((a,b)=> (b.lastUpdated||0)-(a.lastUpdated||0)).slice(0,5);
   const unclassified = unclassifiedDocs().length;
 
   return `
@@ -464,7 +505,7 @@ function viewISO(){
 }
 function isoDetailContent(){
   const clause = state.selectedClause;
-  const docs = DOCUMENTS.filter(d=> (d.clause||'')===clause);
+  const docs = visibleDocuments().filter(d=> (d.clause||'')===clause);
   const evidence = docs.filter(d=> d.note==='สนับสนุน');
   const related = clause ? CLAUSE_TREE.flatMap(g=>g.children).filter(c=> c.id!==clause && groupOf(c.id)===groupOf(clause)) : [];
 
@@ -546,7 +587,7 @@ const DOC_PRESETS = {
 };
 function filteredDocs(){
   const presetFn = DOC_PRESETS[state.docFilter.preset] || DOC_PRESETS.all;
-  return DOCUMENTS.filter(d=>{
+  return visibleDocuments().filter(d=>{
     if(!presetFn(d)) return false;
     if(state.docFilter.clause!=='All' && (d.clause||'')!==state.docFilter.clause) return false;
     if(state.docFilter.type!=='All' && docTypeCode(d)!==state.docFilter.type) return false;
@@ -828,6 +869,7 @@ function wireModalControls(){
         approvalStatus:'ร่าง', reviewerName:'', approverName:'', preparedBy:actor,
         comments:[{ by:actor, text:'ขอขึ้นทะเบียนเอกสารใหม่', time: now }], lastUpdated: now, createdDate: now, effectiveDate:null,
         approvedBy:null, approvedAt:null, approvedComment:null, lastRequestType:'new',
+        publishedLink:null, linkHistory:[],
       });
     } else if(mode==='revise'){
       const actor = document.getElementById('mfActor').value.trim();
@@ -870,7 +912,7 @@ function wireModalControls(){
 // the pasted SharePoint URL (replaces the old "Records" page).
 // ============================================================
 function viewEvidence(){
-  const items = DOCUMENTS.filter(d=> d.note==='สนับสนุน');
+  const items = visibleDocuments().filter(d=> d.note==='สนับสนุน');
   const byClause = {};
   items.forEach(d=>{
     const key = d.clause || '';
@@ -896,20 +938,23 @@ function viewEvidence(){
     <div class="panel">
       <div class="panel-title" style="margin-bottom:12px;">${label} <span style="color:var(--ink-500); font-weight:600; font-size:12px;">(${docs.length})</span></div>
       <div style="display:flex; flex-direction:column; gap:2px;">
-        ${docs.map(d=>`
+        ${docs.map(d=>{
+          const link = displayLink(d);
+          return `
           <div class="evidence-item">
             <div class="file-ic">${ic('file')}</div>
             <div class="evi-main">
-              ${d.link
-                ? `<a class="evi-name" href="${d.link}" target="_blank" rel="noopener">${cleanName(d)}</a>`
+              ${link
+                ? `<a class="evi-name" href="${link}" target="_blank" rel="noopener">${cleanName(d)}</a>`
                 : `<span class="evi-name evi-nolink">${cleanName(d)}</span>`}
-              <div class="evi-sub">${d.id}${!d.link ? ' · ยังไม่มีลิงก์' : ''}</div>
+              <div class="evi-sub">${d.id}${!link ? ' · ยังไม่มีลิงก์' : ''}</div>
             </div>
             <div class="row-actions">
               <button data-edit="${d.id}" title="แก้ไข">${ic('edit')}</button>
               <button data-del="${d.id}" class="del" title="ลบ">${ic('trash')}</button>
             </div>
-          </div>`).join('')}
+          </div>`;
+        }).join('')}
       </div>
     </div>`;
   }).join('') : `<div class="panel">${emptyState('ยังไม่มีเอกสารสนับสนุน','เพิ่มรายการแรกได้จากปุ่ม "เพิ่มรายการสนับสนุน" ด้านบน')}</div>`}
@@ -930,6 +975,209 @@ function attachEvidenceHandlers(){
 }
 
 // ============================================================
+// ARCHIVE — general document store (meeting minutes, calibration certs,
+// external reports, etc). Separate from the controlled ISO register:
+// no document-number scheme, just a title + category + link, with a
+// single DC-verification step before an item counts as confirmed.
+// ============================================================
+function archiveStatusBadge(status){
+  const cls = status==='ยืนยันแล้ว' ? 'active' : 'review';
+  return `<span class="badge ${cls}">${status||'รอตรวจสอบ'}</span>`;
+}
+function viewArchive(){
+  if(!ARCHIVE_LOADED && ARCHIVE_ERROR){
+    return `<div class="panel">${emptyState('โหลดคลังเอกสารไม่สำเร็จ', ARCHIVE_ERROR)}</div>`;
+  }
+  const total = ARCHIVE_ITEMS.length;
+  const pending = ARCHIVE_ITEMS.filter(a=>a.status!=='ยืนยันแล้ว').length;
+  const verified = ARCHIVE_ITEMS.filter(a=>a.status==='ยืนยันแล้ว').length;
+
+  const categoriesInUse = Array.from(new Set(ARCHIVE_ITEMS.map(a=>a.category).filter(Boolean)));
+  const allCategories = Array.from(new Set([...ARCHIVE_CATEGORY_SUGGESTIONS, ...categoriesInUse]));
+
+  let list = ARCHIVE_ITEMS.slice();
+  if(state.archiveFilter.category!=='All') list = list.filter(a=>a.category===state.archiveFilter.category);
+  if(state.archiveFilter.status!=='All') list = list.filter(a=> (a.status||'รอตรวจสอบ')===state.archiveFilter.status);
+  if(state.archiveFilter.q){
+    const q = state.archiveFilter.q.toLowerCase();
+    list = list.filter(a=> (a.title||'').toLowerCase().includes(q) || (a.category||'').toLowerCase().includes(q));
+  }
+  list = list.slice().sort((a,b)=>(b.uploadedAt||0)-(a.uploadedAt||0));
+
+  return `
+  <div class="panel">
+    <div class="panel-title">คลังเอกสาร</div>
+    <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">เก็บเอกสารทั่วไปที่ไม่ใช่เอกสารควบคุมของระบบ ISO เช่น สรุปประชุม, เอกสารสอบเทียบ, ใบรับรองจากภายนอก — ต้องผ่านการตรวจสอบยืนยันจาก DC ก่อนจึงจะถือว่าสมบูรณ์</div>
+  </div>
+  <div class="grid grid-3">
+    <div class="stat-card"><div class="stat-icon blue">${ic('doc')}</div><div><div class="stat-num">${total}</div><div class="stat-label">เอกสารทั้งหมด</div></div></div>
+    <div class="stat-card"><div class="stat-icon amber">${ic('clock')}</div><div><div class="stat-num">${pending}</div><div class="stat-label">รอตรวจสอบ</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">${ic('check')}</div><div><div class="stat-num">${verified}</div><div class="stat-label">ยืนยันแล้ว</div></div></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div></div>
+      <button class="btn primary" id="btnNewArchive">${ic('plus')} เพิ่มเอกสาร</button>
+    </div>
+    <div class="toolbar">
+      <div class="search"><span>${ic('search')}</span><input id="archiveSearch" placeholder="ค้นหาเอกสาร..." value="${state.archiveFilter.q}"></div>
+      <select class="select" id="archiveFCategory">
+        <option value="All" ${state.archiveFilter.category==='All'?'selected':''}>ทุกหมวดหมู่</option>
+        ${allCategories.map(c=>`<option value="${c}" ${state.archiveFilter.category===c?'selected':''}>${c}</option>`).join('')}
+      </select>
+      <select class="select" id="archiveFStatus">
+        <option value="All" ${state.archiveFilter.status==='All'?'selected':''}>ทุกสถานะ</option>
+        <option ${state.archiveFilter.status==='รอตรวจสอบ'?'selected':''}>รอตรวจสอบ</option>
+        <option ${state.archiveFilter.status==='ยืนยันแล้ว'?'selected':''}>ยืนยันแล้ว</option>
+      </select>
+    </div>
+    <div class="table-wrap"><table class="dtable">
+      <thead><tr><th>ชื่อเอกสาร</th><th>หมวดหมู่</th><th>สถานะ</th><th>อัปโหลดโดย</th><th>วันที่</th><th></th></tr></thead>
+      <tbody>
+        ${list.length ? list.map(a=>`
+        <tr>
+          <td class="name">${a.link ? `<a href="${a.link}" target="_blank" rel="noopener" style="color:var(--blue-600); text-decoration:none;">${a.title}</a>` : a.title}</td>
+          <td>${a.category||'—'}</td>
+          <td>${archiveStatusBadge(a.status)}</td>
+          <td>${a.uploadedBy||'—'}</td>
+          <td>${fmtDate(a.uploadedAt)}</td>
+          <td><div class="row-actions">
+            ${a.status!=='ยืนยันแล้ว' ? `<button data-verify="${a.id}" title="ยืนยัน (DC)">${ic('check')}</button>` : ''}
+            <button data-archive-edit="${a.id}" title="แก้ไข">${ic('edit')}</button>
+            <button data-archive-del="${a.id}" class="del" title="ลบ">${ic('trash')}</button>
+          </div></td>
+        </tr>`).join('') : `<tr><td colspan="6" style="text-align:center; padding:40px 0; color:var(--ink-500);">ยังไม่มีเอกสารในคลัง</td></tr>`}
+      </tbody>
+    </table></div>
+  </div>`;
+}
+function attachArchiveHandlers(){
+  const search = document.getElementById('archiveSearch');
+  if(search) search.addEventListener('input', e=>{
+    const cursorPos = e.target.selectionStart;
+    state.archiveFilter.q = e.target.value;
+    render();
+    const refreshed = document.getElementById('archiveSearch');
+    if(refreshed){ refreshed.focus(); refreshed.setSelectionRange(cursorPos, cursorPos); }
+  });
+  const fc = document.getElementById('archiveFCategory');
+  if(fc) fc.addEventListener('change', e=>{ state.archiveFilter.category = e.target.value; render(); });
+  const fs = document.getElementById('archiveFStatus');
+  if(fs) fs.addEventListener('change', e=>{ state.archiveFilter.status = e.target.value; render(); });
+  const newBtn = document.getElementById('btnNewArchive');
+  if(newBtn) newBtn.addEventListener('click', ()=> openArchiveModal({ mode:'new' }));
+  document.querySelectorAll('[data-archive-edit]').forEach(b=> b.addEventListener('click', ()=> openArchiveModal({ mode:'edit', id:b.dataset.archiveEdit })));
+  document.querySelectorAll('[data-verify]').forEach(b=> b.addEventListener('click', ()=> openArchiveModal({ mode:'verify', id:b.dataset.verify })));
+  document.querySelectorAll('[data-archive-del]').forEach(b=> b.addEventListener('click', async ()=>{
+    const a = ARCHIVE_ITEMS.find(x=>x.id===b.dataset.archiveDel);
+    if(!a) return;
+    if(!confirm(`ลบเอกสาร "${a.title}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
+    ARCHIVE_ITEMS = ARCHIVE_ITEMS.filter(x=>x.id!==a.id);
+    await persistArchive();
+    render();
+  }));
+}
+function archiveModal(){
+  const mode = state.archiveModal.mode;
+  const editing = mode==='edit';
+  const verifying = mode==='verify';
+  const a = (editing||verifying) ? ARCHIVE_ITEMS.find(x=>x.id===state.archiveModal.id) : { title:'', category:'', link:'', uploadedBy:'' };
+  if(!a) return `<div class="modal-backdrop" id="archiveModalBackdrop"><div class="modal"><div class="modal-body">${emptyState('ไม่พบเอกสาร','')}</div><div class="modal-actions"><button class="btn ghost" id="archiveModalCancelBtn">ปิด</button></div></div></div>`;
+
+  if(verifying){
+    return `
+    <div class="modal-backdrop" id="archiveModalBackdrop">
+      <div class="modal">
+        <div class="modal-head"><div class="modal-title">ยืนยันเอกสาร (DC)</div><button class="modal-close" id="archiveModalCloseBtn">✕</button></div>
+        <div class="modal-body">
+          <div style="font-size:13px; font-weight:700; color:var(--ink-900); margin-bottom:4px;">${a.title}</div>
+          <div style="font-size:11.5px; color:var(--ink-500); margin-bottom:16px;">${a.category||'ไม่ระบุหมวดหมู่'} · อัปโหลดโดย ${a.uploadedBy||'ไม่ระบุ'}</div>
+          <div class="field"><label>ชื่อ DC ผู้ยืนยัน</label><input id="archiveVerifyName" placeholder="ชื่อ-นามสกุล"></div>
+          <div class="field-error" id="archiveModalError" style="display:none;"></div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn ghost" id="archiveModalCancelBtn">ยกเลิก</button>
+          <button class="btn success" id="archiveModalSaveBtn">${ic('check')} ยืนยันเอกสาร</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  return `
+  <div class="modal-backdrop" id="archiveModalBackdrop">
+    <div class="modal">
+      <div class="modal-head"><div class="modal-title">${editing ? 'แก้ไขเอกสาร' : 'เพิ่มเอกสารในคลัง'}</div><button class="modal-close" id="archiveModalCloseBtn">✕</button></div>
+      <div class="modal-body">
+        <div class="field"><label>ชื่อเอกสาร</label><input id="archiveTitle" value="${(a.title||'').replace(/"/g,'&quot;')}" placeholder="เช่น สรุปประชุมทบทวนฝ่ายบริหาร ม.ค. 2569"></div>
+        <div class="field"><label>หมวดหมู่</label>
+          <input id="archiveCategory" list="archiveCategoryList" value="${(a.category||'').replace(/"/g,'&quot;')}" placeholder="เลือกหรือพิมพ์หมวดหมู่ใหม่">
+          <datalist id="archiveCategoryList">${ARCHIVE_CATEGORY_SUGGESTIONS.map(c=>`<option value="${c}">`).join('')}</datalist>
+        </div>
+        <div class="field"><label>ลิงก์เอกสาร</label><input id="archiveLink" value="${a.link||''}" placeholder="https://mitrphol.sharepoint.com/..."></div>
+        <div class="field"><label>ชื่อผู้อัปโหลด</label><input id="archiveUploader" value="${(a.uploadedBy||'').replace(/"/g,'&quot;')}" placeholder="ชื่อ-นามสกุล"></div>
+        <div class="field-error" id="archiveModalError" style="display:none;"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="archiveModalCancelBtn">ยกเลิก</button>
+        <button class="btn primary" id="archiveModalSaveBtn">${editing ? 'บันทึกการแก้ไข' : 'เพิ่มเอกสาร'}</button>
+      </div>
+    </div>
+  </div>`;
+}
+function wireArchiveModalControls(){
+  const backdrop = document.getElementById('archiveModalBackdrop');
+  if(!backdrop) return;
+  document.getElementById('archiveModalCloseBtn').addEventListener('click', closeArchiveModal);
+  document.getElementById('archiveModalCancelBtn').addEventListener('click', closeArchiveModal);
+  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) closeArchiveModal(); });
+
+  const saveBtn = document.getElementById('archiveModalSaveBtn');
+  if(!saveBtn) return;
+  saveBtn.addEventListener('click', async ()=>{
+    const mode = state.archiveModal.mode;
+    const errEl = document.getElementById('archiveModalError');
+
+    if(mode==='verify'){
+      const nameInput = document.getElementById('archiveVerifyName');
+      const verifier = nameInput ? nameInput.value.trim() : '';
+      if(!verifier){ errEl.textContent='กรอกชื่อ DC ก่อน'; errEl.style.display='block'; return; }
+      const a = ARCHIVE_ITEMS.find(x=>x.id===state.archiveModal.id);
+      if(!a) return;
+      a.status = 'ยืนยันแล้ว';
+      a.verifiedBy = verifier;
+      a.verifiedAt = Date.now();
+      closeArchiveModal();
+      render();
+      await persistArchive();
+      render();
+      return;
+    }
+
+    const title = document.getElementById('archiveTitle').value.trim();
+    const category = document.getElementById('archiveCategory').value.trim();
+    const link = document.getElementById('archiveLink').value.trim();
+    const uploadedBy = document.getElementById('archiveUploader').value.trim();
+    if(!title || !uploadedBy){ errEl.textContent='กรอกชื่อเอกสารและชื่อผู้อัปโหลดให้ครบ'; errEl.style.display='block'; return; }
+
+    if(mode==='new'){
+      ARCHIVE_ITEMS.push({
+        id: 'ARC-' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+        title, category, link, uploadedBy, uploadedAt: Date.now(),
+        status:'รอตรวจสอบ', verifiedBy:null, verifiedAt:null,
+      });
+    } else {
+      const a = ARCHIVE_ITEMS.find(x=>x.id===state.archiveModal.id);
+      if(a){ a.title = title; a.category = category; a.link = link; a.uploadedBy = uploadedBy; }
+    }
+    closeArchiveModal();
+    render();
+    await persistArchive();
+    render();
+  });
+}
+
+// ============================================================
 // DOCUMENT DETAIL
 // ============================================================
 function viewDocDetail(docId){
@@ -941,7 +1189,7 @@ function viewDocDetail(docId){
     <div class="detail-head">
       <div class="doc-thumb">${ic('pdf')}<span>${docTypeCode(d)}</span></div>
       <div style="flex:1;">
-        <div class="detail-title-row"><div class="detail-title">${d.id}</div>${statusBadge(d.note)}${approvalBadge(d.approvalStatus)}</div>
+        <div class="detail-title-row"><div class="detail-title">${d.id}</div>${statusBadge(d.note)}${approvalBadge(d.approvalStatus)}${d.lastRequestType==='new'||d.lastRequestType==='revision' ? (d.publishedLink ? `<span class="badge active">เผยแพร่แล้ว</span>` : `<span class="badge review">รอ DC เผยแพร่</span>`) : ''}</div>
         <div class="detail-sub">${cleanName(d)}${d.rev ? ` <span style="color:var(--ink-500); font-weight:600;">· Rev.${d.rev}</span>` : ''}</div>
         <div class="kv-row"><div class="k">ประเภท</div><div class="v">${docTypeLabel(d)}</div></div>
         <div class="kv-row"><div class="k">วันที่จัดทำ</div><div class="v">${d.createdDate ? fmtDate(d.createdDate) : '—'}</div></div>
@@ -951,7 +1199,7 @@ function viewDocDetail(docId){
         <div class="kv-row"><div class="k">ผู้ทบทวน</div><div class="v">${d.reviewerName || '—'}</div></div>
         <div class="kv-row"><div class="k">ผู้อนุมัติ</div><div class="v">${d.approverName || '—'}</div></div>
         <div class="detail-actions">
-          ${d.link ? `<a class="btn primary" href="${d.link}" target="_blank" rel="noopener">${ic('link')} Open in SharePoint</a>` : `<button class="btn ghost" disabled>${ic('link')} ยังไม่มีลิงก์</button>`}
+          ${displayLink(d) ? `<a class="btn primary" href="${displayLink(d)}" target="_blank" rel="noopener">${ic('link')} Open in SharePoint</a>` : `<button class="btn ghost" disabled>${ic('link')} ยังไม่มีลิงก์</button>`}
           <button class="btn ghost" data-go-revision-history="1">${ic('history')} History</button>
         </div>
         <div class="detail-actions-label">จัดการเอกสาร</div>
@@ -970,6 +1218,11 @@ function viewDocDetail(docId){
       <b>ความคิดเห็นล่าสุด:</b><br>
       ${(d.comments||[]).slice(-1).map(c=>`${c.by}: ${c.text} <span style="color:var(--ink-500);">(${fmtDateTime(c.time)})</span>`).join('') || 'ยังไม่มีความเห็น'}
     </div>
+    ${(d.linkHistory && d.linkHistory.length) ? `
+    <div class="desc-block" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--line);">
+      <b>ประวัติลิงก์เอกสาร:</b><br>
+      ${d.linkHistory.slice().reverse().map(h=>`<div style="margin-top:6px; word-break:break-all;">${h.note||'ลิงก์เดิม'} — <a href="${h.link}" target="_blank" rel="noopener" style="color:var(--blue-600);">${h.link}</a> <span style="color:var(--ink-500);">(${fmtDate(h.time)})</span></div>`).join('')}
+    </div>` : ''}
   </div>`;
 }
 function attachDetailActionHandlers(){
@@ -978,7 +1231,7 @@ function attachDetailActionHandlers(){
   const reviseBtn = document.getElementById('btnDetailRevise');
   if(reviseBtn) reviseBtn.addEventListener('click', ()=> openModal({ mode:'revise', id: state.selectedDoc }));
   const historyBtn = document.querySelector('[data-go-revision-history]');
-  if(historyBtn) historyBtn.addEventListener('click', ()=> goTo('revision', { selectedDoc: state.selectedDoc, revisionDetailOpen: true, revisionTimelineExpanded: false }));
+  if(historyBtn) historyBtn.addEventListener('click', ()=> goTo('revision', { selectedDoc: state.selectedDoc, revisionDetailOpen: true, revisionTimelineExpanded: false, dcPublishEditing: false }));
   const delBtn = document.getElementById('btnDetailDelete');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
@@ -1024,6 +1277,9 @@ function groupHistoryByRequest(d){
 // classifies a comment/event into an icon + color + short Thai title for
 // the colored-icon timeline (revision history detail page + activity feed)
 function classifyEvent(text){
+  if(/DC เผยแพร่เอกสาร|DC แก้ไขลิงก์ที่เผยแพร่/.test(text)){
+    return { icon:'link', bg:'--green-600', title: /แก้ไขลิงก์/.test(text) ? 'DC แก้ไขลิงก์ที่เผยแพร่' : 'DC เผยแพร่เอกสาร' };
+  }
   if(/เปลี่ยนรหัสเอกสารจาก/.test(text)){
     return { icon:'edit', bg:'--blue-600', title:'เปลี่ยนรหัสเอกสาร' };
   }
@@ -1057,9 +1313,74 @@ function eitem(opts){
   </div>`;
 }
 
+// DC publish step — only relevant once a NEW-document or revision request
+// has been fully approved. Until DC pastes the published link, the document
+// stays invisible in every browsable list (see isHiddenFromLists in data.js).
+function renderPublishBox(d){
+  if(d.approvalStatus !== 'อนุมัติแล้ว') return '';
+  if(d.lastRequestType !== 'new' && d.lastRequestType !== 'revision') return '';
+  if(d.publishedLink && !state.dcPublishEditing){
+    return `
+    <div class="side-box" style="border-color:var(--green-600); background:var(--green-50); margin-bottom:18px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+        <div>
+          <div style="font-size:12.5px; font-weight:800; color:var(--green-600);">เผยแพร่แล้ว (Published)</div>
+          <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px; word-break:break-all;">${d.publishedLink}</div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <a class="btn ghost" href="${d.publishedLink}" target="_blank" rel="noopener">${ic('link')} เปิดลิงก์</a>
+          <button class="btn ghost" id="btnDcEditPublish">${ic('edit')} แก้ไขลิงก์</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  return `
+  <div class="side-box" style="border-color:var(--amber-600); background:var(--amber-50); margin-bottom:18px;">
+    <div style="font-size:12.5px; font-weight:800; color:var(--amber-600); margin-bottom:8px;">${d.publishedLink ? 'แก้ไขลิงก์ที่เผยแพร่ (DC)' : 'รอ DC เผยแพร่เอกสาร (Pending Publish)'}</div>
+    <div style="font-size:11.5px; color:var(--ink-700); margin-bottom:10px;">${d.publishedLink ? 'ลิงก์เดิมจะถูกเก็บไว้ในประวัติลิงก์อัตโนมัติ' : 'เอกสารนี้อนุมัติแล้ว แต่จะยังไม่แสดงในรายการเอกสารจนกว่า DC จะวางลิงก์เอกสารที่ขึ้นระบบแล้ว'}</div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <input id="dcPublishLink" placeholder="วางลิงก์เอกสารที่ขึ้นระบบแล้ว" value="${d.publishedLink||''}" style="flex:2; min-width:200px; border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px;">
+      <input id="dcPublishName" placeholder="ชื่อ DC ผู้เผยแพร่" style="flex:1; min-width:140px; border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px;">
+      <button class="btn success" id="btnDcPublish">${ic('link')} ${d.publishedLink ? 'บันทึกลิงก์ใหม่' : 'เผยแพร่เอกสาร'}</button>
+      ${d.publishedLink ? `<button class="btn ghost" id="btnDcCancelEdit">ยกเลิก</button>` : ''}
+    </div>
+  </div>`;
+}
+function wireDcPublish(){
+  const editBtn = document.getElementById('btnDcEditPublish');
+  if(editBtn) editBtn.addEventListener('click', ()=>{ state.dcPublishEditing = true; render(); });
+  const cancelBtn = document.getElementById('btnDcCancelEdit');
+  if(cancelBtn) cancelBtn.addEventListener('click', ()=>{ state.dcPublishEditing = false; render(); });
+  const btn = document.getElementById('btnDcPublish');
+  if(!btn) return;
+  btn.addEventListener('click', async ()=>{
+    const linkInput = document.getElementById('dcPublishLink');
+    const nameInput = document.getElementById('dcPublishName');
+    const link = linkInput ? linkInput.value.trim() : '';
+    const actor = nameInput ? nameInput.value.trim() : '';
+    if(!link){ alert('กรอกลิงก์เอกสารก่อน'); return; }
+    if(!actor){ alert('กรอกชื่อ DC ก่อน'); return; }
+    const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
+    if(!d) return;
+    const now = Date.now();
+    if(d.publishedLink && d.publishedLink !== link){
+      d.linkHistory = d.linkHistory || [];
+      d.linkHistory.push({ link:d.publishedLink, by:actor, time:now, note:`ลิงก์เวอร์ชันก่อนหน้า (Rev.${d.lastRequestFrom||'-'})` });
+    }
+    const isFirstPublish = !d.publishedLink;
+    d.publishedLink = link;
+    d.lastUpdated = now;
+    d.comments = d.comments || [];
+    d.comments.push({ by:actor, text: isFirstPublish ? `DC เผยแพร่เอกสาร (ลิงก์: ${link})` : `DC แก้ไขลิงก์ที่เผยแพร่ (ลิงก์ใหม่: ${link})`, time: now });
+    state.dcPublishEditing = false;
+    render();
+    await persistDocs();
+  });
+}
+
 function viewRevisionDetailInline(d, standalone){
-  const linkBtn = d.link
-    ? `<a class="btn ghost" href="${d.link}" target="_blank" rel="noopener">${ic('link')} เปิดใน SharePoint</a>`
+  const linkBtn = displayLink(d)
+    ? `<a class="btn ghost" href="${displayLink(d)}" target="_blank" rel="noopener">${ic('link')} เปิดใน SharePoint</a>`
     : `<button class="btn ghost" disabled>${ic('link')} ยังไม่มีลิงก์</button>`;
   const nrd = nextReviewDate(d);
   const days = daysUntil(nrd);
@@ -1105,6 +1426,8 @@ function viewRevisionDetailInline(d, standalone){
       <div class="side-box"><div class="side-box-title">ผู้ทบทวน</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.reviewerName || '—'}</div></div>
       <div class="side-box"><div class="side-box-title">ผู้อนุมัติ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.approverName || d.approvedBy || '—'}</div></div>
     </div>
+
+    ${renderPublishBox(d)}
 
     <div class="side-box" style="border-color:var(--green-600); background:var(--green-50); margin-bottom:18px;">
       <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
@@ -1268,11 +1591,12 @@ function attachRevisionDashboardHandlers(){
     elx.addEventListener('click', e=>{
       e.stopPropagation();
       const id = elx.dataset.openRev || elx.dataset.openRevBtn;
-      goTo('revision', { selectedDoc: id, revisionDetailOpen: true, revisionTimelineExpanded: false });
+      goTo('revision', { selectedDoc: id, revisionDetailOpen: true, revisionTimelineExpanded: false, dcPublishEditing: false });
     });
   });
   const toggleTimelineBtn = document.getElementById('btnToggleRevTimeline');
   if(toggleTimelineBtn) toggleTimelineBtn.addEventListener('click', ()=>{ state.revisionTimelineExpanded = !state.revisionTimelineExpanded; render(); });
+  wireDcPublish();
   const editBtn = document.getElementById('revDetailEdit');
   if(editBtn) editBtn.addEventListener('click', ()=> openModal({ mode:'edit', id: state.selectedDoc }));
   const reviseBtn = document.getElementById('revDetailRevise');
@@ -1281,7 +1605,7 @@ function attachRevisionDashboardHandlers(){
   if(approvalBtn) approvalBtn.addEventListener('click', ()=>{
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
     const tab = d && ['อนุมัติแล้ว','ไม่อนุมัติ'].includes(d.approvalStatus) ? 'history' : 'active';
-    goTo('approval', { selectedDoc: state.selectedDoc, approvalTab: tab, approvalPage: 1, approvalDetailOpen: true, approvalCommentsExpanded: false });
+    goTo('approval', { selectedDoc: state.selectedDoc, approvalTab: tab, approvalPage: 1, approvalDetailOpen: true, approvalCommentsExpanded: false, dcPublishEditing: false });
   });
   const delBtn = document.getElementById('revDetailDelete');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
@@ -1495,6 +1819,8 @@ function viewApprovalDetail(){
       ${isRejected ? `<div class="af-line"></div><div class="af-step"><div class="af-circle" style="border-color:var(--red-600); background:var(--red-50);">${ic('alert')}</div><div class="af-name">ไม่อนุมัติ</div><div class="af-status" style="background:var(--red-50); color:var(--red-600);">Rejected</div></div>` : ''}
     </div>
 
+    ${renderPublishBox(d)}
+
     ${isApproved ? `
     <div class="side-box" style="border-color:var(--green-600); background:var(--green-50);">
       <div class="side-box-title" style="color:var(--green-600);">อนุมัติแล้ว</div>
@@ -1539,7 +1865,7 @@ function attachApprovalHandlers(){
   const pgPrev = document.getElementById('apPgPrev'); if(pgPrev) pgPrev.addEventListener('click', ()=>{ state.approvalPage=Math.max(1,state.approvalPage-1); render(); });
   const pgNext = document.getElementById('apPgNext'); if(pgNext) pgNext.addEventListener('click', ()=>{ state.approvalPage=state.approvalPage+1; render(); });
   document.querySelectorAll('[data-select-approval]').forEach(row=>{
-    row.addEventListener('click', ()=>{ goTo('approval', { selectedDoc: row.dataset.selectApproval, approvalDetailOpen: true, approvalCommentsExpanded: false }); });
+    row.addEventListener('click', ()=>{ goTo('approval', { selectedDoc: row.dataset.selectApproval, approvalDetailOpen: true, approvalCommentsExpanded: false, dcPublishEditing: false }); });
   });
 
   const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
@@ -1549,6 +1875,7 @@ function attachApprovalHandlers(){
 
   const toggleCommentsBtn = document.getElementById('btnToggleComments');
   if(toggleCommentsBtn) toggleCommentsBtn.addEventListener('click', ()=>{ state.approvalCommentsExpanded = !state.approvalCommentsExpanded; render(); });
+  wireDcPublish();
 
   const approveBtn = document.getElementById('btnApprove');
   if(approveBtn) approveBtn.addEventListener('click', async ()=>{
@@ -1624,7 +1951,7 @@ function attachApprovalHandlers(){
 // ============================================================
 function viewAudit(){
   const clause = state.selectedClause;
-  const docs = DOCUMENTS.filter(d=> (d.clause||'')===clause);
+  const docs = visibleDocuments().filter(d=> (d.clause||'')===clause);
   const evidence = docs.filter(d=> d.note==='สนับสนุน');
   const related = clause ? CLAUSE_TREE.flatMap(g=>g.children).filter(c=> c.id!==clause && groupOf(c.id)===groupOf(clause)) : [];
   const approvedCount = docs.filter(d=>d.approvalStatus==='อนุมัติแล้ว').length;

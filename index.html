@@ -39,6 +39,10 @@
         <svg class="ic" viewBox="0 0 24 24"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
         <span>Evidence/Support</span>
       </button>
+      <button class="nav-item" data-view="archive">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M3 7h18M4 7v13a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V7M3 7l1.5-4h15L21 7"/><path d="M9 12h6"/></svg>
+        <span>คลังเอกสาร</span>
+      </button>
       <button class="nav-item" data-view="revision">
         <svg class="ic" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 7.07 2.93M12 2v5h5"/></svg>
         <span>Revision</span>
@@ -65,10 +69,14 @@
       </button>
     </nav>
   </aside>
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
   <!-- MAIN -->
   <div class="main">
     <header class="topbar">
+      <button class="menu-toggle" id="menuToggle" title="เมนู">
+        <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
       <button class="icon-btn" id="topBackBtn" title="ย้อนกลับ" style="display:none; margin-right:6px;">
         <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
       </button>
