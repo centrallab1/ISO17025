@@ -124,6 +124,7 @@ const state = {
   dcPublishEditing: false,
   archiveFilter: { category:'All', status:'All', q:'' },
   archiveModal: null, // { mode:'new'|'edit'|'verify', id }
+  archiveFolder: { year:null, category:null, month:null },
   approvalPage: 1,
   approvalTypeFilter: 'All',
   revFilter: { clause:'All', type:'All', status:'All', q:'' },
@@ -151,6 +152,7 @@ const ICONS = {
   chevronRight: `<path d="m9 18 6-6-6-6"/>`,
   bell: `<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>`,
   filter: `<path d="M4 4h16l-6 8v6l-4 2v-8L4 4Z"/>`,
+  folder: `<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>`,
 };
 function ic(name, cls=''){ return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||''}</svg>`; }
 
@@ -309,6 +311,7 @@ function wireNav(){
       let extra = {};
       if(btn.dataset.view==='documents') extra = { docFilter:{ clause:'All', type:'All', status:'All', q:'', preset:'all' }, docPage:1 };
       if(btn.dataset.view==='revision') extra = { revFilter:{ clause:'All', type:'All', status:'All', q:'' }, revPage:1, revisionDetailOpen:false };
+      if(btn.dataset.view==='archive') extra = { archiveFilter:{ category:'All', status:'All', q:'' }, archiveFolder:{ year:null, category:null, month:null } };
       if(btn.dataset.view==='approval'){
         const next = pendingQueue()[0];
         extra = { approvalTab:'active', approvalPage:1, approvalDetailOpen:false };
@@ -985,6 +988,75 @@ function archiveStatusBadge(status){
   const cls = status==='ยืนยันแล้ว' ? 'active' : 'review';
   return `<span class="badge ${cls}">${status||'รอตรวจสอบ'}</span>`;
 }
+function archiveItemRow(a){
+  return `
+  <div class="evidence-item">
+    <div class="file-ic">${ic('file')}</div>
+    <div class="evi-main">
+      ${a.link ? `<a class="evi-name" href="${a.link}" target="_blank" rel="noopener">${a.title}</a>` : `<span class="evi-name evi-nolink">${a.title}</span>`}
+      <div class="evi-sub">อัปโหลดโดย ${a.uploadedBy||'—'} · ยืนยันโดย ${a.verifiedBy ? `<b style="color:var(--green-600);">${a.verifiedBy}</b>` : 'ยังไม่ยืนยัน'} · ${fmtDate(a.uploadedAt)}</div>
+    </div>
+    ${archiveStatusBadge(a.status)}
+    <div class="row-actions" style="margin-left:10px;">
+      ${a.status!=='ยืนยันแล้ว' ? `<button data-verify="${a.id}" title="ยืนยัน (DC)">${ic('check')}</button>` : ''}
+      <button data-archive-edit="${a.id}" title="แก้ไข">${ic('edit')}</button>
+      <button data-archive-del="${a.id}" class="del" title="ลบ">${ic('trash')}</button>
+    </div>
+  </div>`;
+}
+function buildArchiveTree(items){
+  const tree = {};
+  items.forEach(a=>{
+    const cat = a.category || 'ไม่ระบุหมวดหมู่';
+    const dt = new Date(a.uploadedAt || Date.now());
+    const year = dt.getFullYear() + 543;
+    const month = dt.getMonth();
+    tree[year] = tree[year] || {};
+    tree[year][cat] = tree[year][cat] || {};
+    tree[year][cat][month] = tree[year][cat][month] || [];
+    tree[year][cat][month].push(a);
+  });
+  return tree;
+}
+function archiveCategoryOrderFor(catsObj){
+  const cats = Object.keys(catsObj);
+  return [...ARCHIVE_CATEGORY_SUGGESTIONS.filter(c=>cats.includes(c)), ...cats.filter(c=>!ARCHIVE_CATEGORY_SUGGESTIONS.includes(c) && c!=='ไม่ระบุหมวดหมู่').sort(), ...(cats.includes('ไม่ระบุหมวดหมู่')?['ไม่ระบุหมวดหมู่']:[])];
+}
+function countArchiveNode(node){
+  if(Array.isArray(node)) return node.length;
+  return Object.values(node).reduce((s,v)=>s+countArchiveNode(v),0);
+}
+function archiveBreadcrumb(){
+  const f = state.archiveFolder;
+  const parts = [`<span data-archive-crumb="root" style="cursor:pointer; color:${f.year?'var(--blue-600)':'var(--ink-900)'}; font-weight:700;">${ic('folder','sm-icon')} คลังเอกสาร</span>`];
+  if(f.year) parts.push(`<span data-archive-crumb="year" style="cursor:pointer; color:${f.category?'var(--blue-600)':'var(--ink-900)'}; font-weight:700;">ปี ${f.year}</span>`);
+  if(f.category) parts.push(`<span data-archive-crumb="category" style="cursor:pointer; color:${f.month!=null?'var(--blue-600)':'var(--ink-900)'}; font-weight:700;">${f.category}</span>`);
+  if(f.month!=null) parts.push(`<span style="color:var(--ink-900); font-weight:700;">${THAI_MONTHS[f.month]}</span>`);
+  return `<div style="display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:18px; flex-wrap:wrap;">${parts.join('<span style="color:var(--ink-400);">/</span>')}</div>`;
+}
+function renderArchiveFolderView(tree){
+  const f = state.archiveFolder;
+  const crumb = archiveBreadcrumb();
+
+  if(!f.year){
+    const years = Object.keys(tree).map(Number).sort((a,b)=>b-a);
+    if(!years.length) return `<div class="panel">${crumb}${emptyState('ยังไม่มีเอกสารในคลัง','เพิ่มรายการแรกได้จากปุ่ม "เพิ่มเอกสาร" ด้านบน')}</div>`;
+    return `<div class="panel">${crumb}<div class="folder-grid">${years.map(y=>`
+      <div class="folder-card" data-open-year="${y}">${ic('folder')}<div class="folder-label">ปี ${y}</div><div class="folder-count">${countArchiveNode(tree[y])} รายการ</div></div>`).join('')}</div></div>`;
+  }
+  if(!f.category){
+    const cats = archiveCategoryOrderFor(tree[f.year]||{});
+    return `<div class="panel">${crumb}<div class="folder-grid">${cats.map(c=>`
+      <div class="folder-card" data-open-category="${c}">${ic('folder')}<div class="folder-label">${c}</div><div class="folder-count">${countArchiveNode(tree[f.year][c])} รายการ</div></div>`).join('')}</div></div>`;
+  }
+  if(f.month==null){
+    const months = Object.keys((tree[f.year]&&tree[f.year][f.category])||{}).map(Number).sort((a,b)=>b-a);
+    return `<div class="panel">${crumb}<div class="folder-grid">${months.map(m=>`
+      <div class="folder-card" data-open-month="${m}">${ic('folder')}<div class="folder-label">${THAI_MONTHS[m]}</div><div class="folder-count">${tree[f.year][f.category][m].length} รายการ</div></div>`).join('')}</div></div>`;
+  }
+  const items = (tree[f.year] && tree[f.year][f.category] && tree[f.year][f.category][f.month]) || [];
+  return `<div class="panel">${crumb}<div style="display:flex; flex-direction:column;">${items.map(archiveItemRow).join('') || emptyState('ไม่มีเอกสารในโฟลเดอร์นี้','')}</div></div>`;
+}
 function viewArchive(){
   if(!ARCHIVE_LOADED && ARCHIVE_ERROR){
     return `<div class="panel">${emptyState('โหลดคลังเอกสารไม่สำเร็จ', ARCHIVE_ERROR)}</div>`;
@@ -996,36 +1068,31 @@ function viewArchive(){
   const categoriesInUse = Array.from(new Set(ARCHIVE_ITEMS.map(a=>a.category).filter(Boolean)));
   const allCategories = Array.from(new Set([...ARCHIVE_CATEGORY_SUGGESTIONS, ...categoriesInUse]));
 
-  let list = ARCHIVE_ITEMS.slice();
-  if(state.archiveFilter.category!=='All') list = list.filter(a=>a.category===state.archiveFilter.category);
-  if(state.archiveFilter.status!=='All') list = list.filter(a=> (a.status||'รอตรวจสอบ')===state.archiveFilter.status);
-  if(state.archiveFilter.q){
-    const q = state.archiveFilter.q.toLowerCase();
-    list = list.filter(a=> (a.title||'').toLowerCase().includes(q) || (a.category||'').toLowerCase().includes(q));
-  }
+  const searching = !!state.archiveFilter.q || state.archiveFilter.category!=='All' || state.archiveFilter.status!=='All';
 
-  // folder-style grouping: ปี (year) → หมวดหมู่ (category) → เดือน (month)
-  const tree = {};
-  list.forEach(a=>{
-    const cat = a.category || 'ไม่ระบุหมวดหมู่';
-    const dt = new Date(a.uploadedAt || Date.now());
-    const year = dt.getFullYear() + 543;
-    const month = dt.getMonth();
-    tree[year] = tree[year] || {};
-    tree[year][cat] = tree[year][cat] || {};
-    tree[year][cat][month] = tree[year][cat][month] || [];
-    tree[year][cat][month].push(a);
-  });
-  const yearOrder = Object.keys(tree).map(Number).sort((a,b)=>b-a);
-  function categoryOrderFor(catsObj){
-    const cats = Object.keys(catsObj);
-    return [...ARCHIVE_CATEGORY_SUGGESTIONS.filter(c=>cats.includes(c)), ...cats.filter(c=>!ARCHIVE_CATEGORY_SUGGESTIONS.includes(c) && c!=='ไม่ระบุหมวดหมู่').sort(), ...(cats.includes('ไม่ระบุหมวดหมู่')?['ไม่ระบุหมวดหมู่']:[])];
+  let body;
+  if(searching){
+    let list = ARCHIVE_ITEMS.slice();
+    if(state.archiveFilter.category!=='All') list = list.filter(a=>a.category===state.archiveFilter.category);
+    if(state.archiveFilter.status!=='All') list = list.filter(a=> (a.status||'รอตรวจสอบ')===state.archiveFilter.status);
+    if(state.archiveFilter.q){
+      const q = state.archiveFilter.q.toLowerCase();
+      list = list.filter(a=> (a.title||'').toLowerCase().includes(q) || (a.category||'').toLowerCase().includes(q));
+    }
+    list = list.slice().sort((a,b)=>(b.uploadedAt||0)-(a.uploadedAt||0));
+    body = `<div class="panel">
+      <div style="font-size:11.5px; color:var(--ink-500); margin-bottom:10px;">ผลการค้นหา (${list.length})</div>
+      <div style="display:flex; flex-direction:column;">${list.map(archiveItemRow).join('') || emptyState('ไม่พบเอกสารที่ตรงกับเงื่อนไข','')}</div>
+    </div>`;
+  } else {
+    const tree = buildArchiveTree(ARCHIVE_ITEMS);
+    body = renderArchiveFolderView(tree);
   }
 
   return `
   <div class="panel">
     <div class="panel-title">คลังเอกสาร</div>
-    <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">เก็บเอกสารทั่วไปที่ไม่ใช่เอกสารควบคุมของระบบ ISO เช่น สรุปประชุม, เอกสารสอบเทียบ, ใบรับรองจากภายนอก — ต้องผ่านการตรวจสอบยืนยันจาก DC ก่อนจึงจะถือว่าสมบูรณ์ · จัดกลุ่มเป็นโฟลเดอร์ตามปี → หมวดหมู่ → เดือน</div>
+    <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">เก็บเอกสารทั่วไปที่ไม่ใช่เอกสารควบคุมของระบบ ISO เช่น สรุปประชุม, เอกสารสอบเทียบ, ใบรับรองจากภายนอก — ต้องผ่านการตรวจสอบยืนยันจาก DC ก่อนจึงจะถือว่าสมบูรณ์ · กดเข้าโฟลเดอร์ ปี → หมวดหมู่ → เดือน เพื่อดูเอกสาร</div>
   </div>
   <div class="grid grid-3">
     <div class="stat-card"><div class="stat-icon blue">${ic('doc')}</div><div><div class="stat-num">${total}</div><div class="stat-label">เอกสารทั้งหมด</div></div></div>
@@ -1052,41 +1119,7 @@ function viewArchive(){
     </div>
   </div>
 
-  ${yearOrder.length ? yearOrder.map(year=>{
-    const cats = categoryOrderFor(tree[year]);
-    const yearCount = Object.values(tree[year]).reduce((s,months)=> s + Object.values(months).reduce((s2,items)=>s2+items.length,0), 0);
-    return `
-    <div class="panel">
-      <div class="panel-title" style="margin-bottom:14px;">ปี ${year} <span style="color:var(--ink-500); font-weight:600; font-size:12px;">(${yearCount})</span></div>
-      ${cats.map(cat=>{
-        const months = Object.keys(tree[year][cat]).map(Number).sort((a,b)=>b-a);
-        return `
-        <div style="margin-bottom:16px;">
-          <div style="font-size:13px; font-weight:800; color:var(--ink-900); padding-bottom:6px; margin-bottom:8px; border-bottom:2px solid var(--line); display:flex; align-items:center; gap:7px;">${ic('doc','sm-icon')} ${cat}</div>
-          ${months.map(month=>`
-            <div style="margin-bottom:6px; margin-left:8px;">
-              <div style="font-size:11px; font-weight:700; color:var(--ink-500); text-transform:uppercase; letter-spacing:.3px; margin-bottom:2px;">${THAI_MONTHS[month]}</div>
-              <div style="display:flex; flex-direction:column;">
-                ${tree[year][cat][month].map(a=>`
-                <div class="evidence-item">
-                  <div class="file-ic">${ic('file')}</div>
-                  <div class="evi-main">
-                    ${a.link ? `<a class="evi-name" href="${a.link}" target="_blank" rel="noopener">${a.title}</a>` : `<span class="evi-name evi-nolink">${a.title}</span>`}
-                    <div class="evi-sub">อัปโหลดโดย ${a.uploadedBy||'—'} · ยืนยันโดย ${a.verifiedBy ? `<b style="color:var(--green-600);">${a.verifiedBy}</b>` : 'ยังไม่ยืนยัน'} · ${fmtDate(a.uploadedAt)}</div>
-                  </div>
-                  ${archiveStatusBadge(a.status)}
-                  <div class="row-actions" style="margin-left:10px;">
-                    ${a.status!=='ยืนยันแล้ว' ? `<button data-verify="${a.id}" title="ยืนยัน (DC)">${ic('check')}</button>` : ''}
-                    <button data-archive-edit="${a.id}" title="แก้ไข">${ic('edit')}</button>
-                    <button data-archive-del="${a.id}" class="del" title="ลบ">${ic('trash')}</button>
-                  </div>
-                </div>`).join('')}
-              </div>
-            </div>`).join('')}
-        </div>`;
-      }).join('')}
-    </div>`;
-  }).join('') : `<div class="panel">${emptyState('ยังไม่มีเอกสารในคลัง','เพิ่มรายการแรกได้จากปุ่ม "เพิ่มเอกสาร" ด้านบน')}</div>`}
+  ${body}
   `;
 }
 function attachArchiveHandlers(){
@@ -1112,6 +1145,23 @@ function attachArchiveHandlers(){
     if(!confirm(`ลบเอกสาร "${a.title}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
     ARCHIVE_ITEMS = ARCHIVE_ITEMS.filter(x=>x.id!==a.id);
     await persistArchive();
+    render();
+  }));
+  // folder navigation
+  document.querySelectorAll('[data-open-year]').forEach(el=> el.addEventListener('click', ()=>{
+    state.archiveFolder = { year: Number(el.dataset.openYear), category:null, month:null }; render();
+  }));
+  document.querySelectorAll('[data-open-category]').forEach(el=> el.addEventListener('click', ()=>{
+    state.archiveFolder.category = el.dataset.openCategory; state.archiveFolder.month = null; render();
+  }));
+  document.querySelectorAll('[data-open-month]').forEach(el=> el.addEventListener('click', ()=>{
+    state.archiveFolder.month = Number(el.dataset.openMonth); render();
+  }));
+  document.querySelectorAll('[data-archive-crumb]').forEach(el=> el.addEventListener('click', ()=>{
+    const level = el.dataset.archiveCrumb;
+    if(level==='root') state.archiveFolder = { year:null, category:null, month:null };
+    else if(level==='year') state.archiveFolder = { year: state.archiveFolder.year, category:null, month:null };
+    else if(level==='category') state.archiveFolder.month = null;
     render();
   }));
 }
