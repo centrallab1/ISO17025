@@ -1004,24 +1004,28 @@ function viewArchive(){
     list = list.filter(a=> (a.title||'').toLowerCase().includes(q) || (a.category||'').toLowerCase().includes(q));
   }
 
-  // folder-style grouping: หมวดหมู่ (category) → ปี (year) → เดือน (month)
+  // folder-style grouping: ปี (year) → หมวดหมู่ (category) → เดือน (month)
   const tree = {};
   list.forEach(a=>{
     const cat = a.category || 'ไม่ระบุหมวดหมู่';
     const dt = new Date(a.uploadedAt || Date.now());
     const year = dt.getFullYear() + 543;
     const month = dt.getMonth();
-    tree[cat] = tree[cat] || {};
-    tree[cat][year] = tree[cat][year] || {};
-    tree[cat][year][month] = tree[cat][year][month] || [];
-    tree[cat][year][month].push(a);
+    tree[year] = tree[year] || {};
+    tree[year][cat] = tree[year][cat] || {};
+    tree[year][cat][month] = tree[year][cat][month] || [];
+    tree[year][cat][month].push(a);
   });
-  const categoryOrder = [...ARCHIVE_CATEGORY_SUGGESTIONS.filter(c=>tree[c]), ...Object.keys(tree).filter(c=>!ARCHIVE_CATEGORY_SUGGESTIONS.includes(c) && c!=='ไม่ระบุหมวดหมู่').sort(), ...(tree['ไม่ระบุหมวดหมู่']?['ไม่ระบุหมวดหมู่']:[])];
+  const yearOrder = Object.keys(tree).map(Number).sort((a,b)=>b-a);
+  function categoryOrderFor(catsObj){
+    const cats = Object.keys(catsObj);
+    return [...ARCHIVE_CATEGORY_SUGGESTIONS.filter(c=>cats.includes(c)), ...cats.filter(c=>!ARCHIVE_CATEGORY_SUGGESTIONS.includes(c) && c!=='ไม่ระบุหมวดหมู่').sort(), ...(cats.includes('ไม่ระบุหมวดหมู่')?['ไม่ระบุหมวดหมู่']:[])];
+  }
 
   return `
   <div class="panel">
     <div class="panel-title">คลังเอกสาร</div>
-    <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">เก็บเอกสารทั่วไปที่ไม่ใช่เอกสารควบคุมของระบบ ISO เช่น สรุปประชุม, เอกสารสอบเทียบ, ใบรับรองจากภายนอก — ต้องผ่านการตรวจสอบยืนยันจาก DC ก่อนจึงจะถือว่าสมบูรณ์ · จัดกลุ่มเป็นโฟลเดอร์ตามหมวดหมู่ → ปี → เดือน</div>
+    <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">เก็บเอกสารทั่วไปที่ไม่ใช่เอกสารควบคุมของระบบ ISO เช่น สรุปประชุม, เอกสารสอบเทียบ, ใบรับรองจากภายนอก — ต้องผ่านการตรวจสอบยืนยันจาก DC ก่อนจึงจะถือว่าสมบูรณ์ · จัดกลุ่มเป็นโฟลเดอร์ตามปี → หมวดหมู่ → เดือน</div>
   </div>
   <div class="grid grid-3">
     <div class="stat-card"><div class="stat-icon blue">${ic('doc')}</div><div><div class="stat-num">${total}</div><div class="stat-label">เอกสารทั้งหมด</div></div></div>
@@ -1048,22 +1052,22 @@ function viewArchive(){
     </div>
   </div>
 
-  ${categoryOrder.length ? categoryOrder.map(cat=>{
-    const years = Object.keys(tree[cat]).map(Number).sort((a,b)=>b-a);
-    const catCount = years.reduce((s,y)=> s + Object.values(tree[cat][y]).reduce((s2,items)=>s2+items.length,0), 0);
+  ${yearOrder.length ? yearOrder.map(year=>{
+    const cats = categoryOrderFor(tree[year]);
+    const yearCount = Object.values(tree[year]).reduce((s,months)=> s + Object.values(months).reduce((s2,items)=>s2+items.length,0), 0);
     return `
     <div class="panel">
-      <div class="panel-title" style="margin-bottom:14px; display:flex; align-items:center; gap:8px;">${ic('doc','sm-icon')} ${cat} <span style="color:var(--ink-500); font-weight:600; font-size:12px;">(${catCount})</span></div>
-      ${years.map(year=>{
-        const months = Object.keys(tree[cat][year]).map(Number).sort((a,b)=>b-a);
+      <div class="panel-title" style="margin-bottom:14px;">ปี ${year} <span style="color:var(--ink-500); font-weight:600; font-size:12px;">(${yearCount})</span></div>
+      ${cats.map(cat=>{
+        const months = Object.keys(tree[year][cat]).map(Number).sort((a,b)=>b-a);
         return `
         <div style="margin-bottom:16px;">
-          <div style="font-size:13px; font-weight:800; color:var(--ink-900); padding-bottom:6px; margin-bottom:8px; border-bottom:2px solid var(--line);">ปี ${year}</div>
+          <div style="font-size:13px; font-weight:800; color:var(--ink-900); padding-bottom:6px; margin-bottom:8px; border-bottom:2px solid var(--line); display:flex; align-items:center; gap:7px;">${ic('doc','sm-icon')} ${cat}</div>
           ${months.map(month=>`
             <div style="margin-bottom:6px; margin-left:8px;">
               <div style="font-size:11px; font-weight:700; color:var(--ink-500); text-transform:uppercase; letter-spacing:.3px; margin-bottom:2px;">${THAI_MONTHS[month]}</div>
               <div style="display:flex; flex-direction:column;">
-                ${tree[cat][year][month].map(a=>`
+                ${tree[year][cat][month].map(a=>`
                 <div class="evidence-item">
                   <div class="file-ic">${ic('file')}</div>
                   <div class="evi-main">
@@ -1115,7 +1119,7 @@ function archiveModal(){
   const mode = state.archiveModal.mode;
   const editing = mode==='edit';
   const verifying = mode==='verify';
-  const a = (editing||verifying) ? ARCHIVE_ITEMS.find(x=>x.id===state.archiveModal.id) : { title:'', category:'', link:'', uploadedBy:'' };
+  const a = (editing||verifying) ? ARCHIVE_ITEMS.find(x=>x.id===state.archiveModal.id) : { title:'', category:'', link:'', uploadedBy:'', uploadedAt:null };
   if(!a) return `<div class="modal-backdrop" id="archiveModalBackdrop"><div class="modal"><div class="modal-body">${emptyState('ไม่พบเอกสาร','')}</div><div class="modal-actions"><button class="btn ghost" id="archiveModalCancelBtn">ปิด</button></div></div></div>`;
 
   if(verifying){
@@ -1149,6 +1153,8 @@ function archiveModal(){
         </div>
         <div class="field"><label>ลิงก์เอกสาร</label><input id="archiveLink" value="${a.link||''}" placeholder="https://mitrphol.sharepoint.com/..."></div>
         <div class="field"><label>ชื่อผู้อัปโหลด</label><input id="archiveUploader" value="${(a.uploadedBy||'').replace(/"/g,'&quot;')}" placeholder="ชื่อ-นามสกุล"></div>
+        <div class="field"><label>วันที่เอกสาร</label><input type="date" id="archiveDate" value="${new Date(a.uploadedAt || Date.now()).toISOString().slice(0,10)}"></div>
+        <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:14px;">แก้วันที่ได้ถ้าวางไฟล์ย้อนหลัง — ระบบจะจัดกลุ่มปี/เดือนตามวันที่นี้</div>
         <div class="field-error" id="archiveModalError" style="display:none;"></div>
       </div>
       <div class="modal-actions">
@@ -1191,17 +1197,20 @@ function wireArchiveModalControls(){
     const category = document.getElementById('archiveCategory').value.trim();
     const link = document.getElementById('archiveLink').value.trim();
     const uploadedBy = document.getElementById('archiveUploader').value.trim();
+    const dateInput = document.getElementById('archiveDate');
+    const dateVal = dateInput ? dateInput.value : '';
+    const uploadedAt = dateVal ? new Date(dateVal+'T00:00:00').getTime() : Date.now();
     if(!title || !uploadedBy){ errEl.textContent='กรอกชื่อเอกสารและชื่อผู้อัปโหลดให้ครบ'; errEl.style.display='block'; return; }
 
     if(mode==='new'){
       ARCHIVE_ITEMS.push({
         id: 'ARC-' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
-        title, category, link, uploadedBy, uploadedAt: Date.now(),
+        title, category, link, uploadedBy, uploadedAt,
         status:'รอตรวจสอบ', verifiedBy:null, verifiedAt:null,
       });
     } else {
       const a = ARCHIVE_ITEMS.find(x=>x.id===state.archiveModal.id);
-      if(a){ a.title = title; a.category = category; a.link = link; a.uploadedBy = uploadedBy; }
+      if(a){ a.title = title; a.category = category; a.link = link; a.uploadedBy = uploadedBy; a.uploadedAt = uploadedAt; }
     }
     closeArchiveModal();
     render();
