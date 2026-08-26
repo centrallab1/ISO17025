@@ -96,7 +96,7 @@ body{
 .topbar-right{display:flex; align-items:center; gap:6px;}
 .icon-btn{
   width:36px; height:36px; border-radius:9px; border:none; background:transparent;
-  display:flex; align-items:center; justify-content:center; cursor:pointer; position:relative;
+  display:flex; align-items:center; justify-content:center; cursor:pointer; position:relative; text-decoration:none;
 }
 .icon-btn:hover{background:var(--bg);}
 .icon-btn svg{width:18px; height:18px; stroke:var(--ink-500); fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round;}
@@ -477,6 +477,15 @@ table.dtable td.name{color:var(--ink-900); font-weight:650; font-size:13.5px; ma
 .boot-error{max-width:420px; text-align:center; background:#fff; border:1px solid var(--line); border-radius:12px; padding:22px 24px; box-shadow:var(--shadow-md);}
 .boot-error h3{font-size:14.5px; color:var(--red-600); margin:0 0 8px;}
 .boot-error p{font-size:12.5px; color:var(--ink-500); margin:0; line-height:1.6;}
+
+.login-screen{position:fixed; inset:0; background:linear-gradient(135deg, var(--navy-900,#0f1b3d) 0%, var(--navy-800,#152451) 100%); background-color:#101b3d; display:flex; align-items:center; justify-content:center; z-index:300;}
+.login-card{width:360px; max-width:90vw; background:#fff; border-radius:16px; padding:32px 28px; box-shadow:0 20px 60px rgba(0,0,0,.35);}
+.login-logo{width:48px; height:48px; border-radius:12px; background:var(--blue-600); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:16px; margin-bottom:16px;}
+.login-title{font-size:17px; font-weight:800; color:var(--ink-900); margin-bottom:4px;}
+.login-sub{font-size:12px; color:var(--ink-500); margin-bottom:20px;}
+.login-card .field{margin-bottom:14px;}
+.login-card .field label{display:block; font-size:11.5px; font-weight:700; color:var(--ink-700); margin-bottom:5px;}
+.login-card .field input{width:100%; box-sizing:border-box; border:1px solid var(--line); border-radius:9px; padding:10px 12px; font-size:13px;}
 
 /* modal */
 .modal-backdrop{position:fixed; inset:0; background:rgba(16,24,40,.45); display:flex; align-items:center; justify-content:center; z-index:100; padding:20px;}

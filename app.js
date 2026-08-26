@@ -21,6 +21,93 @@ const dbFirestore = getFirestore(firebaseApp);
 const docRef = doc(dbFirestore, "iso17025", "documents");
 const archiveDocRef = doc(dbFirestore, "iso17025", "archive");
 
+// ============================================================
+// AUTH — soft, client-side login for identity + role-based UI gating.
+// NOTE: this is a static site with no backend, so this is NOT
+// cryptographically secure (the password list lives in this JS file
+// and could be read via browser dev tools). It's meant to stop
+// accidental misuse and give every action a real name for the audit
+// trail, not to withstand a determined attacker. Real security would
+// need Firebase Authentication + Firestore security rules.
+// ============================================================
+const USERS = [
+  { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
+  { id:'thidarati', password:'ISO123',       name:'Thitarat Intakham',  role:'QM' },
+  { id:'pimchanok', password:'mpir1234',     name:'Pimchanok Busayapong', role:'LM' },
+];
+const ROLE_LABEL = { DC:'Document Control', QM:'Quality Manager', LM:'Lab Manager' };
+let currentUser = null;
+const SESSION_KEY = 'mpir_iso17025_session';
+function tryRestoreSession(){
+  try{
+    const raw = localStorage.getItem(SESSION_KEY);
+    if(!raw) return;
+    const saved = JSON.parse(raw);
+    const match = USERS.find(u=>u.id===saved.id);
+    if(match) currentUser = { id:match.id, name:match.name, role:match.role };
+  } catch(e){ /* ignore corrupt/blocked storage */ }
+}
+function saveSession(){
+  try{ localStorage.setItem(SESSION_KEY, JSON.stringify({ id: currentUser.id })); } catch(e){}
+}
+function clearSession(){
+  try{ localStorage.removeItem(SESSION_KEY); } catch(e){}
+  currentUser = null;
+}
+function isDC(){ return !!currentUser && currentUser.role==='DC'; }
+function currentActorName(){ return currentUser ? currentUser.name : 'ไม่ระบุ'; }
+
+function renderLoginScreen(){
+  const el = document.createElement('div');
+  el.className = 'login-screen';
+  el.id = 'loginScreen';
+  el.innerHTML = `
+    <div class="login-card">
+      <div class="login-logo">MP</div>
+      <div class="login-title">MPIR Central Lab</div>
+      <div class="login-sub">ระบบเอกสาร ISO/IEC 17025:2017 — เข้าสู่ระบบ</div>
+      <div class="field"><label>รหัสผู้ใช้ (ID)</label><input id="loginId" placeholder="เช่น yaraponp" autocomplete="username"></div>
+      <div class="field"><label>รหัสผ่าน</label><input id="loginPw" type="password" placeholder="Password" autocomplete="current-password"></div>
+      <div class="field-error" id="loginError" style="display:none;"></div>
+      <button class="btn primary" id="loginBtn" style="width:100%; justify-content:center; margin-top:8px;">เข้าสู่ระบบ</button>
+    </div>`;
+  document.body.appendChild(el);
+  const doLogin = ()=>{
+    const id = document.getElementById('loginId').value.trim();
+    const pw = document.getElementById('loginPw').value;
+    const errEl = document.getElementById('loginError');
+    const user = USERS.find(u=>u.id===id && u.password===pw);
+    if(!user){ errEl.textContent = 'รหัสผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'; errEl.style.display='block'; return; }
+    currentUser = { id:user.id, name:user.name, role:user.role };
+    saveSession();
+    const screen = document.getElementById('loginScreen');
+    if(screen) screen.remove();
+    startApp();
+  };
+  document.getElementById('loginBtn').addEventListener('click', doLogin);
+  document.getElementById('loginPw').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+  document.getElementById('loginId').focus();
+}
+function updateUserBadge(){
+  if(!currentUser) return;
+  const initials = currentUser.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+  const avatarEl = document.getElementById('userAvatar');
+  const nameEl = document.getElementById('userNameDisplay');
+  const roleEl = document.getElementById('userRoleDisplay');
+  if(avatarEl) avatarEl.textContent = initials;
+  if(nameEl) nameEl.textContent = currentUser.name;
+  if(roleEl) roleEl.textContent = `${currentUser.role} — ${ROLE_LABEL[currentUser.role]}`;
+  const badge = document.getElementById('userBadge');
+  if(badge) badge.onclick = ()=>{
+    if(confirm('ออกจากระบบใช่หรือไม่?')){ clearSession(); location.reload(); }
+  };
+  // Administration is DC-only (system oversight); Archive stays visible to
+  // everyone (QM/LM can view/upload — DC-only actions are gated inside it)
+  document.querySelectorAll('.nav-item[data-view="administration"], .nav-item[data-view="admin"]').forEach(el=>{
+    el.style.display = isDC() ? '' : 'none';
+  });
+}
+
 async function loadDocs(){
   try{
     const snap = await getDoc(docRef);
@@ -260,7 +347,8 @@ function cleanName(d){
 // ============================================================
 // BOOT
 // ============================================================
-async function boot(){
+async function startApp(){
+  updateUserBadge();
   renderBootScreen('กำลังโหลดข้อมูลจาก Firestore…');
   await loadDocs();
   if(!DOCS_LOADED){
@@ -275,6 +363,12 @@ async function boot(){
   wireBackButton();
   wireSidebarToggle();
   render();
+  updateUserBadge();
+}
+function initApp(){
+  tryRestoreSession();
+  if(currentUser) startApp();
+  else renderLoginScreen();
 }
 function renderBootScreen(text){
   const el = document.createElement('div');
@@ -641,8 +735,8 @@ function renderDocumentsInto(){
           <td class="mono">${d.id}</td><td class="name" title="${cleanName(d).replace(/"/g,'&quot;')}">${cleanName(d)}</td><td>${d.clause || '<span style="color:var(--ink-400);">—</span>'}</td>
           <td>${docTypeLabel(d)}</td><td>${statusBadge(d.note)}</td><td>${approvalBadge(d.approvalStatus)}</td><td>${fmtDate(d.lastUpdated)}</td>
           <td><div class="row-actions" onclick="event.stopPropagation()">
-            <button data-edit="${d.id}" title="Edit">${ic('edit')}</button>
-            <button data-del="${d.id}" class="del" title="Delete">${ic('trash')}</button>
+            ${isDC() ? `<button data-edit="${d.id}" title="Edit">${ic('edit')}</button>
+            <button data-del="${d.id}" class="del" title="Delete">${ic('trash')}</button>` : ''}
           </div></td>
         </tr>`).join('') : `<tr><td colspan="8" style="text-align:center; padding:40px 0; color:var(--ink-500);">No documents match your filters.</td></tr>`}
       </tbody>
@@ -762,8 +856,7 @@ function docModal(){
         </div>
         <div class="field"><label>${revising ? 'Rev. ใหม่ (เรียงต่ออัตโนมัติ แก้ไขได้)' : 'Rev.'}</label>
           <input id="mfRev" value="${suggestedRev}" placeholder="0"></div>
-        ${revising ? `<div class="field"><label>ชื่อผู้ขอปรับปรุง</label><input id="mfActor" placeholder="ชื่อ-นามสกุล"></div>` : ''}
-        ${creatingNew ? `<div class="field"><label>ชื่อผู้จัดทำ / ผู้ขอขึ้นทะเบียน</label><input id="mfActor" placeholder="ชื่อ-นามสกุล"></div>` : ''}
+        ${(revising||creatingNew) ? `<div class="field"><label>${revising ? 'ผู้ขอปรับปรุง' : 'ผู้จัดทำ / ผู้ขอขึ้นทะเบียน'}</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()} <span style="color:var(--ink-500); font-weight:600;">(${currentUser.role})</span></div></div>` : ''}
         ${editing ? `
         <div class="field"><label>วันที่จัดทำ</label><input id="mfCreated" type="date" value="${d.createdDate ? new Date(d.createdDate).toISOString().slice(0,10) : ''}"></div>
         <div class="field"><label>วันที่ประกาศใช้</label><input id="mfEffective" type="date" value="${d.effectiveDate ? new Date(d.effectiveDate).toISOString().slice(0,10) : ''}"></div>
@@ -864,26 +957,24 @@ function wireModalControls(){
 
     if(mode==='new'){
       if(DOCUMENTS.some(x=>x.id===id)){ errEl.textContent = 'รหัสเอกสารนี้มีอยู่แล้ว'; errEl.style.display='block'; return; }
-      const actor = document.getElementById('mfActor').value.trim();
-      if(!actor){ errEl.textContent = 'กรอกชื่อผู้จัดทำก่อน'; errEl.style.display='block'; return; }
+      const actor = currentActorName();
       const now = Date.now();
       DOCUMENTS.push({
         id, name, clause, link, note, rev: rev || '0',
         approvalStatus:'ร่าง', reviewerName:'', approverName:'', preparedBy:actor,
         comments:[{ by:actor, text:'ขอขึ้นทะเบียนเอกสารใหม่', time: now }], lastUpdated: now, createdDate: now, effectiveDate:null,
-        approvedBy:null, approvedAt:null, approvedComment:null, lastRequestType:'new',
+        approvedBy:null, approvedAt:null, approvedComment:null, lastRequestType:'new', requestedBy: actor,
         publishedLink:null, linkHistory:[],
       });
     } else if(mode==='revise'){
-      const actor = document.getElementById('mfActor').value.trim();
-      if(!actor){ errEl.textContent = 'กรอกชื่อผู้ขอปรับปรุงก่อน'; errEl.style.display='block'; return; }
+      const actor = currentActorName();
       const d = DOCUMENTS.find(x=>x.id===state.modal.id);
       const oldRev = d.rev;
       d.name = name; d.clause = clause; d.link = link; d.note = note;
       d.rev = rev || nextRevNumber(oldRev);
       d.approvalStatus = 'รอทบทวน';
       d.approvedBy = null; d.approvedAt = null; d.approvedComment = null;
-      d.lastRequestType = 'revision'; d.lastRequestFrom = oldRev || null;
+      d.lastRequestType = 'revision'; d.lastRequestFrom = oldRev || null; d.requestedBy = actor;
       d.comments = d.comments || [];
       d.comments.push({ by:actor, text:`ขอปรับปรุงจาก Rev.${oldRev||'-'} เป็น Rev.${d.rev}`, time: Date.now() });
       d.lastUpdated = Date.now();
@@ -953,8 +1044,8 @@ function viewEvidence(){
               <div class="evi-sub">${d.id}${!link ? ' · ยังไม่มีลิงก์' : ''}</div>
             </div>
             <div class="row-actions">
-              <button data-edit="${d.id}" title="แก้ไข">${ic('edit')}</button>
-              <button data-del="${d.id}" class="del" title="ลบ">${ic('trash')}</button>
+              ${isDC() ? `<button data-edit="${d.id}" title="แก้ไข">${ic('edit')}</button>
+              <button data-del="${d.id}" class="del" title="ลบ">${ic('trash')}</button>` : ''}
             </div>
           </div>`;
         }).join('')}
@@ -998,9 +1089,9 @@ function archiveItemRow(a){
     </div>
     ${archiveStatusBadge(a.status)}
     <div class="row-actions" style="margin-left:10px;">
-      ${a.status!=='ยืนยันแล้ว' ? `<button data-verify="${a.id}" title="ยืนยัน (DC)">${ic('check')}</button>` : ''}
-      <button data-archive-edit="${a.id}" title="แก้ไข">${ic('edit')}</button>
-      <button data-archive-del="${a.id}" class="del" title="ลบ">${ic('trash')}</button>
+      ${(a.status!=='ยืนยันแล้ว' && isDC()) ? `<button data-verify="${a.id}" title="ยืนยัน (DC)">${ic('check')}</button>` : ''}
+      ${isDC() ? `<button data-archive-edit="${a.id}" title="แก้ไข">${ic('edit')}</button>
+      <button data-archive-del="${a.id}" class="del" title="ลบ">${ic('trash')}</button>` : ''}
     </div>
   </div>`;
 }
@@ -1180,7 +1271,7 @@ function archiveModal(){
         <div class="modal-body">
           <div style="font-size:13px; font-weight:700; color:var(--ink-900); margin-bottom:4px;">${a.title}</div>
           <div style="font-size:11.5px; color:var(--ink-500); margin-bottom:16px;">${a.category||'ไม่ระบุหมวดหมู่'} · อัปโหลดโดย ${a.uploadedBy||'ไม่ระบุ'}</div>
-          <div class="field"><label>ชื่อ DC ผู้ยืนยัน</label><input id="archiveVerifyName" placeholder="ชื่อ-นามสกุล"></div>
+          <div class="field"><label>ผู้ยืนยัน (DC)</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()}</div></div>
           <div class="field-error" id="archiveModalError" style="display:none;"></div>
         </div>
         <div class="modal-actions">
@@ -1202,7 +1293,7 @@ function archiveModal(){
           <datalist id="archiveCategoryList">${ARCHIVE_CATEGORY_SUGGESTIONS.map(c=>`<option value="${c}">`).join('')}</datalist>
         </div>
         <div class="field"><label>ลิงก์เอกสาร</label><input id="archiveLink" value="${a.link||''}" placeholder="https://mitrphol.sharepoint.com/..."></div>
-        <div class="field"><label>ชื่อผู้อัปโหลด</label><input id="archiveUploader" value="${(a.uploadedBy||'').replace(/"/g,'&quot;')}" placeholder="ชื่อ-นามสกุล"></div>
+        <div class="field"><label>ผู้อัปโหลด</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()}</div></div>
         <div class="field"><label>วันที่เอกสาร</label><input type="date" id="archiveDate" value="${new Date(a.uploadedAt || Date.now()).toISOString().slice(0,10)}"></div>
         <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:14px;">แก้วันที่ได้ถ้าวางไฟล์ย้อนหลัง — ระบบจะจัดกลุ่มปี/เดือนตามวันที่นี้</div>
         <div class="field-error" id="archiveModalError" style="display:none;"></div>
@@ -1228,9 +1319,8 @@ function wireArchiveModalControls(){
     const errEl = document.getElementById('archiveModalError');
 
     if(mode==='verify'){
-      const nameInput = document.getElementById('archiveVerifyName');
-      const verifier = nameInput ? nameInput.value.trim() : '';
-      if(!verifier){ errEl.textContent='กรอกชื่อ DC ก่อน'; errEl.style.display='block'; return; }
+      if(!isDC()) return; // defense in depth
+      const verifier = currentActorName();
       const a = ARCHIVE_ITEMS.find(x=>x.id===state.archiveModal.id);
       if(!a) return;
       a.status = 'ยืนยันแล้ว';
@@ -1246,11 +1336,11 @@ function wireArchiveModalControls(){
     const title = document.getElementById('archiveTitle').value.trim();
     const category = document.getElementById('archiveCategory').value.trim();
     const link = document.getElementById('archiveLink').value.trim();
-    const uploadedBy = document.getElementById('archiveUploader').value.trim();
+    const uploadedBy = currentActorName();
     const dateInput = document.getElementById('archiveDate');
     const dateVal = dateInput ? dateInput.value : '';
     const uploadedAt = dateVal ? new Date(dateVal+'T00:00:00').getTime() : Date.now();
-    if(!title || !uploadedBy){ errEl.textContent='กรอกชื่อเอกสารและชื่อผู้อัปโหลดให้ครบ'; errEl.style.display='block'; return; }
+    if(!title){ errEl.textContent='กรอกชื่อเอกสารให้ครบ'; errEl.style.display='block'; return; }
 
     if(mode==='new'){
       ARCHIVE_ITEMS.push({
@@ -1296,9 +1386,9 @@ function viewDocDetail(docId){
         </div>
         <div class="detail-actions-label">จัดการเอกสาร</div>
         <div class="detail-actions">
-          <button class="btn ghost" id="btnDetailEdit">${ic('edit')} แก้ไข</button>
+          ${isDC() ? `<button class="btn ghost" id="btnDetailEdit">${ic('edit')} แก้ไข</button>` : ''}
           <button class="btn ghost" id="btnDetailRevise">${ic('history')} ปรับปรุง Rev.</button>
-          <button class="btn danger" id="btnDetailDelete">${ic('trash')} ลบ</button>
+          ${isDC() ? `<button class="btn danger" id="btnDetailDelete">${ic('trash')} ลบ</button>` : ''}
         </div>
       </div>
       <div class="side-box" style="width:230px;">
@@ -1421,18 +1511,25 @@ function renderPublishBox(d){
         </div>
         <div style="display:flex; gap:8px;">
           <a class="btn ghost" href="${d.publishedLink}" target="_blank" rel="noopener">${ic('link')} เปิดลิงก์</a>
-          <button class="btn ghost" id="btnDcEditPublish">${ic('edit')} แก้ไขลิงก์</button>
+          ${isDC() ? `<button class="btn ghost" id="btnDcEditPublish">${ic('edit')} แก้ไขลิงก์</button>` : ''}
         </div>
       </div>
+    </div>`;
+  }
+  if(!isDC()){
+    return `
+    <div class="side-box" style="border-color:var(--amber-600); background:var(--amber-50); margin-bottom:18px;">
+      <div style="font-size:12.5px; font-weight:800; color:var(--amber-600); margin-bottom:4px;">รอ DC เผยแพร่เอกสาร (Pending Publish)</div>
+      <div style="font-size:11.5px; color:var(--ink-700);">เอกสารนี้อนุมัติแล้ว แต่จะยังไม่แสดงในรายการเอกสารจนกว่า Document Control (DC) จะวางลิงก์เอกสารที่ขึ้นระบบแล้ว</div>
     </div>`;
   }
   return `
   <div class="side-box" style="border-color:var(--amber-600); background:var(--amber-50); margin-bottom:18px;">
     <div style="font-size:12.5px; font-weight:800; color:var(--amber-600); margin-bottom:8px;">${d.publishedLink ? 'แก้ไขลิงก์ที่เผยแพร่ (DC)' : 'รอ DC เผยแพร่เอกสาร (Pending Publish)'}</div>
     <div style="font-size:11.5px; color:var(--ink-700); margin-bottom:10px;">${d.publishedLink ? 'ลิงก์เดิมจะถูกเก็บไว้ในประวัติลิงก์อัตโนมัติ' : 'เอกสารนี้อนุมัติแล้ว แต่จะยังไม่แสดงในรายการเอกสารจนกว่า DC จะวางลิงก์เอกสารที่ขึ้นระบบแล้ว'}</div>
-    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
       <input id="dcPublishLink" placeholder="วางลิงก์เอกสารที่ขึ้นระบบแล้ว" value="${d.publishedLink||''}" style="flex:2; min-width:200px; border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px;">
-      <input id="dcPublishName" placeholder="ชื่อ DC ผู้เผยแพร่" style="flex:1; min-width:140px; border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px;">
+      <div style="font-size:12px; color:var(--ink-500);">โดย ${currentActorName()}</div>
       <button class="btn success" id="btnDcPublish">${ic('link')} ${d.publishedLink ? 'บันทึกลิงก์ใหม่' : 'เผยแพร่เอกสาร'}</button>
       ${d.publishedLink ? `<button class="btn ghost" id="btnDcCancelEdit">ยกเลิก</button>` : ''}
     </div>
@@ -1446,12 +1543,11 @@ function wireDcPublish(){
   const btn = document.getElementById('btnDcPublish');
   if(!btn) return;
   btn.addEventListener('click', async ()=>{
+    if(!isDC()) return; // defense in depth — button only renders for DC anyway
     const linkInput = document.getElementById('dcPublishLink');
-    const nameInput = document.getElementById('dcPublishName');
     const link = linkInput ? linkInput.value.trim() : '';
-    const actor = nameInput ? nameInput.value.trim() : '';
+    const actor = currentActorName();
     if(!link){ alert('กรอกลิงก์เอกสารก่อน'); return; }
-    if(!actor){ alert('กรอกชื่อ DC ก่อน'); return; }
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
     if(!d) return;
     const now = Date.now();
@@ -1503,10 +1599,10 @@ function viewRevisionDetailInline(d, standalone){
       </div>
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
         ${linkBtn}
-        <button class="btn ghost" id="revDetailEdit">${ic('edit')} แก้ไข</button>
+        ${isDC() ? `<button class="btn ghost" id="revDetailEdit">${ic('edit')} แก้ไข</button>` : ''}
         <button class="btn ghost" id="revDetailRevise">${ic('history')} ปรับปรุง Rev.</button>
         <button class="btn ghost" id="revDetailApproval">${ic('check')} Approval</button>
-        <button class="btn danger" id="revDetailDelete">${ic('trash')} ลบ</button>
+        ${isDC() ? `<button class="btn danger" id="revDetailDelete">${ic('trash')} ลบ</button>` : ''}
       </div>
     </div>
 
@@ -1534,8 +1630,7 @@ function viewRevisionDetailInline(d, standalone){
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
           ${reviewPending
             ? `<button class="btn ghost" id="btnGoReviewApproval">${ic('check')} ไปที่ Approval</button>`
-            : `<input id="revReviewerName" placeholder="ชื่อผู้ขอทบทวน" style="border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px; width:160px;">
-               <button class="btn success" id="btnConfirmReview">${ic('send')} ขอทบทวนประจำปี</button>`}
+            : `<button class="btn success" id="btnConfirmReview">${ic('send')} ขอทบทวนประจำปี (โดย ${currentActorName()})</button>`}
         </div>
       </div>
     </div>
@@ -1712,9 +1807,7 @@ function attachRevisionDashboardHandlers(){
   });
   const confirmReviewBtn = document.getElementById('btnConfirmReview');
   if(confirmReviewBtn) confirmReviewBtn.addEventListener('click', async ()=>{
-    const nameInput = document.getElementById('revReviewerName');
-    const actor = nameInput ? nameInput.value.trim() : '';
-    if(!actor){ alert('กรอกชื่อผู้ขอทบทวนก่อน'); return; }
+    const actor = currentActorName();
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
     if(!d) return;
     const now = Date.now();
@@ -1723,6 +1816,7 @@ function attachRevisionDashboardHandlers(){
     d.approvalStatus = 'รอทบทวน';
     d.lastRequestType = 'review';
     d.lastRequestFrom = d.rev || null;
+    d.requestedBy = actor;
     d.approvedBy = null; d.approvedAt = null; d.approvedComment = null;
     d.comments = d.comments || [];
     d.comments.push({ by:actor, text:'ขอทบทวนประจำปี — ไม่มีการแก้ไขเอกสาร', time: now });
@@ -1921,7 +2015,7 @@ function viewApprovalDetail(){
       ${approvedComment ? `<div style="font-size:12.5px; color:var(--ink-700); margin-top:8px; padding-top:8px; border-top:1px solid var(--line);">${approvedComment}</div>` : ''}
     </div>
     ` : `
-    <div class="field" style="max-width:320px;"><label>ชื่อผู้ดำเนินการ</label><input id="approvalActor" placeholder="ชื่อ-นามสกุล" value="${lastActorName.replace(/"/g,'&quot;')}"></div>
+    <div class="field" style="max-width:320px;"><label>ผู้ดำเนินการ</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()} <span style="color:var(--ink-500); font-weight:600;">(${currentUser.role})</span></div></div>
     <div class="comment-box">
       <label style="font-size:12px; font-weight:700; color:var(--ink-700); display:block; margin-bottom:8px;">ความเห็น (จำเป็นถ้ากด "ไม่อนุมัติ")</label>
       <textarea id="approvalComment" placeholder="Enter comment..."></textarea>
@@ -1971,14 +2065,33 @@ function attachApprovalHandlers(){
 
   const approveBtn = document.getElementById('btnApprove');
   if(approveBtn) approveBtn.addEventListener('click', async ()=>{
-    const actor = document.getElementById('approvalActor').value.trim();
+    const actor = currentActorName();
     const errEl = document.getElementById('approvalError');
-    if(!actor){ errEl.textContent='กรอกชื่อผู้ดำเนินการก่อน'; errEl.style.display='block'; return; }
-    lastActorName = actor;
     const comment = document.getElementById('approvalComment').value.trim();
     const nextIdx = Math.min(currentIdx+1, STATUS_FLOW.length-1);
+    const nextStatus = STATUS_FLOW[nextIdx];
+
+    // rule 1: the reviewer must not be the request's own creator. The
+    // creator naturally submits their own draft (ร่าง→รอทบทวน), and the
+    // final LM sign-off (รออนุมัติ→อนุมัติแล้ว) is exempted too — otherwise
+    // a request the sole LM created herself could never be finally approved
+    // by anyone (rule 2 requires LM specifically for that step). The
+    // independent-review requirement still applies in full at the middle
+    // step (รอทบทวน→รออนุมัติ), which is where it matters most.
+    if(currentIdx > 0 && nextStatus!=='อนุมัติแล้ว' && d.requestedBy && d.requestedBy === actor){
+      errEl.textContent = `ผู้ทบทวนต้องไม่ใช่ผู้สร้างคำขอเอง (${d.requestedBy})`;
+      errEl.style.display = 'block';
+      return;
+    }
+    // rule 2: the final approval step must be done by the Lab Manager (LM)
+    if(nextStatus==='อนุมัติแล้ว' && currentUser.role!=='LM'){
+      errEl.textContent = 'ผู้อนุมัติขั้นสุดท้ายต้องเป็น Lab Manager (LM) เท่านั้น';
+      errEl.style.display = 'block';
+      return;
+    }
+
     const now = Date.now();
-    d.approvalStatus = STATUS_FLOW[nextIdx];
+    d.approvalStatus = nextStatus;
     d.lastUpdated = now;
     d.comments = d.comments || [];
     d.comments.push({ by:actor, text: comment || `อนุมัติ → ${d.approvalStatus}`, time: now });
@@ -2020,12 +2133,15 @@ function attachApprovalHandlers(){
   });
   const rejectBtn = document.getElementById('btnReject');
   if(rejectBtn) rejectBtn.addEventListener('click', async ()=>{
-    const actor = document.getElementById('approvalActor').value.trim();
+    const actor = currentActorName();
     const comment = document.getElementById('approvalComment').value.trim();
     const errEl = document.getElementById('approvalError');
-    if(!actor){ errEl.textContent='กรอกชื่อผู้ดำเนินการก่อน'; errEl.style.display='block'; return; }
+    if(currentIdx > 0 && d.requestedBy && d.requestedBy === actor){
+      errEl.textContent = `ผู้ทบทวน/อนุมัติต้องไม่ใช่ผู้สร้างคำขอเอง (${d.requestedBy})`;
+      errEl.style.display = 'block';
+      return;
+    }
     if(!comment){ errEl.textContent='กรอกความเห็นก่อนกด "ไม่อนุมัติ"'; errEl.style.display='block'; return; }
-    lastActorName = actor;
     d.approvalStatus = 'ไม่อนุมัติ';
     d.lastUpdated = Date.now();
     d.comments = d.comments || [];
@@ -2285,6 +2401,9 @@ function attachAdminHandlers(){
 // ADMINISTRATION
 // ============================================================
 function viewAdmin(){
+  if(!isDC()){
+    return `<div class="panel">${emptyState('ไม่มีสิทธิ์เข้าถึง', 'หน้า Administration ใช้ได้เฉพาะ Document Control (DC) เท่านั้น')}</div>`;
+  }
   const n = (typeof MASTER_LIST!=='undefined') ? MASTER_LIST.length : 0;
   return `
   <div class="panel">
@@ -2307,4 +2426,4 @@ function viewAdmin(){
 // ============================================================
 // GO
 // ============================================================
-boot();
+initApp();

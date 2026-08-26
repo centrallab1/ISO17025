@@ -92,17 +92,17 @@
           </button>
           <div id="notifPanel" style="display:none;"></div>
         </div>
-        <button class="icon-btn" title="Help">
+        <a class="icon-btn" id="helpBtn" title="Help — คู่มือ ISO 17025 (GLA-23)" href="./GLA-23-00.pdf" target="_blank" rel="noopener">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.2 1.9-2.4 3.4M12 17h.01"/></svg>
-        </button>
+        </a>
         <button class="icon-btn" title="Settings">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 0 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 0 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 0 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 0 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z"/></svg>
         </button>
-        <div class="user">
-          <div class="avatar">PR</div>
+        <div class="user" id="userBadge" style="cursor:pointer;" title="คลิกเพื่อออกจากระบบ">
+          <div class="avatar" id="userAvatar">--</div>
           <div class="user-text">
-            <div class="user-name">Preaw</div>
-            <div class="user-role">QA Officer</div>
+            <div class="user-name" id="userNameDisplay">-</div>
+            <div class="user-role" id="userRoleDisplay">-</div>
           </div>
         </div>
       </div>
