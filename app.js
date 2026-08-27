@@ -136,6 +136,9 @@ async function loadDocs(){
       if(d.lastReviewedBy===undefined){ d.lastReviewedBy=''; needsMigration = true; }
       if(d.publishedLink===undefined){ d.publishedLink=null; needsMigration = true; }
       if(!Array.isArray(d.linkHistory)){ d.linkHistory=[]; needsMigration = true; }
+      if(d.dcRegisteredLink===undefined){ d.dcRegisteredLink=null; needsMigration = true; }
+      if(d.dcRegisteredBy===undefined){ d.dcRegisteredBy=null; needsMigration = true; }
+      if(d.dcRegisteredAt===undefined){ d.dcRegisteredAt=null; needsMigration = true; }
     });
     DOCS_LOADED = true;
     DOCS_ERROR = null;
@@ -255,11 +258,18 @@ function pendingQueue(){
 let notifOpen = false;
 let helpOpen = false;
 let settingsOpen = false;
+function closeAllTopPanels(except){
+  if(except!=='notif' && notifOpen){ notifOpen = false; renderNotifPanel(); }
+  if(except!=='help' && helpOpen){ helpOpen = false; renderHelpPanel(); }
+  if(except!=='settings' && settingsOpen){ settingsOpen = false; renderSettingsPanel(); }
+}
 function wireNotifBell(){
   const bell = document.getElementById('notifBell');
   if(bell) bell.addEventListener('click', e=>{
     e.stopPropagation();
-    notifOpen = !notifOpen;
+    const opening = !notifOpen;
+    closeAllTopPanels('notif');
+    notifOpen = opening;
     renderNotifPanel();
   });
   document.addEventListener('click', ()=>{
@@ -290,7 +300,9 @@ function wireHelpBtn(){
   const btn = document.getElementById('helpBtn');
   if(btn) btn.addEventListener('click', e=>{
     e.stopPropagation();
-    helpOpen = !helpOpen;
+    const opening = !helpOpen;
+    closeAllTopPanels('help');
+    helpOpen = opening;
     renderHelpPanel();
   });
   document.addEventListener('click', ()=>{
@@ -361,7 +373,9 @@ function wireSettingsBtn(){
   const btn = document.getElementById('settingsBtn');
   if(btn) btn.addEventListener('click', e=>{
     e.stopPropagation();
-    settingsOpen = !settingsOpen;
+    const opening = !settingsOpen;
+    closeAllTopPanels('settings');
+    settingsOpen = opening;
     renderSettingsPanel();
   });
   document.addEventListener('click', ()=>{
@@ -916,6 +930,11 @@ function docModal(){
     <div class="modal-backdrop" id="docModalBackdrop">
       <div class="modal">
         <div class="modal-head"><div class="modal-title">ขอปรับปรุงเอกสาร (Revision)</div><button class="modal-close" id="modalCloseBtn">✕</button></div>
+        <div class="wizard-steps">
+          <div class="wizard-step active"><span>1</span><span>เลือกเอกสารเดิม</span></div>
+          <div class="wizard-step"><span>2</span><span>รายละเอียด</span></div>
+          <div class="wizard-step"><span>3</span><span>ลิงก์และยืนยัน</span></div>
+        </div>
         <div class="modal-body">
           <div class="field"><label>เลือกเอกสารที่ต้องการปรับปรุง</label>
             <select id="mfReviseDocPicker">
@@ -934,32 +953,34 @@ function docModal(){
   const editing = mode==='edit';
   const revising = mode==='revise';
   const creatingNew = mode==='new';
+  const wizardMode = creatingNew || revising; // edit/verify stay single-page
   const d = (editing||revising) ? DOCUMENTS.find(x=>x.id===state.modal.id) : {
     id:'', name:'', clause: state.modal.presetClause || '', link:'', note: state.modal.presetNote || 'ว่าง', rev:'0', preparedBy:'', reviewerName:'', approverName:'',
   };
   if(!d) return `<div class="modal-backdrop" id="docModalBackdrop"><div class="modal"><div class="modal-body">${emptyState('ไม่พบเอกสาร','')}</div><div class="modal-actions"><button class="btn ghost" id="modalCancelBtn">ปิด</button></div></div></div>`;
 
+  // draft holds field values captured between wizard steps (re-rendering the
+  // modal on Next/Back would otherwise lose whatever wasn't on-screen)
+  const draft = state.modal.draft = state.modal.draft || {};
+  const val = (key, fallback)=> draft[key]!==undefined ? draft[key] : fallback;
+
   const title = editing ? 'แก้ไขเอกสาร (แก้ไขข้อมูลที่นำเข้าให้ถูกต้อง)' : revising ? `ขอปรับปรุง — ${d.id}` : 'เอกสารใหม่';
   const suggestedRev = revising ? nextRevNumber(d.rev) : (d.rev || '0');
+  const step = wizardMode ? (state.modal.step || (creatingNew ? 1 : 2)) : null;
 
-  return `
-  <div class="modal-backdrop" id="docModalBackdrop">
-    <div class="modal">
-      <div class="modal-head"><div class="modal-title">${title}</div><button class="modal-close" id="modalCloseBtn">✕</button></div>
-      <div class="modal-body">
-        ${revising ? `<div class="field"><label>Rev. ปัจจุบัน</label><input value="${d.rev || '—'}" disabled></div>` : ''}
-        ${creatingNew ? `<div class="field"><label>ประเภทเอกสาร</label>
-          <select id="mfTypePrefix">
-            <option value="">— เลือกประเภท —</option>
-            ${Object.entries(DOC_TYPE_MAP).map(([k,v])=>`<option value="${k}">${k} — ${v}</option>`).join('')}
-          </select></div>` : ''}
+  const stepsBar = !wizardMode ? '' : `
+    <div class="wizard-steps">
+      ${creatingNew ? `<div class="wizard-step ${step===1?'active':step>1?'done':''}"><span>1</span><span>ประเภท/เลขเอกสาร</span></div>` : ''}
+      <div class="wizard-step ${step===2?'active':step>2?'done':''}"><span>${creatingNew?'2':'1'}</span><span>รายละเอียด</span></div>
+      <div class="wizard-step ${step===3?'active':''}"><span>${creatingNew?'3':'2'}</span><span>ลิงก์และยืนยัน</span></div>
+    </div>`;
+
+  let bodyFields = '';
+  if(!wizardMode){
+    // EDIT / correction — unchanged single-page form
+    bodyFields = `
         <div class="field"><label>รหัสเอกสาร (Document ID)</label>
-          <div style="display:flex; gap:8px;">
-            <input id="mfId" value="${d.id}" placeholder="เช่น MPIR-LF-074-00" style="flex:1;" ${(editing||revising)?'disabled':''}>
-            ${creatingNew ? `<button type="button" class="btn ghost" id="btnAutoNumber" style="flex-shrink:0; white-space:nowrap;">ออกเลขอัตโนมัติ</button>` : ''}
-          </div>
-          ${creatingNew ? `<div style="font-size:11px; color:var(--ink-500); margin-top:5px;">เลือกประเภทด้านบนเพื่อออกเลขอัตโนมัติ — ระบบจะเติมเลขที่ยังว่างอยู่ก่อนเสมอ (เช่น ถ้า 050 ยังไม่มีแต่ 054 มีแล้ว จะออกเลข 050 ให้ก่อน)</div>` : ''}
-        </div>
+          <input id="mfId" value="${d.id}" placeholder="เช่น MPIR-LF-074-00" disabled></div>
         <div class="field"><label>ชื่อเอกสาร</label>
           <input id="mfName" value="${cleanName(d).replace(/"/g,'&quot;')}" placeholder="ชื่อเอกสาร"></div>
         <div class="field"><label>ข้อกำหนด ISO 17025</label>
@@ -972,10 +993,7 @@ function docModal(){
           <select id="mfNote">${['ควบคุม','แจกจ่าย','สนับสนุน','ยกเลิก','ว่าง','ไม่พบ'].map(s=>`<option ${d.note===s?'selected':''}>${s}</option>`).join('')}</select>
           <div id="noteSuggest" class="suggest-hint"></div>
         </div>
-        <div class="field"><label>${revising ? 'Rev. ใหม่ (เรียงต่ออัตโนมัติ แก้ไขได้)' : 'Rev.'}</label>
-          <input id="mfRev" value="${suggestedRev}" placeholder="0"></div>
-        ${(revising||creatingNew) ? `<div class="field"><label>${revising ? 'ผู้ขอปรับปรุง' : 'ผู้จัดทำ / ผู้ขอขึ้นทะเบียน'}</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()} <span style="color:var(--ink-500); font-weight:600;">(${currentUser.role})</span></div></div>` : ''}
-        ${editing ? `
+        <div class="field"><label>Rev.</label><input id="mfRev" value="${d.rev||'0'}" placeholder="0"></div>
         <div class="field"><label>วันที่จัดทำ</label><input id="mfCreated" type="date" value="${d.createdDate ? new Date(d.createdDate).toISOString().slice(0,10) : ''}"></div>
         <div class="field"><label>วันที่ประกาศใช้</label><input id="mfEffective" type="date" value="${d.effectiveDate ? new Date(d.effectiveDate).toISOString().slice(0,10) : ''}"></div>
         <div class="field"><label>ผู้จัดทำ</label><input id="mfPrep" value="${(d.preparedBy||'').replace(/"/g,'&quot;')}"></div>
@@ -984,12 +1002,66 @@ function docModal(){
         <div class="field"><label>สถานะการอนุมัติ</label>
           <select id="mfApprovalStatus">${[...STATUS_FLOW,'ไม่อนุมัติ'].map(s=>`<option ${((d.approvalStatus||'ร่าง')===s)?'selected':''}>${s}</option>`).join('')}</select></div>
         <div class="field"><label>รอบทบทวน (วัน) — นับจากวันประกาศใช้</label><input id="mfReviewCycle" value="${d.reviewCycleDays || DEFAULT_REVIEW_CYCLE_DAYS}" placeholder="365"></div>
-        ` : ''}
-        <div class="field-error" id="mfError" style="display:none;"></div>
+        <div class="field-error" id="mfError" style="display:none;"></div>`;
+  } else if(step===1){
+    // STEP 1 (new-document only): document type -> auto/manual numbering
+    bodyFields = `
+        <div class="field"><label>ประเภทเอกสาร</label>
+          <select id="mfTypePrefix">
+            <option value="">— เลือกประเภท —</option>
+            ${Object.entries(DOC_TYPE_MAP).map(([k,v])=>`<option value="${k}" ${val('typePrefix','')===k?'selected':''}>${k} — ${v}</option>`).join('')}
+          </select></div>
+        <div class="field"><label>รหัสเอกสาร (Document ID)</label>
+          <div style="display:flex; gap:8px;">
+            <input id="mfId" value="${val('id', d.id)}" placeholder="เช่น MPIR-LF-074-00" style="flex:1;">
+            <button type="button" class="btn ghost" id="btnAutoNumber" style="flex-shrink:0; white-space:nowrap;">ออกเลขอัตโนมัติ</button>
+          </div>
+          <div style="font-size:11px; color:var(--ink-500); margin-top:5px;">เลือกประเภทด้านบนเพื่อออกเลขอัตโนมัติ — ระบบจะเติมเลขที่ยังว่างอยู่ก่อนเสมอ (เช่น ถ้า 050 ยังไม่มีแต่ 054 มีแล้ว จะออกเลข 050 ให้ก่อน)</div>
+        </div>
+        <div class="field-error" id="mfError" style="display:none;"></div>`;
+  } else if(step===2){
+    // STEP 2: name + ISO clause
+    bodyFields = `
+        ${revising ? `<div class="field"><label>Rev. ปัจจุบัน</label><input value="${d.rev || '—'}" disabled></div>` : ''}
+        <div class="field"><label>ชื่อเอกสาร</label>
+          <input id="mfName" value="${val('name', cleanName(d)).replace(/"/g,'&quot;')}" placeholder="ชื่อเอกสาร"></div>
+        <div class="field"><label>ข้อกำหนด ISO 17025</label>
+          <select id="mfClause"><option value="">ไม่ระบุ</option>${CLAUSES.map(([c,l])=>`<option value="${c}" ${val('clause',d.clause)===c?'selected':''}>${l}</option>`).join('')}</select>
+          <div id="clauseSuggest" class="suggest-hint"></div>
+        </div>
+        <div class="field-error" id="mfError" style="display:none;"></div>`;
+  } else {
+    // STEP 3: SharePoint link + status + rev + confirm
+    bodyFields = `
+        <div class="field"><label>ลิงก์ SharePoint</label>
+          <input id="mfLink" value="${val('link', d.link||'')}" placeholder="https://mitrphol.sharepoint.com/..."></div>
+        <div class="field"><label>สถานะเอกสาร</label>
+          <select id="mfNote">${['ควบคุม','แจกจ่าย','สนับสนุน','ยกเลิก','ว่าง','ไม่พบ'].map(s=>`<option ${val('note',d.note)===s?'selected':''}>${s}</option>`).join('')}</select>
+          <div id="noteSuggest" class="suggest-hint"></div>
+        </div>
+        <div class="field"><label>${revising ? 'Rev. ใหม่ (เรียงต่ออัตโนมัติ แก้ไขได้)' : 'Rev.'}</label>
+          <input id="mfRev" value="${val('rev', suggestedRev)}" placeholder="0"></div>
+        <div class="field"><label>${revising ? 'ผู้ขอปรับปรุง' : 'ผู้จัดทำ / ผู้ขอขึ้นทะเบียน'}</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()} <span style="color:var(--ink-500); font-weight:600;">(${currentUser.role})</span></div></div>
+        <div class="field-error" id="mfError" style="display:none;"></div>`;
+  }
+
+  const showBack = wizardMode && (creatingNew ? step>1 : step>2);
+  const showNext = wizardMode && step<3;
+  const showSubmit = !wizardMode || step===3;
+
+  return `
+  <div class="modal-backdrop" id="docModalBackdrop">
+    <div class="modal">
+      <div class="modal-head"><div class="modal-title">${title}</div><button class="modal-close" id="modalCloseBtn">✕</button></div>
+      ${stepsBar}
+      <div class="modal-body">
+        ${bodyFields}
       </div>
       <div class="modal-actions">
         <button class="btn ghost" id="modalCancelBtn">ยกเลิก</button>
-        <button class="btn primary" id="modalSaveBtn">${editing ? 'บันทึกการแก้ไข' : revising ? 'ส่งคำขอปรับปรุง' : 'สร้างเอกสาร'}</button>
+        ${showBack ? `<button class="btn ghost" id="modalBackBtn">‹ ย้อนกลับ</button>` : ''}
+        ${showNext ? `<button class="btn primary" id="modalNextBtn">ถัดไป ›</button>` : ''}
+        ${showSubmit ? `<button class="btn primary" id="modalSaveBtn">${editing ? 'บันทึกการแก้ไข' : revising ? 'ส่งคำขอปรับปรุง' : 'สร้างเอกสาร'}</button>` : ''}
       </div>
     </div>
   </div>`;
@@ -1060,17 +1132,67 @@ function wireModalControls(){
   if(typePrefixSel) typePrefixSel.addEventListener('change', doAutoNumber);
   if(autoNumBtn) autoNumBtn.addEventListener('click', doAutoNumber);
 
+  // wizard step field capture — since only the current step's fields exist
+  // in the DOM at any moment, values from earlier/visited steps are stashed
+  // in state.modal.draft so nothing is lost moving between steps
+  const FIELD_MAP = { mfTypePrefix:'typePrefix', mfId:'id', mfName:'name', mfClause:'clause', mfLink:'link', mfNote:'note', mfRev:'rev' };
+  function captureStepFields(){
+    if(!state.modal.draft) return;
+    Object.entries(FIELD_MAP).forEach(([fid,key])=>{
+      const el = document.getElementById(fid);
+      if(el) state.modal.draft[key] = el.value;
+    });
+  }
+
+  const nextBtn = document.getElementById('modalNextBtn');
+  if(nextBtn) nextBtn.addEventListener('click', ()=>{
+    const errEl = document.getElementById('mfError');
+    const curStep = state.modal.step || (state.modal.mode==='new' ? 1 : 2);
+    if(curStep===1){
+      const idVal = (document.getElementById('mfId')||{value:''}).value.trim();
+      if(!idVal){ errEl.textContent='กรอกหรือออกรหัสเอกสารก่อน'; errEl.style.display='block'; return; }
+      if(DOCUMENTS.some(x=>x.id===idVal)){ errEl.textContent='รหัสเอกสารนี้มีอยู่แล้ว'; errEl.style.display='block'; return; }
+    }
+    if(curStep===2){
+      const nameVal = (document.getElementById('mfName')||{value:''}).value.trim();
+      if(!nameVal){ errEl.textContent='กรอกชื่อเอกสารก่อน'; errEl.style.display='block'; return; }
+    }
+    captureStepFields();
+    state.modal.step = curStep + 1;
+    renderModalLayer();
+  });
+  const backBtn = document.getElementById('modalBackBtn');
+  if(backBtn) backBtn.addEventListener('click', ()=>{
+    captureStepFields();
+    const curStep = state.modal.step || (state.modal.mode==='new' ? 1 : 2);
+    state.modal.step = curStep - 1;
+    renderModalLayer();
+  });
+
   const saveBtn = document.getElementById('modalSaveBtn');
   if(!saveBtn) return;
   saveBtn.addEventListener('click', async ()=>{
     const mode = state.modal.mode;
-    const id = document.getElementById('mfId').value.trim();
-    const name = document.getElementById('mfName').value.trim();
-    const clause = document.getElementById('mfClause').value;
-    const link = document.getElementById('mfLink').value.trim();
-    const note = document.getElementById('mfNote').value;
-    const rev = document.getElementById('mfRev').value.trim();
     const errEl = document.getElementById('mfError');
+    let id, name, clause, link, note, rev;
+
+    if(mode==='new' || mode==='revise'){
+      captureStepFields();
+      const dr = state.modal.draft;
+      id = (dr.id||'').trim();
+      name = (dr.name||'').trim();
+      clause = dr.clause || '';
+      link = (dr.link||'').trim();
+      note = dr.note || 'ว่าง';
+      rev = (dr.rev||'').trim();
+    } else {
+      id = document.getElementById('mfId').value.trim();
+      name = document.getElementById('mfName').value.trim();
+      clause = document.getElementById('mfClause').value;
+      link = document.getElementById('mfLink').value.trim();
+      note = document.getElementById('mfNote').value;
+      rev = document.getElementById('mfRev').value.trim();
+    }
     if(!id || !name){ errEl.textContent = 'กรอกรหัสเอกสารและชื่อเอกสารให้ครบ'; errEl.style.display='block'; return; }
 
     if(mode==='new'){
@@ -1577,6 +1699,9 @@ function groupHistoryByRequest(d){
 // classifies a comment/event into an icon + color + short Thai title for
 // the colored-icon timeline (revision history detail page + activity feed)
 function classifyEvent(text){
+  if(/DC ลงทะเบียนคำขอใน SharePoint List/.test(text)){
+    return { icon:'link', bg:'--amber-600', title:'DC ลงทะเบียนใน SharePoint List' };
+  }
   if(/DC เผยแพร่เอกสาร|DC แก้ไขลิงก์ที่เผยแพร่/.test(text)){
     return { icon:'link', bg:'--green-600', title: /แก้ไขลิงก์/.test(text) ? 'DC แก้ไขลิงก์ที่เผยแพร่' : 'DC เผยแพร่เอกสาร' };
   }
@@ -1616,6 +1741,67 @@ function eitem(opts){
 // DC publish step — only relevant once a NEW-document or revision request
 // has been fully approved. Until DC pastes the published link, the document
 // stays invisible in every browsable list (see isHiddenFromLists in data.js).
+// DC's early SharePoint-List registration checkpoint — sits between the
+// creator's own submission (ร่าง→รอทบทวน) and the independent reviewer's
+// action (รอทบทวน→รออนุมัติ). The reviewer cannot proceed until DC has
+// logged the request into the SharePoint List and pasted that item's link
+// here as proof. This mirrors a real action DC does in SharePoint itself —
+// the app cannot fill that form; it only records that it was done.
+function renderDcRegisterBox(d){
+  if(d.approvalStatus !== 'รอทบทวน') return '';
+  if(d.lastRequestType !== 'new' && d.lastRequestType !== 'revision') return '';
+  if(d.dcRegisteredLink){
+    return `
+    <div class="side-box" style="border-color:var(--green-600); background:var(--green-50); margin-bottom:18px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+        <div>
+          <div style="font-size:12.5px; font-weight:800; color:var(--green-600);">ลงทะเบียนใน SharePoint List แล้ว</div>
+          <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px; word-break:break-all;">โดย ${d.dcRegisteredBy||'—'} · ${d.dcRegisteredLink}</div>
+        </div>
+        <a class="btn ghost" href="${d.dcRegisteredLink}" target="_blank" rel="noopener">${ic('link')} เปิดรายการ</a>
+      </div>
+    </div>`;
+  }
+  if(!isDC()){
+    return `
+    <div class="side-box" style="border-color:var(--amber-600); background:var(--amber-50); margin-bottom:18px;">
+      <div style="font-size:12.5px; font-weight:800; color:var(--amber-600); margin-bottom:4px;">รอ DC ลงทะเบียนคำขอใน SharePoint List</div>
+      <div style="font-size:11.5px; color:var(--ink-700);">ผู้ทบทวนจะยังกดทบทวนต่อไม่ได้ จนกว่า Document Control (DC) จะนำคำขอนี้ไปลงทะเบียนใน SharePoint List และวางลิงก์รายการไว้ที่นี่</div>
+    </div>`;
+  }
+  return `
+  <div class="side-box" style="border-color:var(--amber-600); background:var(--amber-50); margin-bottom:18px;">
+    <div style="font-size:12.5px; font-weight:800; color:var(--amber-600); margin-bottom:8px;">DC: ลงทะเบียนคำขอใน SharePoint List</div>
+    <div style="font-size:11.5px; color:var(--ink-700); margin-bottom:10px;">ไปเพิ่มรายการนี้ใน SharePoint List ของทีมก่อน แล้ววางลิงก์รายการที่นี่ เพื่อให้ผู้ทบทวนดำเนินการต่อได้</div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <input id="dcRegisterLink" placeholder="วางลิงก์รายการใน SharePoint List" style="flex:2; min-width:200px; border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px;">
+      <div style="font-size:12px; color:var(--ink-500);">โดย ${currentActorName()}</div>
+      <button class="btn success" id="btnDcRegister">${ic('link')} ลงทะเบียน</button>
+    </div>
+  </div>`;
+}
+function wireDcRegister(){
+  const btn = document.getElementById('btnDcRegister');
+  if(!btn) return;
+  btn.addEventListener('click', async ()=>{
+    if(!isDC()) return; // defense in depth — button only renders for DC anyway
+    const linkInput = document.getElementById('dcRegisterLink');
+    const link = linkInput ? linkInput.value.trim() : '';
+    const actor = currentActorName();
+    if(!link){ alert('กรอกลิงก์รายการ SharePoint List ก่อน'); return; }
+    const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
+    if(!d) return;
+    const now = Date.now();
+    d.dcRegisteredLink = link;
+    d.dcRegisteredBy = actor;
+    d.dcRegisteredAt = now;
+    d.lastUpdated = now;
+    d.comments = d.comments || [];
+    d.comments.push({ by:actor, text:`DC ลงทะเบียนคำขอใน SharePoint List (ลิงก์: ${link})`, time: now });
+    render();
+    await persistDocs();
+  });
+}
 function renderPublishBox(d){
   if(d.approvalStatus !== 'อนุมัติแล้ว') return '';
   if(d.lastRequestType !== 'new' && d.lastRequestType !== 'revision') return '';
@@ -1733,6 +1919,7 @@ function viewRevisionDetailInline(d, standalone){
       <div class="side-box"><div class="side-box-title">ผู้อนุมัติ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.approverName || d.approvedBy || '—'}</div></div>
     </div>
 
+    ${renderDcRegisterBox(d)}
     ${renderPublishBox(d)}
 
     <div class="side-box" style="border-color:var(--green-600); background:var(--green-50); margin-bottom:18px;">
@@ -1901,6 +2088,7 @@ function attachRevisionDashboardHandlers(){
   });
   const toggleTimelineBtn = document.getElementById('btnToggleRevTimeline');
   if(toggleTimelineBtn) toggleTimelineBtn.addEventListener('click', ()=>{ state.revisionTimelineExpanded = !state.revisionTimelineExpanded; render(); });
+  wireDcRegister();
   wireDcPublish();
   const editBtn = document.getElementById('revDetailEdit');
   if(editBtn) editBtn.addEventListener('click', ()=> openModal({ mode:'edit', id: state.selectedDoc }));
@@ -2123,6 +2311,7 @@ function viewApprovalDetail(){
       ${isRejected ? `<div class="af-line"></div><div class="af-step"><div class="af-circle" style="border-color:var(--red-600); background:var(--red-50);">${ic('alert')}</div><div class="af-name">ไม่อนุมัติ</div><div class="af-status" style="background:var(--red-50); color:var(--red-600);">Rejected</div></div>` : ''}
     </div>
 
+    ${renderDcRegisterBox(d)}
     ${renderPublishBox(d)}
 
     ${isApproved ? `
@@ -2179,6 +2368,7 @@ function attachApprovalHandlers(){
 
   const toggleCommentsBtn = document.getElementById('btnToggleComments');
   if(toggleCommentsBtn) toggleCommentsBtn.addEventListener('click', ()=>{ state.approvalCommentsExpanded = !state.approvalCommentsExpanded; render(); });
+  wireDcRegister();
   wireDcPublish();
 
   const approveBtn = document.getElementById('btnApprove');
@@ -2204,6 +2394,14 @@ function attachApprovalHandlers(){
     // rule 2: the final approval step must be done by the Lab Manager (LM)
     if(nextStatus==='อนุมัติแล้ว' && currentUser.role!=='LM'){
       errEl.textContent = 'ผู้อนุมัติขั้นสุดท้ายต้องเป็น Lab Manager (LM) เท่านั้น';
+      errEl.style.display = 'block';
+      return;
+    }
+    // rule 3: the reviewer can't act (ร่าง's own submission is exempt) until
+    // DC has registered this request in the SharePoint List — a real action
+    // DC must do outside the app; this only checks that it was recorded
+    if(currentIdx===1 && (d.lastRequestType==='new'||d.lastRequestType==='revision') && !d.dcRegisteredLink){
+      errEl.textContent = 'ยังทบทวนไม่ได้ — รอ DC ลงทะเบียนคำขอนี้ใน SharePoint List ก่อน';
       errEl.style.display = 'block';
       return;
     }
