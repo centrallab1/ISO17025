@@ -510,6 +510,18 @@ table.dtable td.name{color:var(--ink-900); font-weight:650; font-size:13.5px; ma
 .modal-title{font-size:14.5px; font-weight:800; color:var(--ink-900);}
 .modal-close{width:28px; height:28px; border-radius:8px; border:none; background:var(--bg); cursor:pointer; font-size:15px; color:var(--ink-500); display:flex; align-items:center; justify-content:center;}
 .modal-body{padding:18px 20px;}
+.wizard-steps{display:flex; align-items:center; padding:14px 20px 0; gap:0;}
+.wizard-step{display:flex; flex-direction:column; align-items:center; gap:5px; flex:1; position:relative; font-size:11px; font-weight:800; color:var(--ink-400);}
+.wizard-step::before{content:''; position:absolute; top:12px; left:-50%; width:100%; height:2px; background:var(--line); z-index:0;}
+.wizard-step:first-child::before{display:none;}
+.wizard-step span{width:24px; height:24px; border-radius:50%; background:var(--bg); border:2px solid var(--line); color:var(--ink-400); display:flex; align-items:center; justify-content:center; z-index:1; font-size:11px;}
+.wizard-step{display:flex; flex-direction:column; align-items:center;}
+.wizard-step > span:last-child{width:auto; height:auto; border:none; background:none; font-size:10.5px; font-weight:700; color:var(--ink-500); margin-top:2px; white-space:nowrap;}
+.wizard-step.active{color:var(--blue-600);}
+.wizard-step.active > span:first-child{background:var(--blue-600); border-color:var(--blue-600); color:#fff;}
+.wizard-step.active > span:last-child{color:var(--blue-600);}
+.wizard-step.done > span:first-child{background:var(--green-600); border-color:var(--green-600); color:#fff;}
+.wizard-step.done::before{background:var(--green-600);}
 .field{margin-bottom:14px;}
 .field label{display:block; font-size:12px; font-weight:700; color:var(--ink-700); margin-bottom:6px;}
 .field input, .field select, .field textarea{
