@@ -240,6 +240,7 @@ const ICONS = {
   bell: `<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>`,
   filter: `<path d="M4 4h16l-6 8v6l-4 2v-8L4 4Z"/>`,
   folder: `<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>`,
+  logout: `<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>`,
 };
 function ic(name, cls=''){ return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||''}</svg>`; }
 
@@ -252,6 +253,8 @@ function pendingQueue(){
     .sort((a,b)=> (a.lastUpdated||0)-(b.lastUpdated||0));
 }
 let notifOpen = false;
+let helpOpen = false;
+let settingsOpen = false;
 function wireNotifBell(){
   const bell = document.getElementById('notifBell');
   if(bell) bell.addEventListener('click', e=>{
@@ -278,6 +281,118 @@ function updateBackButton(){
   if(!btn) return;
   btn.style.display = navStack.length>0 ? 'flex' : 'none';
 }
+
+// ============================================================
+// HELP PANEL — clicking Help shows a card explaining the linked
+// document instead of jumping straight to a new tab.
+// ============================================================
+function wireHelpBtn(){
+  const btn = document.getElementById('helpBtn');
+  if(btn) btn.addEventListener('click', e=>{
+    e.stopPropagation();
+    helpOpen = !helpOpen;
+    renderHelpPanel();
+  });
+  document.addEventListener('click', ()=>{
+    if(helpOpen){ helpOpen = false; renderHelpPanel(); }
+  });
+}
+function renderHelpPanel(){
+  const wrap = document.getElementById('helpPanel');
+  if(!wrap) return;
+  if(!helpOpen){ wrap.style.display = 'none'; wrap.innerHTML=''; return; }
+  wrap.style.display = 'block';
+  wrap.innerHTML = `
+    <div class="dp-title">คู่มือ ISO/IEC 17025:2017 (GLA-23)</div>
+    <div class="dp-sub">ข้อแนะนำประกอบการตรวจประเมิน ตาม มอก. 17025-2561 จัดทำโดยสำนักงานมาตรฐานผลิตภัณฑ์อุตสาหกรรม (สมอ.) — ใช้เฉพาะกิจกรรมการรับรองห้องปฏิบัติการของ MPIR เท่านั้น ไม่ใช่ตัวมาตรฐานฉบับแปล</div>
+    <a class="btn primary" href="./GLA-23-00.pdf" target="_blank" rel="noopener" style="width:100%; justify-content:center; box-sizing:border-box;">${ic('doc')} เปิดเอกสาร (PDF)</a>
+  `;
+}
+
+// ============================================================
+// SETTINGS PANEL — language switcher + logout.
+// Language switching only re-labels the app's fixed chrome (sidebar
+// nav, topbar, brand) — it does not translate document content,
+// which comes from the lab's own real (mixed Thai/English) data.
+// ============================================================
+const I18N = {
+  th: {
+    brandTitle:'MPIR CENTRAL LAB', brandSub:'ISO/IEC 17025:2017',
+    search:'Search documents, records, ISO clause...',
+    nav_dashboard:'Dashboard', nav_iso:'ISO 17025', nav_documents:'Documents',
+    nav_records:'Evidence/Support', nav_archive:'คลังเอกสาร', nav_revision:'History',
+    nav_approval:'Approval', nav_audit:'Audit View', nav_calendar:'Review Calendar',
+    nav_audittrail:'Audit Trail', nav_admin:'Administration',
+  },
+  en: {
+    brandTitle:'MPIR CENTRAL LAB', brandSub:'ISO/IEC 17025:2017',
+    search:'Search documents, records, ISO clause...',
+    nav_dashboard:'Dashboard', nav_iso:'ISO 17025', nav_documents:'Documents',
+    nav_records:'Evidence/Support', nav_archive:'Document Archive', nav_revision:'History',
+    nav_approval:'Approval', nav_audit:'Audit View', nav_calendar:'Review Calendar',
+    nav_audittrail:'Audit Trail', nav_admin:'Administration',
+  },
+};
+const LANG_KEY = 'mpir_iso17025_lang';
+let uiLang = 'th';
+try{ uiLang = localStorage.getItem(LANG_KEY) || 'th'; }catch(e){}
+function applyLanguage(){
+  const t = I18N[uiLang] || I18N.th;
+  const setText = (sel, val)=>{ const el = document.querySelector(sel); if(el) el.textContent = val; };
+  setText('.brand-title', t.brandTitle);
+  setText('.brand-sub', t.brandSub);
+  const searchInput = document.getElementById('globalSearch');
+  if(searchInput) searchInput.placeholder = t.search;
+  const navMap = { dashboard:'nav_dashboard', iso:'nav_iso', documents:'nav_documents', records:'nav_records',
+    archive:'nav_archive', revision:'nav_revision', approval:'nav_approval', audit:'nav_audit',
+    calendar:'nav_calendar', audittrail:'nav_audittrail', admin:'nav_admin', administration:'nav_admin' };
+  document.querySelectorAll('.nav-item').forEach(btn=>{
+    const key = navMap[btn.dataset.view];
+    if(key && t[key]){ const span = btn.querySelector('span'); if(span) span.textContent = t[key]; }
+  });
+}
+function setLanguage(lang){
+  uiLang = lang;
+  try{ localStorage.setItem(LANG_KEY, lang); }catch(e){}
+  applyLanguage();
+  renderSettingsPanel();
+}
+function wireSettingsBtn(){
+  const btn = document.getElementById('settingsBtn');
+  if(btn) btn.addEventListener('click', e=>{
+    e.stopPropagation();
+    settingsOpen = !settingsOpen;
+    renderSettingsPanel();
+  });
+  document.addEventListener('click', ()=>{
+    if(settingsOpen){ settingsOpen = false; renderSettingsPanel(); }
+  });
+}
+function renderSettingsPanel(){
+  const wrap = document.getElementById('settingsPanel');
+  if(!wrap) return;
+  if(!settingsOpen){ wrap.style.display = 'none'; wrap.innerHTML=''; return; }
+  wrap.style.display = 'block';
+  wrap.innerHTML = `
+    <div class="dp-title">ภาษา / Language</div>
+    <div class="lang-toggle" style="margin-bottom:12px;">
+      <button id="langTh" class="${uiLang==='th'?'active':''}">ไทย</button>
+      <button id="langEn" class="${uiLang==='en'?'active':''}">English</button>
+    </div>
+    <div class="dp-divider"></div>
+    <button class="dp-btn danger" id="btnLogoutMenu">${ic('logout')} ออกจากระบบ (Logout)</button>
+  `;
+  const thBtn = document.getElementById('langTh');
+  const enBtn = document.getElementById('langEn');
+  if(thBtn) thBtn.addEventListener('click', e=>{ e.stopPropagation(); setLanguage('th'); });
+  if(enBtn) enBtn.addEventListener('click', e=>{ e.stopPropagation(); setLanguage('en'); });
+  const logoutBtn = document.getElementById('btnLogoutMenu');
+  if(logoutBtn) logoutBtn.addEventListener('click', e=>{
+    e.stopPropagation();
+    if(confirm('ออกจากระบบใช่หรือไม่?')){ clearSession(); location.reload(); }
+  });
+}
+
 function renderNotifPanel(){
   const wrap = document.getElementById('notifPanel');
   if(!wrap) return;
@@ -360,8 +475,11 @@ async function startApp(){
   wireNav();
   wireGlobalSearch();
   wireNotifBell();
+  wireHelpBtn();
+  wireSettingsBtn();
   wireBackButton();
   wireSidebarToggle();
+  applyLanguage();
   render();
   updateUserBadge();
 }
@@ -1695,7 +1813,7 @@ function viewRevisionDashboard(){
 
   return `
   <div class="panel">
-    <div class="panel-title">Revision</div>
+    <div class="panel-title">History</div>
     <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">ติดตามการแก้ไขและประวัติการอนุมัติเอกสาร</div>
   </div>
   <div class="stat-row-5">

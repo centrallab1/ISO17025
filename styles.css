@@ -115,6 +115,22 @@ body{
 .notif-title{font-size:12.5px; font-weight:700; color:var(--ink-900); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .notif-sub{font-size:11.5px; color:var(--ink-500); margin-top:2px;}
 .notif-empty{padding:30px 16px; text-align:center; font-size:12.5px; color:var(--ink-500);}
+.dropdown-panel{
+  position:absolute; top:44px; right:0; width:300px;
+  background:#fff; border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow-md); z-index:60;
+  padding:14px;
+}
+.dropdown-panel .dp-title{font-size:12.5px; font-weight:800; color:var(--ink-900); margin-bottom:4px;}
+.dropdown-panel .dp-sub{font-size:11.5px; color:var(--ink-500); line-height:1.5; margin-bottom:12px;}
+.dropdown-panel .dp-row{display:flex; align-items:center; justify-content:space-between; padding:9px 2px; font-size:12.5px; color:var(--ink-700);}
+.dropdown-panel .dp-divider{border-top:1px solid var(--line); margin:6px 0;}
+.dropdown-panel .dp-btn{width:100%; text-align:left; background:none; border:none; padding:9px 2px; font-size:12.5px; color:var(--ink-700); cursor:pointer; display:flex; align-items:center; gap:8px; border-radius:6px;}
+.dropdown-panel .dp-btn:hover{background:var(--bg); color:var(--ink-900);}
+.dropdown-panel .dp-btn.danger{color:var(--red-600);}
+.dropdown-panel .dp-btn svg{width:15px; height:15px; stroke:currentColor; fill:none; stroke-width:2;}
+.lang-toggle{display:flex; background:var(--bg); border-radius:8px; padding:2px; gap:2px;}
+.lang-toggle button{flex:1; border:none; background:none; padding:6px 0; font-size:11.5px; font-weight:700; border-radius:6px; cursor:pointer; color:var(--ink-500);}
+.lang-toggle button.active{background:#fff; color:var(--blue-600); box-shadow:0 1px 2px rgba(0,0,0,.08);}
 .user{display:flex; align-items:center; gap:9px; padding:5px 6px 5px 14px; margin-left:6px; border-left:1px solid var(--line);}
 .avatar{width:32px; height:32px; border-radius:50%; background:linear-gradient(135deg,var(--blue-500),#7c5cff); color:#fff; font-size:11.5px; font-weight:700; display:flex; align-items:center; justify-content:center;}
 .row-avatar{width:28px; height:28px; border-radius:50%; background:linear-gradient(135deg,var(--blue-500),#7c5cff); color:#fff; font-size:10.5px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0;}
