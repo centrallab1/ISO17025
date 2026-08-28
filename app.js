@@ -343,18 +343,16 @@ const I18N = {
   th: {
     brandTitle:'MPIR CENTRAL LAB', brandSub:'ISO/IEC 17025:2017',
     search:'Search documents, records, ISO clause...',
-    nav_dashboard:'Dashboard', nav_iso:'ISO 17025', nav_documents:'Documents',
-    nav_records:'Evidence/Support', nav_archive:'คลังเอกสาร', nav_revision:'History',
-    nav_approval:'Approval', nav_audit:'Audit View', nav_calendar:'Review Calendar',
-    nav_audittrail:'Audit Trail', nav_admin:'Administration',
+    nav_dashboard:'Dashboard', nav_documents:'Documents',
+    nav_archive:'คลังเอกสาร', nav_approval:'Approval', nav_audit:'Audit',
+    nav_calendar:'Review Calendar', nav_admin:'Administration',
   },
   en: {
     brandTitle:'MPIR CENTRAL LAB', brandSub:'ISO/IEC 17025:2017',
     search:'Search documents, records, ISO clause...',
-    nav_dashboard:'Dashboard', nav_iso:'ISO 17025', nav_documents:'Documents',
-    nav_records:'Evidence/Support', nav_archive:'Document Archive', nav_revision:'History',
-    nav_approval:'Approval', nav_audit:'Audit View', nav_calendar:'Review Calendar',
-    nav_audittrail:'Audit Trail', nav_admin:'Administration',
+    nav_dashboard:'Dashboard', nav_documents:'Documents',
+    nav_archive:'Document Archive', nav_approval:'Approval', nav_audit:'Audit',
+    nav_calendar:'Review Calendar', nav_admin:'Administration',
   },
 };
 const LANG_KEY = 'mpir_iso17025_lang';
@@ -367,9 +365,9 @@ function applyLanguage(){
   setText('.brand-sub', t.brandSub);
   const searchInput = document.getElementById('globalSearch');
   if(searchInput) searchInput.placeholder = t.search;
-  const navMap = { dashboard:'nav_dashboard', iso:'nav_iso', documents:'nav_documents', records:'nav_records',
-    archive:'nav_archive', revision:'nav_revision', approval:'nav_approval', audit:'nav_audit',
-    calendar:'nav_calendar', audittrail:'nav_audittrail', admin:'nav_admin', administration:'nav_admin' };
+  const navMap = { dashboard:'nav_dashboard', documents:'nav_documents',
+    archive:'nav_archive', approval:'nav_approval', audit:'nav_audit',
+    calendar:'nav_calendar', admin:'nav_admin', administration:'nav_admin' };
   document.querySelectorAll('.nav-item').forEach(btn=>{
     const key = navMap[btn.dataset.view];
     if(key && t[key]){ const span = btn.querySelector('span'); if(span) span.textContent = t[key]; }
@@ -541,7 +539,46 @@ function snapshotState(){
   return JSON.parse(JSON.stringify(state));
 }
 function syncNavActive(){
-  document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active', b.dataset.view===state.view));
+  const activeKey = NAV_GROUP_MAP[state.view] || state.view;
+  document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active', b.dataset.view===activeKey));
+}
+// which sidebar button stays highlighted for each of the merged views
+const NAV_GROUP_MAP = {
+  documents:'documents', iso:'documents', records:'documents',
+  audit:'audit', audittrail:'audit',
+  approval:'approval', revision:'approval',
+};
+// shared tab bars for the three merged sections — the underlying pages/state
+// (docFilter, selectedClause, isoTab, approvalTab, revFilter, etc.) are all
+// untouched; this only adds a tab strip on top and reuses goTo() to switch
+// between the views that used to be separate sidebar entries
+function renderDocHubTabs(){
+  const tabs = [ ['documents','ทั้งหมด'], ['iso','ตามข้อกำหนด ISO'], ['records','หลักฐาน/สนับสนุน'] ];
+  return `<div class="tabs">${tabs.map(([k,l])=>`<button class="tab ${state.view===k?'active':''}" data-hub-nav="${k}">${l}</button>`).join('')}</div>`;
+}
+function renderAuditHubTabs(){
+  const tabs = [ ['audit','ภาพรวมตรวจสอบ'], ['audittrail','บันทึกกิจกรรม'] ];
+  return `<div class="tabs">${tabs.map(([k,l])=>`<button class="tab ${state.view===k?'active':''}" data-hub-nav="${k}">${l}</button>`).join('')}</div>`;
+}
+function renderWorkflowHubTabs(){
+  const tabs = [ ['approval','คำขออนุมัติ'], ['revision','ภาพรวมการปรับปรุง'] ];
+  return `<div class="tabs">${tabs.map(([k,l])=>`<button class="tab ${state.view===k?'active':''}" data-hub-nav="${k}">${l}</button>`).join('')}</div>`;
+}
+function wireHubTabs(){
+  document.querySelectorAll('[data-hub-nav]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const view = btn.dataset.hubNav;
+      let extra = {};
+      if(view==='documents') extra = { docFilter:{ clause:'All', type:'All', status:'All', q:'', preset:'all' }, docPage:1 };
+      if(view==='revision') extra = { revFilter:{ clause:'All', type:'All', status:'All', q:'' }, revPage:1, revisionDetailOpen:false };
+      if(view==='approval'){
+        const next = pendingQueue()[0];
+        extra = { approvalTab:'active', approvalPage:1, approvalDetailOpen:false };
+        if(next) extra.selectedDoc = next.id;
+      }
+      goTo(view, extra);
+    });
+  });
 }
 function wireNav(){
   document.querySelectorAll('.nav-item').forEach(btn=>{
@@ -612,15 +649,15 @@ function render(){
   const el = document.getElementById('content');
   switch(state.view){
     case 'dashboard': el.innerHTML = viewDashboard(); break;
-    case 'iso': el.innerHTML = viewISO(); attachISOHandlers(); break;
-    case 'documents': renderDocumentsInto(); wireDocControls(); renderModalLayer(); updateNotifBadge(); updateBackButton(); return;
-    case 'records': el.innerHTML = viewEvidence(); attachEvidenceHandlers(); break;
+    case 'iso': el.innerHTML = renderDocHubTabs() + viewISO(); attachISOHandlers(); break;
+    case 'documents': renderDocumentsInto(); wireDocControls(); renderModalLayer(); updateNotifBadge(); updateBackButton(); wireHubTabs(); return;
+    case 'records': el.innerHTML = renderDocHubTabs() + viewEvidence(); attachEvidenceHandlers(); break;
     case 'archive': el.innerHTML = viewArchive(); attachArchiveHandlers(); break;
-    case 'revision': el.innerHTML = viewRevisionDashboard(); attachRevisionDashboardHandlers(); break;
-    case 'approval': el.innerHTML = viewApproval(); attachApprovalHandlers(); break;
-    case 'audit': el.innerHTML = viewAudit(); attachAuditHandlers(); break;
+    case 'revision': el.innerHTML = renderWorkflowHubTabs() + viewRevisionDashboard(); attachRevisionDashboardHandlers(); break;
+    case 'approval': el.innerHTML = renderWorkflowHubTabs() + viewApproval(); attachApprovalHandlers(); break;
+    case 'audit': el.innerHTML = renderAuditHubTabs() + viewAudit(); attachAuditHandlers(); break;
     case 'calendar': el.innerHTML = viewCalendar(); attachCalHandlers(); break;
-    case 'audittrail': el.innerHTML = viewAuditTrail(); break;
+    case 'audittrail': el.innerHTML = renderAuditHubTabs() + viewAuditTrail(); break;
     case 'admin': el.innerHTML = viewAdmin(); attachAdminHandlers(); break;
     case 'docdetail': el.innerHTML = viewDocDetail(state.selectedDoc); attachDetailActionHandlers(); break;
     default: el.innerHTML = viewDashboard();
@@ -629,6 +666,7 @@ function render(){
   renderModalLayer();
   updateNotifBadge();
   updateBackButton();
+  wireHubTabs();
 }
 function attachGlobalRowHandlers(){
   document.querySelectorAll('[data-open-doc]').forEach(row=>{
@@ -856,6 +894,7 @@ function renderDocumentsInto(){
   const presetActive = state.docFilter.preset && state.docFilter.preset!=='all';
 
   el.innerHTML = `
+  ${renderDocHubTabs()}
   <div class="panel">
     <div class="panel-head"><div class="panel-title">Document List <span id="syncPill" class="sync-pill" style="margin-left:10px;"><span class="dot"></span>Synced with Firestore</span></div>
       <div style="display:flex; gap:8px;">
@@ -904,20 +943,21 @@ function wireDocControls(){
     state.docPage=1;
     renderDocumentsInto();
     wireDocControls();
+    wireHubTabs();
     const refreshed = document.getElementById('docSearch');
     if(refreshed){ refreshed.focus(); refreshed.setSelectionRange(cursorPos, cursorPos); }
   });
   const fc = document.getElementById('fClause');
-  if(fc) fc.addEventListener('change', e=>{ state.docFilter.clause = e.target.value; state.docFilter.preset='all'; state.docPage=1; renderDocumentsInto(); wireDocControls(); });
+  if(fc) fc.addEventListener('change', e=>{ state.docFilter.clause = e.target.value; state.docFilter.preset='all'; state.docPage=1; renderDocumentsInto(); wireDocControls(); wireHubTabs(); });
   const ft = document.getElementById('fType');
-  if(ft) ft.addEventListener('change', e=>{ state.docFilter.type = e.target.value; state.docFilter.preset='all'; state.docPage=1; renderDocumentsInto(); wireDocControls(); });
+  if(ft) ft.addEventListener('change', e=>{ state.docFilter.type = e.target.value; state.docFilter.preset='all'; state.docPage=1; renderDocumentsInto(); wireDocControls(); wireHubTabs(); });
   const fs = document.getElementById('fStatus');
-  if(fs) fs.addEventListener('change', e=>{ state.docFilter.status = e.target.value; state.docFilter.preset='all'; state.docPage=1; renderDocumentsInto(); wireDocControls(); });
+  if(fs) fs.addEventListener('change', e=>{ state.docFilter.status = e.target.value; state.docFilter.preset='all'; state.docPage=1; renderDocumentsInto(); wireDocControls(); wireHubTabs(); });
   const clearPreset = document.getElementById('btnClearPreset');
-  if(clearPreset) clearPreset.addEventListener('click', ()=>{ state.docFilter.preset='all'; state.docPage=1; renderDocumentsInto(); wireDocControls(); });
-  document.querySelectorAll('[data-pg]').forEach(b=>b.addEventListener('click', ()=>{ state.docPage=parseInt(b.dataset.pg,10); renderDocumentsInto(); wireDocControls(); }));
-  const prev = document.getElementById('pgPrev'); if(prev) prev.addEventListener('click', ()=>{ state.docPage=Math.max(1,state.docPage-1); renderDocumentsInto(); wireDocControls(); });
-  const next = document.getElementById('pgNext'); if(next) next.addEventListener('click', ()=>{ state.docPage=state.docPage+1; renderDocumentsInto(); wireDocControls(); });
+  if(clearPreset) clearPreset.addEventListener('click', ()=>{ state.docFilter.preset='all'; state.docPage=1; renderDocumentsInto(); wireDocControls(); wireHubTabs(); });
+  document.querySelectorAll('[data-pg]').forEach(b=>b.addEventListener('click', ()=>{ state.docPage=parseInt(b.dataset.pg,10); renderDocumentsInto(); wireDocControls(); wireHubTabs(); }));
+  const prev = document.getElementById('pgPrev'); if(prev) prev.addEventListener('click', ()=>{ state.docPage=Math.max(1,state.docPage-1); renderDocumentsInto(); wireDocControls(); wireHubTabs(); });
+  const next = document.getElementById('pgNext'); if(next) next.addEventListener('click', ()=>{ state.docPage=state.docPage+1; renderDocumentsInto(); wireDocControls(); wireHubTabs(); });
   const btnNew = document.getElementById('btnNewDoc');
   if(btnNew) btnNew.addEventListener('click', ()=> openModal({ mode:'new' }));
   const btnRevise = document.getElementById('btnReviseDoc');
@@ -929,7 +969,7 @@ function wireDocControls(){
     if(!confirm(`ลบเอกสาร "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
     DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
     await persistDocs();
-    renderDocumentsInto(); wireDocControls();
+    renderDocumentsInto(); wireDocControls(); wireHubTabs();
   }));
   attachGlobalRowHandlers();
 }
