@@ -2278,7 +2278,7 @@ function viewApproval(){
     </div>
 
     <div class="table-wrap"><table class="dtable">
-      <thead><tr><th>รหัสเอกสาร</th><th>ชื่อเอกสาร</th><th>สถานะ</th><th>ขั้นตอนปัจจุบัน</th><th>ผู้ดำเนินการ</th><th>อัปเดตล่าสุด</th></tr></thead>
+      <thead><tr><th>รหัสเอกสาร</th><th>ชื่อเอกสาร</th><th>สถานะ</th><th>ขั้นตอนปัจจุบัน</th><th>ผู้ดำเนินการ</th><th>อัปเดตล่าสุด</th>${isDC() ? '<th></th>' : ''}</tr></thead>
       <tbody>
         ${pageItems.length ? pageItems.map(d=>{
           const actor = actorForDoc(d);
@@ -2290,8 +2290,9 @@ function viewApproval(){
           <td>${stepIndicator(d.approvalStatus||'ร่าง')}</td>
           <td><div class="actor-cell"><div class="row-avatar">${initials(actor.name)}</div><div><div class="actor-name">${actor.name||'—'}</div><div class="actor-role">${actor.role}</div></div></div></td>
           <td>${fmtDateTime(d.lastUpdated)}</td>
+          ${isDC() ? `<td><div class="row-actions" onclick="event.stopPropagation()"><button data-del-request="${d.id}" class="del" title="ลบคำขอ">${ic('trash')}</button></div></td>` : ''}
         </tr>`;
-        }).join('') : `<tr><td colspan="6" style="text-align:center; padding:40px 0; color:var(--ink-500);">ไม่มีเอกสารในหมวดนี้</td></tr>`}
+        }).join('') : `<tr><td colspan="${isDC()?7:6}" style="text-align:center; padding:40px 0; color:var(--ink-500);">ไม่มีเอกสารในหมวดนี้</td></tr>`}
       </tbody>
     </table></div>
     <div class="pagination">
@@ -2407,6 +2408,18 @@ function attachApprovalHandlers(){
   const pgNext = document.getElementById('apPgNext'); if(pgNext) pgNext.addEventListener('click', ()=>{ state.approvalPage=state.approvalPage+1; render(); });
   document.querySelectorAll('[data-select-approval]').forEach(row=>{
     row.addEventListener('click', ()=>{ goTo('approval', { selectedDoc: row.dataset.selectApproval, approvalDetailOpen: true, approvalCommentsExpanded: false, dcPublishEditing: false }); });
+  });
+  document.querySelectorAll('[data-del-request]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      if(!isDC()) return; // defense in depth — button only renders for DC anyway
+      const d = DOCUMENTS.find(x=>x.id===btn.dataset.delRequest);
+      if(!d) return;
+      if(!confirm(`ลบคำขอ "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
+      DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
+      if(state.selectedDoc===d.id) state.selectedDoc = null;
+      await persistDocs();
+      render();
+    });
   });
 
   const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
