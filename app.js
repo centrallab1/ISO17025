@@ -20,6 +20,7 @@ const firebaseApp = initializeApp(firebaseConfig);
 const dbFirestore = getFirestore(firebaseApp);
 const docRef = doc(dbFirestore, "iso17025", "documents");
 const archiveDocRef = doc(dbFirestore, "iso17025", "archive");
+const watermarkLogRef = doc(dbFirestore, "iso17025", "watermarklog");
 
 // ============================================================
 // AUTH — soft, client-side login for identity + role-based UI gating.
@@ -206,6 +207,31 @@ async function persistArchive(){
   archiveSaving = false;
 }
 
+// watermark distribution log — DC-only feature (see viewAdmin). We never
+// store the uploaded PDF itself, only a record of each watermark+download
+// action (document ID, who, when) so DC can track how many controlled
+// copies of a document have been issued.
+var WATERMARK_LOG = [];
+var WATERMARK_LOG_LOADED = false;
+async function loadWatermarkLog(){
+  try{
+    const snap = await getDoc(watermarkLogRef);
+    WATERMARK_LOG = (snap.exists() && Array.isArray(snap.data().items)) ? snap.data().items : [];
+    WATERMARK_LOG_LOADED = true;
+  } catch(e){
+    console.error('watermark log load failed', e);
+    WATERMARK_LOG_LOADED = false;
+  }
+}
+async function persistWatermarkLog(){
+  try{
+    await setDoc(watermarkLogRef, { items: WATERMARK_LOG, updatedAt: Date.now() });
+  } catch(e){
+    console.error('watermark log save failed', e);
+    alert('บันทึกประวัติการดาวน์โหลดไม่สำเร็จ: ' + e.message);
+  }
+}
+
 // ============================================================
 // APP STATE
 // ============================================================
@@ -252,6 +278,7 @@ const ICONS = {
   plus: `<path d="M12 5v14M5 12h14"/>`,
   send: `<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>`,
   chevronRight: `<path d="m9 18 6-6-6-6"/>`,
+  chevronDown: `<path d="m6 9 6 6 6-6"/>`,
   bell: `<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>`,
   filter: `<path d="M4 4h16l-6 8v6l-4 2v-8L4 4Z"/>`,
   folder: `<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>`,
@@ -517,6 +544,7 @@ async function startApp(){
     return;
   }
   loadArchive().then(()=>{ if(state.view==='archive') render(); }); // best-effort, non-blocking — Archive is a separate store
+  loadWatermarkLog().then(()=>{ if(state.view==='admin') render(); }); // best-effort, non-blocking
   removeBootScreen();
   wireNav();
   wireGlobalSearch();
@@ -680,7 +708,7 @@ function render(){
     case 'audit': el.innerHTML = renderAuditHubTabs() + viewAudit(); attachAuditHandlers(); break;
     case 'calendar': el.innerHTML = viewCalendar(); attachCalHandlers(); break;
     case 'audittrail': el.innerHTML = renderAuditHubTabs() + viewAuditTrail(); break;
-    case 'admin': el.innerHTML = viewAdmin(); attachAdminHandlers(); break;
+    case 'admin': el.innerHTML = viewAdmin(); attachAdminHandlers(); attachWatermarkHandlers(); break;
     case 'docdetail': el.innerHTML = viewDocDetail(state.selectedDoc); attachDetailActionHandlers(); break;
     default: el.innerHTML = viewDashboard();
   }
@@ -2853,7 +2881,143 @@ function viewAdmin(){
       อัปเดตชื่อ, ลิงก์ SharePoint, วันที่จัดทำ/ประกาศใช้, Revision, สถานะ และชื่อผู้จัดทำ/ทบทวน/อนุมัติ (แปลงรหัสตำแหน่ง LM=รัตนา, TM=พิสิทธินี, QM/DC=พิมพ์ชนก เป็นชื่อจริง) จากไฟล์ Master List ที่โหลดไว้ (${n} รายการ) — จับคู่ตามรหัสเอกสาร เอกสารที่ไม่มีในระบบจะถูกเพิ่มใหม่
     </div>
     <button class="btn primary" id="btnImportMasterList">${ic('doc')} นำเข้า/อัปเดตจาก Master List</button>
+  </div>
+  ${viewWatermarkTool()}`;
+}
+
+// ============================================================
+// WATERMARK TOOL — DC-only. DC uploads a PDF, the app stamps a tiled
+// diagonal watermark ("เอกสารออกโดย DC วันที่...") across every page,
+// entirely in the browser, then triggers a download. The uploaded/output
+// PDF is never stored anywhere — only a log entry (document ID, who, when)
+// is kept, so DC can see how many controlled copies of a document have
+// been issued without keeping the files themselves.
+// ============================================================
+function watermarkCountsByDoc(){
+  const counts = {};
+  WATERMARK_LOG.forEach(e=>{
+    counts[e.docId] = counts[e.docId] || { count:0, entries:[] };
+    counts[e.docId].count++;
+    counts[e.docId].entries.push(e);
+  });
+  return counts;
+}
+function viewWatermarkTool(){
+  const counts = watermarkCountsByDoc();
+  const docIds = Object.keys(counts).sort();
+  return `
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">ลายน้ำเอกสาร (Watermark PDF)</div></div>
+    <div style="font-size:12.5px; color:var(--ink-700); margin-bottom:14px;">
+      อัปโหลดไฟล์ PDF แล้วระบบจะติดลายน้ำ "เอกสารออกโดย DC วันที่ ${fmtDate(Date.now())}" พาดขวางเต็มหน้าทุกหน้า แล้วดาวน์โหลดไฟล์ให้ทันที — <b>ไม่มีการเก็บไฟล์ไว้ในระบบ</b> เก็บแค่บันทึกว่าเอกสารเลขไหนถูกดาวน์โหลดไปแจกจ่ายกี่ครั้ง
+    </div>
+    <div class="field"><label>รหัสเอกสาร</label>
+      <input id="wmDocId" list="wmDocIdList" placeholder="เช่น MPIR-LM-001-00 หรือพิมพ์เอง">
+      <datalist id="wmDocIdList">${DOCUMENTS.map(d=>`<option value="${d.id}">`).join('')}</datalist>
+    </div>
+    <div class="field"><label>ไฟล์ PDF</label><input type="file" id="wmFile" accept="application/pdf"></div>
+    <div class="field-error" id="wmError" style="display:none;"></div>
+    <button class="btn primary" id="btnWatermark">${ic('doc')} ติดลายน้ำและดาวน์โหลด</button>
+    <span id="wmStatus" style="font-size:12px; color:var(--ink-500); margin-left:10px;"></span>
+
+    <div style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line);">
+      <div style="font-size:12.5px; font-weight:800; color:var(--ink-900); margin-bottom:10px;">ประวัติการแจกจ่าย (${WATERMARK_LOG.length} ครั้ง จาก ${docIds.length} เอกสาร)</div>
+      ${docIds.length ? `<div class="table-wrap"><table class="dtable">
+        <thead><tr><th>รหัสเอกสาร</th><th>จำนวนที่ดาวน์โหลด</th><th>ล่าสุด</th><th></th></tr></thead>
+        <tbody>
+          ${docIds.map(id=>{
+            const c = counts[id];
+            const last = c.entries.slice().sort((a,b)=>b.at-a.at)[0];
+            return `
+          <tr data-wm-toggle="${id}" style="cursor:pointer;">
+            <td class="mono">${id}</td>
+            <td>${c.count}</td>
+            <td>${last ? `${last.by} · ${fmtDateTime(last.at)}` : '—'}</td>
+            <td>${ic('chevronDown','sm-icon')}</td>
+          </tr>
+          <tr class="wm-detail-row" data-wm-detail="${id}" style="display:none;"><td colspan="4">
+            ${c.entries.slice().sort((a,b)=>b.at-a.at).map(e=>`<div style="font-size:11.5px; color:var(--ink-700); padding:4px 0;">${e.by} — ${fmtDateTime(e.at)}</div>`).join('')}
+          </td></tr>`;
+          }).join('')}
+        </tbody>
+      </table></div>` : `<div style="font-size:12.5px; color:var(--ink-500);">ยังไม่มีประวัติการแจกจ่าย</div>`}
+    </div>
   </div>`;
+}
+let PDF_LIB_PROMISE = null;
+function loadPdfLib(){
+  if(!PDF_LIB_PROMISE) PDF_LIB_PROMISE = import('https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.esm.min.js');
+  return PDF_LIB_PROMISE;
+}
+async function watermarkAndDownload(file, docId){
+  const { PDFDocument, StandardFonts, rgb, degrees } = await loadPdfLib();
+  const watermarkText = `เอกสารออกโดย DC วันที่ ${fmtDate(Date.now())}`;
+  const bytes = await file.arrayBuffer();
+  const pdfDoc = await PDFDocument.load(bytes);
+  const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const fontSize = 18;
+  const textWidth = font.widthOfTextAtSize(watermarkText, fontSize);
+  pdfDoc.getPages().forEach(page=>{
+    const { width, height } = page.getSize();
+    const stepX = textWidth + 90;
+    const stepY = 130;
+    for(let y = -height*0.5; y < height*1.5; y += stepY){
+      for(let x = -width*0.5; x < width*1.5; x += stepX){
+        page.drawText(watermarkText, {
+          x, y, size: fontSize, font,
+          color: rgb(0.55,0.55,0.55), opacity: 0.28,
+          rotate: degrees(45),
+        });
+      }
+    }
+  });
+  const outBytes = await pdfDoc.save();
+  const blob = new Blob([outBytes], { type:'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `${docId}-DC-watermarked.pdf`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+function attachWatermarkHandlers(){
+  document.querySelectorAll('[data-wm-toggle]').forEach(row=>{
+    row.addEventListener('click', ()=>{
+      const id = row.dataset.wmToggle;
+      const detail = document.querySelector(`[data-wm-detail="${CSS && CSS.escape ? CSS.escape(id) : id}"]`);
+      if(detail) detail.style.display = detail.style.display==='none' ? 'table-row' : 'none';
+    });
+  });
+  const btn = document.getElementById('btnWatermark');
+  if(!btn) return;
+  btn.addEventListener('click', async ()=>{
+    if(!isDC()) return; // defense in depth — page/section is already DC-only
+    const errEl = document.getElementById('wmError');
+    const statusEl = document.getElementById('wmStatus');
+    const docId = document.getElementById('wmDocId').value.trim();
+    const fileInput = document.getElementById('wmFile');
+    const file = fileInput && fileInput.files && fileInput.files[0];
+    errEl.style.display = 'none';
+    if(!docId){ errEl.textContent = 'กรอกรหัสเอกสารก่อน'; errEl.style.display='block'; return; }
+    if(!file){ errEl.textContent = 'เลือกไฟล์ PDF ก่อน'; errEl.style.display='block'; return; }
+    if(file.type !== 'application/pdf'){ errEl.textContent = 'รองรับเฉพาะไฟล์ PDF เท่านั้น'; errEl.style.display='block'; return; }
+    btn.disabled = true;
+    statusEl.textContent = 'กำลังติดลายน้ำ...';
+    try{
+      await watermarkAndDownload(file, docId);
+      const actor = currentActorName();
+      WATERMARK_LOG.push({ docId, by: actor, at: Date.now() });
+      await persistWatermarkLog();
+      statusEl.textContent = 'เสร็จแล้ว — ดาวน์โหลดไฟล์และบันทึกประวัติแล้ว';
+      fileInput.value = '';
+      render();
+    } catch(e){
+      console.error('watermark failed', e);
+      statusEl.textContent = '';
+      errEl.textContent = 'ติดลายน้ำไม่สำเร็จ: ' + (e && e.message ? e.message : e);
+      errEl.style.display = 'block';
+    }
+    btn.disabled = false;
+  });
 }
 
 // ============================================================
