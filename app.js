@@ -3112,7 +3112,24 @@ async function watermarkAndDownload(file, docId){
   const angleDeg = 45;
   const angleRad = angleDeg * Math.PI / 180;
   const lineGap = 42; // baseline-to-baseline spacing between the two lines — scaled up to match the larger font sizes
-  pdfDoc.getPages().forEach(page=>{
+  const pages = pdfDoc.getPages();
+  // Shrink any line that would run wider than the page can comfortably show
+  // — the role/name text (line 2) varies in length depending on who's
+  // logged in, so a fixed size that fits "Yarapon Puttakot" could overflow
+  // for a longer name. Uses the first page's dimensions as the reference so
+  // every page in the document gets the same, consistent watermark size.
+  if(pages.length){
+    const { width: refWidth, height: refHeight } = pages[0].getSize();
+    const maxTextWidth = Math.min(refWidth, refHeight) * 0.85;
+    lines.forEach(line=>{
+      const font = line.bold ? boldFont : regularFont;
+      const w = font.widthOfTextAtSize(line.text, line.size);
+      if(w > maxTextWidth){
+        line.size = Math.max(8, line.size * (maxTextWidth / w));
+      }
+    });
+  }
+  pages.forEach(page=>{
     const { width, height } = page.getSize();
     const centerX = width / 2, centerY = height / 2;
     const n = lines.length;
