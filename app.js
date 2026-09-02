@@ -136,6 +136,7 @@ async function loadDocs(){
       if(d.rev===undefined){ d.rev=null; needsMigration = true; }
       if(d.createdDate===undefined){ d.createdDate=null; needsMigration = true; }
       if(d.effectiveDate===undefined){ d.effectiveDate=null; needsMigration = true; }
+      if(d.cancelledDate===undefined){ d.cancelledDate=null; needsMigration = true; }
       if(d.approvedBy===undefined){ d.approvedBy=null; needsMigration = true; }
       if(d.approvedAt===undefined){ d.approvedAt=null; needsMigration = true; }
       if(d.approvedComment===undefined){ d.approvedComment=null; needsMigration = true; }
@@ -1092,6 +1093,8 @@ function docModal(){
         <div class="field"><label>Rev.</label><input id="mfRev" value="${d.rev||'0'}" placeholder="0"></div>
         <div class="field"><label>วันที่จัดทำ</label><input id="mfCreated" type="date" value="${d.createdDate ? new Date(d.createdDate).toISOString().slice(0,10) : ''}"></div>
         <div class="field"><label>วันที่ประกาศใช้</label><input id="mfEffective" type="date" value="${d.effectiveDate ? new Date(d.effectiveDate).toISOString().slice(0,10) : ''}"></div>
+        <div class="field"><label>วันที่ยกเลิก</label><input id="mfCancelled" type="date" value="${d.cancelledDate ? new Date(d.cancelledDate).toISOString().slice(0,10) : ''}"></div>
+        <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:14px;">กรอกเมื่อเปลี่ยนสถานะเอกสารเป็น "ยกเลิก" — ระบบจะเติมวันนี้ให้อัตโนมัติถ้ายังไม่ได้กรอก แก้ไขได้</div>
         <div class="field"><label>ผู้จัดทำ</label><input id="mfPrep" value="${(d.preparedBy||'').replace(/"/g,'&quot;')}"></div>
         <div class="field"><label>ผู้ทบทวน</label><input id="mfReviewer" value="${(d.reviewerName||'').replace(/"/g,'&quot;')}"></div>
         <div class="field"><label>ผู้อนุมัติ</label><input id="mfApprover" value="${(d.approverName||'').replace(/"/g,'&quot;')}"></div>
@@ -1168,6 +1171,14 @@ function wireModalControls(){
   const idInput = document.getElementById('mfId');
   const clauseSel = document.getElementById('mfClause');
   const noteSel = document.getElementById('mfNote');
+  const cancelledInput = document.getElementById('mfCancelled');
+  if(noteSel && cancelledInput){
+    noteSel.addEventListener('change', ()=>{
+      if(noteSel.value==='ยกเลิก' && !cancelledInput.value){
+        cancelledInput.value = new Date().toISOString().slice(0,10);
+      }
+    });
+  }
   function refreshSuggestions(){
     const name = nameInput ? nameInput.value.trim() : '';
     const idVal = idInput ? idInput.value.trim() : '';
@@ -1249,7 +1260,7 @@ function wireModalControls(){
       DOCUMENTS.push({
         id, name, clause, link:'', note, rev:'0',
         approvalStatus:'ร่าง', reviewerName:'', approverName:'', preparedBy:actor,
-        comments:[{ by:actor, text:'ขั้นที่ 1: จองเลขเอกสาร', time: now }], lastUpdated: now, createdDate: now, effectiveDate:null,
+        comments:[{ by:actor, text:'ขั้นที่ 1: จองเลขเอกสาร', time: now }], lastUpdated: now, createdDate: now, effectiveDate:null, cancelledDate:null,
         approvedBy:null, approvedAt:null, approvedComment:null, lastRequestType:'new', requestedBy: actor,
         publishedLink:null, linkHistory:[],
         formConfirmedAt:null, formConfirmedBy:null, linkSetAt:null, linkSetBy:null, reviewedAt:null,
@@ -1293,6 +1304,8 @@ function wireModalControls(){
     const effective = document.getElementById('mfEffective');
     if(created) d.createdDate = created.value ? new Date(created.value+'T00:00:00').getTime() : null;
     if(effective) d.effectiveDate = effective.value ? new Date(effective.value+'T00:00:00').getTime() : null;
+    const cancelled = document.getElementById('mfCancelled');
+    if(cancelled) d.cancelledDate = cancelled.value ? new Date(cancelled.value+'T00:00:00').getTime() : null;
     const prep = document.getElementById('mfPrep'); if(prep) d.preparedBy = prep.value.trim();
     const rev2 = document.getElementById('mfReviewer'); if(rev2) d.reviewerName = rev2.value.trim();
     const appr = document.getElementById('mfApprover'); if(appr) d.approverName = appr.value.trim();
@@ -1412,7 +1425,7 @@ function archiveItemRow(a){
     <div class="file-ic">${ic('file')}</div>
     <div class="evi-main">
       ${a.link ? `<a class="evi-name" href="${a.link}" target="_blank" rel="noopener">${a.title}</a>` : `<span class="evi-name evi-nolink">${a.title}</span>`}
-      <div class="evi-sub">${a.clause ? `ข้อกำหนด ${clauseLabel(a.clause)} · ` : ''}อัปโหลดโดย ${a.uploadedBy||'—'} · ยืนยันโดย ${a.verifiedBy ? `<b style="color:var(--green-600);">${a.verifiedBy}</b>` : 'ยังไม่ยืนยัน'} · ${fmtDate(a.uploadedAt)}</div>
+      <div class="evi-sub">${a.clause ? `ข้อกำหนด ${clauseLabel(a.clause)} · ` : ''}อัปโหลดโดย ${a.uploadedBy||'—'} · ยืนยันโดย ${a.verifiedBy ? `<b style="color:var(--green-600);">${a.verifiedBy}</b>` : 'ยังไม่ยืนยัน'} · ${fmtDate(a.uploadedAt)}${a.cancelledDate ? ` · ยกเลิกเมื่อ ${fmtDate(a.cancelledDate)}` : ''}</div>
     </div>
     ${archiveStatusBadge(a.status)}
     <div class="row-actions" style="margin-left:10px;">
@@ -1618,6 +1631,9 @@ function archiveModal(){
         <div class="field"><label>ผู้อัปโหลด</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()}</div></div>
         <div class="field"><label>วันที่เอกสาร</label><input type="date" id="archiveDate" value="${new Date(a.uploadedAt || Date.now()).toISOString().slice(0,10)}"></div>
         <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:14px;">แก้วันที่ได้ถ้าวางไฟล์ย้อนหลัง — ระบบจะจัดกลุ่มปี/เดือนตามวันที่นี้</div>
+        ${a.category===CANCELLED_ARCHIVE_CATEGORY ? `
+        <div class="field"><label>วันที่ยกเลิก</label><input type="date" id="archiveCancelledDate" value="${a.cancelledDate ? new Date(a.cancelledDate).toISOString().slice(0,10) : ''}"></div>
+        <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:14px;">วันที่เอกสารต้นทางถูกยกเลิกจริง (แยกจาก "วันที่เอกสาร" ด้านบนซึ่งใช้จัดกลุ่มเท่านั้น)</div>` : ''}
         <div class="field-error" id="archiveModalError" style="display:none;"></div>
       </div>
       <div class="modal-actions">
@@ -1685,16 +1701,22 @@ function wireArchiveModalControls(){
     const dateVal = dateInput ? dateInput.value : '';
     const uploadedAt = dateVal ? new Date(dateVal+'T00:00:00').getTime() : Date.now();
     if(!title){ errEl.textContent='กรอกชื่อเอกสารให้ครบ'; errEl.style.display='block'; return; }
+    const cancelledInput = document.getElementById('archiveCancelledDate');
+    const cancelledDate = cancelledInput ? (cancelledInput.value ? new Date(cancelledInput.value+'T00:00:00').getTime() : null) : undefined;
 
     if(mode==='new'){
       ARCHIVE_ITEMS.push({
         id: 'ARC-' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
         title, category, clause, link, uploadedBy, uploadedAt,
+        cancelledDate: cancelledDate ?? null,
         status:'รอตรวจสอบ', verifiedBy:null, verifiedAt:null,
       });
     } else {
       const a = ARCHIVE_ITEMS.find(x=>x.id===state.archiveModal.id);
-      if(a){ a.title = title; a.category = category; a.clause = clause; a.link = link; a.uploadedBy = uploadedBy; a.uploadedAt = uploadedAt; }
+      if(a){
+        a.title = title; a.category = category; a.clause = clause; a.link = link; a.uploadedBy = uploadedBy; a.uploadedAt = uploadedAt;
+        if(cancelledDate !== undefined) a.cancelledDate = cancelledDate;
+      }
     }
     closeArchiveModal();
     render();
@@ -1720,6 +1742,7 @@ function viewDocDetail(docId){
         <div class="kv-row"><div class="k">ประเภท</div><div class="v">${docTypeLabel(d)}</div></div>
         <div class="kv-row"><div class="k">วันที่จัดทำ</div><div class="v">${d.createdDate ? fmtDate(d.createdDate) : '—'}</div></div>
         <div class="kv-row"><div class="k">วันที่ประกาศใช้</div><div class="v">${d.effectiveDate ? fmtDate(d.effectiveDate) : '—'}</div></div>
+        ${d.cancelledDate ? `<div class="kv-row"><div class="k">วันที่ยกเลิก</div><div class="v">${fmtDate(d.cancelledDate)}</div></div>` : ''}
         <div class="kv-row"><div class="k">อัปเดตล่าสุด</div><div class="v">${fmtDateTime(d.lastUpdated)}</div></div>
         <div class="kv-row"><div class="k">ผู้จัดทำ</div><div class="v">${d.preparedBy || '—'}</div></div>
         <div class="kv-row"><div class="k">ผู้ทบทวน</div><div class="v">${d.reviewerName || '—'}</div></div>
@@ -2534,6 +2557,7 @@ function viewApprovalDetail(){
       <div class="side-box"><div class="side-box-title">ผู้อนุมัติ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.approverName || d.approvedBy || '—'}</div>${d.approvedAt ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.approvedAt)}</div>` : ''}</div>
       <div class="side-box"><div class="side-box-title">วันที่จัดทำ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.createdDate ? fmtDate(d.createdDate) : '—'}</div></div>
       <div class="side-box"><div class="side-box-title">วันที่ประกาศใช้</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.effectiveDate ? fmtDate(d.effectiveDate) : '—'}</div></div>
+      ${d.cancelledDate ? `<div class="side-box"><div class="side-box-title">วันที่ยกเลิก</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${fmtDate(d.cancelledDate)}</div></div>` : ''}
       <div class="side-box"><div class="side-box-title">อัปเดตล่าสุด</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${fmtDateTime(d.lastUpdated)}</div></div>
     </div>
 
@@ -2963,18 +2987,25 @@ function applyMasterListRow(row, d){
 // instead of creating a duplicate each time.
 function archiveCancelledRow(row, existingDoc){
   const uploadedAt = toEpoch(row.effective) || toEpoch(row.created) || (existingDoc && existingDoc.lastUpdated) || Date.now();
+  // actual cancellation date, kept separate from uploadedAt (which is only
+  // a grouping date, not necessarily when the document was retired). Only
+  // set when the master list actually has a "cancelled" column — otherwise
+  // left blank for someone to fill in via the archive edit modal, rather
+  // than guessing it equals the effective/created date.
+  const cancelledDate = toEpoch(row.cancelled) || (existingDoc && existingDoc.cancelledDate) || null;
   const approver = roleName(row.approver) || '';
   let a = ARCHIVE_ITEMS.find(x=> x.sourceDocId===row.id);
   if(a){
     a.title = row.name || a.title;
     a.link = row.link || a.link;
     a.uploadedAt = uploadedAt;
+    if(cancelledDate) a.cancelledDate = cancelledDate;
   } else {
     ARCHIVE_ITEMS.push({
       id: 'ARC-' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
       sourceDocId: row.id, title: row.name || row.id, category: CANCELLED_ARCHIVE_CATEGORY,
       clause:'', link: row.link || '', uploadedBy: approver || 'Master List Import',
-      uploadedAt, status:'ยืนยันแล้ว', verifiedBy: approver || null, verifiedAt: uploadedAt,
+      uploadedAt, cancelledDate, status:'ยืนยันแล้ว', verifiedBy: approver || null, verifiedAt: uploadedAt,
     });
   }
 }
@@ -3007,7 +3038,7 @@ async function runMasterListImport(){
       d = {
         id: row.id, name: row.name, clause:'', link: row.link || '', note: row.note || 'ว่าง',
         approvalStatus:'ร่าง', reviewerName:'', approverName:'', preparedBy:'', comments:[],
-        lastUpdated: Date.now(), rev:null, createdDate:null, effectiveDate:null,
+        lastUpdated: Date.now(), rev:null, createdDate:null, effectiveDate:null, cancelledDate:null,
       };
       applyMasterListRow(row, d);
       DOCUMENTS.push(d);
@@ -3132,7 +3163,7 @@ function viewWatermarkTool(){
             <td>${c.recalled}</td>
             <td>${outstanding>0 ? `<b style="color:var(--amber-600);">${outstanding}</b>` : outstanding}</td>
             <td>${last ? `${last.by} · ${fmtDateTime(last.at)}` : '—'}</td>
-            <td>${ic('chevronDown','sm-icon')}</td>
+            <td style="white-space:nowrap;">${isDC() ? `<button data-wm-del-doc="${id}" class="del" title="ลบทะเบียนสำเนาของเอกสารนี้ทั้งหมด" style="margin-right:6px;">${ic('trash')}</button>` : ''}${ic('chevronDown','sm-icon')}</td>
           </tr>
           <tr class="wm-detail-row" data-wm-detail="${id}" style="display:${state.wmExpandedDoc===id?'table-row':'none'};"><td colspan="7">
             ${c.entries.slice().sort((a,b)=>b.at-a.at).map(e=>{
@@ -3146,7 +3177,10 @@ function viewWatermarkTool(){
                 ${e.manual ? ` <span style="color:var(--amber-600); font-weight:700;">(บันทึกด้วยตนเอง${e.note ? ': '+e.note : ''})</span>` : ''}
                 ${isDistribute && e.recalled ? `<br><span style="color:var(--green-600); font-weight:700;">✓ เรียกคืนแล้ว ${fmtDateTime(e.recalledAt)} โดย ${e.recalledBy}</span>` : ''}
               </div>
-              ${isDistribute ? `<button class="btn ${e.recalled?'ghost':'success'}" data-wm-recall="${e.id}" style="flex-shrink:0; font-size:11px; padding:5px 10px;">${e.recalled ? 'ยกเลิกการเรียกคืน' : 'ทำเครื่องหมายว่าเรียกคืนแล้ว'}</button>` : ''}
+              <div style="display:flex; gap:6px; flex-shrink:0;">
+                ${isDistribute ? `<button class="btn ${e.recalled?'ghost':'success'}" data-wm-recall="${e.id}" style="font-size:11px; padding:5px 10px;">${e.recalled ? 'ยกเลิกการเรียกคืน' : 'ทำเครื่องหมายว่าเรียกคืนแล้ว'}</button>` : ''}
+                ${isDC() ? `<button data-wm-del-entry="${e.id}" class="del" title="ลบรายการนี้" style="font-size:11px; padding:5px 10px;">${ic('trash')}</button>` : ''}
+              </div>
             </div>`;
             }).join('')}
           </td></tr>`;
@@ -3354,6 +3388,27 @@ function attachWatermarkHandlers(){
       } else {
         entry.recalled = true; entry.recalledAt = Date.now(); entry.recalledBy = currentActorName();
       }
+      render();
+      await persistWatermarkLog();
+    });
+  });
+  document.querySelectorAll('[data-wm-del-entry]').forEach(delBtn=>{
+    delBtn.addEventListener('click', async (e)=>{
+      e.stopPropagation();
+      if(!isDC()) return; // defense in depth
+      if(!confirm('ลบรายการทะเบียนสำเนานี้? ลบแล้วกู้คืนไม่ได้')) return;
+      WATERMARK_LOG = WATERMARK_LOG.filter(x=>x.id!==delBtn.dataset.wmDelEntry);
+      render();
+      await persistWatermarkLog();
+    });
+  });
+  document.querySelectorAll('[data-wm-del-doc]').forEach(delBtn=>{
+    delBtn.addEventListener('click', async (e)=>{
+      e.stopPropagation();
+      if(!isDC()) return; // defense in depth
+      const id = delBtn.dataset.wmDelDoc;
+      if(!confirm(`ลบทะเบียนสำเนาทั้งหมดของ ${id}? ลบแล้วกู้คืนไม่ได้`)) return;
+      WATERMARK_LOG = WATERMARK_LOG.filter(x=>x.docId!==id);
       render();
       await persistWatermarkLog();
     });
