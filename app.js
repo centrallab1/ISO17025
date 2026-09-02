@@ -1774,6 +1774,12 @@ function classifyEvent(text){
   if(/ขั้นที่ 3: DC วางลิงก์เอกสาร/.test(text)){
     return { icon:'link', bg:'--amber-600', title:'ขั้นที่ 3: DC วางลิงก์+เลือกข้อกำหนด' };
   }
+  if(/ขั้นที่ 4: ทบทวนแล้ว/.test(text)){
+    return { icon:'check', bg:'--amber-600', title:'ขั้นที่ 4: ทบทวนแล้ว' };
+  }
+  if(/ขั้นที่ 5: อนุมัติเอกสารแล้ว/.test(text)){
+    return { icon:'check', bg:'--green-600', title:'ขั้นที่ 5: อนุมัติเอกสารแล้ว' };
+  }
   if(/ขั้นที่ 6: DC เผยแพร่เอกสาร|DC แก้ไขลิงก์ที่เผยแพร่/.test(text)){
     return { icon:'link', bg:'--green-600', title: /แก้ไขลิงก์/.test(text) ? 'DC แก้ไขลิงก์ที่เผยแพร่' : 'ขั้นที่ 6: DC เผยแพร่เอกสาร' };
   }
@@ -2575,7 +2581,18 @@ function attachApprovalHandlers(){
     d.approvalStatus = nextStatus;
     d.lastUpdated = now;
     d.comments = d.comments || [];
-    d.comments.push({ by:actor, text: comment || `อนุมัติ → ${d.approvalStatus}`, time: now });
+    // always keep the ขั้นที่ N label visible in the history even when the
+    // person also typed a comment — previously a custom comment replaced
+    // the label entirely, making steps 4/5 look "missing" from the log
+    let stepLabel;
+    if((d.lastRequestType==='new'||d.lastRequestType==='revision') && nextStatus==='รออนุมัติ'){
+      stepLabel = 'ขั้นที่ 4: ทบทวนแล้ว → รออนุมัติ';
+    } else if((d.lastRequestType==='new'||d.lastRequestType==='revision') && nextStatus==='อนุมัติแล้ว'){
+      stepLabel = 'ขั้นที่ 5: อนุมัติเอกสารแล้ว';
+    } else {
+      stepLabel = `อนุมัติ → ${nextStatus}`;
+    }
+    d.comments.push({ by:actor, text: comment ? `${stepLabel} — ${comment}` : stepLabel, time: now });
     // record the reviewer/approver names on the document's formal record —
     // only for actual new-document or revision-update requests, per SOP
     // (annual review confirmations don't touch these role fields)
@@ -2970,12 +2987,30 @@ function loadPdfLib(){
   if(!PDF_LIB_PROMISE) PDF_LIB_PROMISE = import('https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.esm.min.js');
   return PDF_LIB_PROMISE;
 }
+let FONTKIT_PROMISE = null;
+function loadFontkit(){
+  // pdf-lib's built-in StandardFonts (Helvetica etc.) can't encode Thai
+  // characters at all — registering fontkit lets us embed a real font
+  // (below) that has Thai glyphs instead
+  if(!FONTKIT_PROMISE) FONTKIT_PROMISE = import('https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/+esm');
+  return FONTKIT_PROMISE;
+}
+let THAI_FONT_BYTES_PROMISE = null;
+function loadThaiFontBytes(){
+  if(!THAI_FONT_BYTES_PROMISE) THAI_FONT_BYTES_PROMISE = fetch('https://raw.githubusercontent.com/google/fonts/main/ofl/sarabun/Sarabun-Regular.ttf')
+    .then(r=>{ if(!r.ok) throw new Error('โหลดฟอนต์ไทยไม่สำเร็จ'); return r.arrayBuffer(); });
+  return THAI_FONT_BYTES_PROMISE;
+}
 async function watermarkAndDownload(file, docId){
-  const { PDFDocument, StandardFonts, rgb, degrees } = await loadPdfLib();
+  const [{ PDFDocument, rgb, degrees }, fontkitModule, thaiFontBytes] = await Promise.all([
+    loadPdfLib(), loadFontkit(), loadThaiFontBytes(),
+  ]);
+  const fontkit = fontkitModule.default || fontkitModule;
   const watermarkText = `เอกสารออกโดย DC วันที่ ${fmtDate(Date.now())}`;
   const bytes = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(bytes);
-  const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  pdfDoc.registerFontkit(fontkit);
+  const font = await pdfDoc.embedFont(thaiFontBytes, { subset: true });
   const fontSize = 18;
   const textWidth = font.widthOfTextAtSize(watermarkText, fontSize);
   pdfDoc.getPages().forEach(page=>{
