@@ -1972,6 +1972,44 @@ function wireDcRegister(){
     await persistDocs();
   });
 }
+// ============================================================
+// STEP 4: the independent review itself (รอทบทวน → รออนุมัติ). There's no
+// separate action UI here — the reviewer acts via the comment/approve
+// box further down viewApprovalDetail() — but once it's done, show a
+// completed-step card here too, matching steps 2/3/6, so the flow
+// doesn't visually "skip" from step 3 straight to step 5/6.
+// ============================================================
+function renderReviewBox(d){
+  if(d.lastRequestType !== 'new' && d.lastRequestType !== 'revision') return '';
+  if(!d.reviewedAt) return '';
+  return `
+  <div class="side-box" style="border-color:var(--green-600); background:var(--green-50); margin-bottom:18px;">
+    <div class="side-box-title" style="color:var(--green-600);">ขั้นที่ 4: ทบทวนแล้ว</div>
+    <div style="font-size:13px; color:var(--ink-900); font-weight:700;">${d.reviewerName || '—'}</div>
+    <div style="font-size:12px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.reviewedAt)}</div>
+  </div>`;
+}
+// ============================================================
+// STEP 5: final approval (รออนุมัติ → อนุมัติแล้ว). Shared between
+// viewApprovalDetail() (where an in-progress request still shows the
+// pending action buttons instead) and viewRevisionDetailInline() (which
+// has no action buttons of its own and previously skipped straight from
+// step 3 to step 6, making steps 4/5 look like they'd vanished).
+// ============================================================
+function renderApprovedBox(d){
+  if(d.approvalStatus !== 'อนุมัติแล้ว') return '';
+  const lastComment = (d.comments||[])[(d.comments||[]).length-1];
+  const approvedBy = d.approvedBy || (lastComment ? lastComment.by : '');
+  const approvedAt = d.approvedAt || (lastComment ? lastComment.time : d.lastUpdated);
+  const approvedComment = d.approvedComment !== undefined ? d.approvedComment : (lastComment ? lastComment.text : '');
+  return `
+  <div class="side-box" style="border-color:var(--green-600); background:var(--green-50); margin-bottom:18px;">
+    <div class="side-box-title" style="color:var(--green-600);">${(d.lastRequestType==='new'||d.lastRequestType==='revision') ? 'ขั้นที่ 5: อนุมัติแล้ว' : 'อนุมัติแล้ว'}</div>
+    <div style="font-size:13px; color:var(--ink-900); font-weight:700;">${approvedBy || 'ไม่ระบุผู้อนุมัติ'}</div>
+    <div style="font-size:12px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(approvedAt)}</div>
+    ${approvedComment ? `<div style="font-size:12.5px; color:var(--ink-700); margin-top:8px; padding-top:8px; border-top:1px solid var(--line);">${approvedComment}</div>` : ''}
+  </div>`;
+}
 function renderPublishBox(d){
   if(d.approvalStatus !== 'อนุมัติแล้ว') return '';
   if(d.lastRequestType !== 'new' && d.lastRequestType !== 'revision') return '';
@@ -2101,6 +2139,8 @@ function viewRevisionDetailInline(d, standalone){
 
     ${renderFormConfirmBox(d)}
     ${renderDcRegisterBox(d)}
+    ${renderReviewBox(d)}
+    ${renderApprovedBox(d)}
     ${renderPublishBox(d)}
 
     <div class="side-box" style="border-color:var(--green-600); background:var(--green-50); margin-bottom:18px;">
@@ -2456,10 +2496,6 @@ function viewApprovalDetail(){
   });
 
   const isApproved = status === 'อนุมัติแล้ว';
-  const lastComment = (d.comments||[])[ (d.comments||[]).length-1 ];
-  const approvedBy = d.approvedBy || (lastComment ? lastComment.by : '');
-  const approvedAt = d.approvedAt || (lastComment ? lastComment.time : d.lastUpdated);
-  const approvedComment = d.approvedComment !== undefined ? d.approvedComment : (lastComment ? lastComment.text : '');
   const requestLabel = d.lastRequestType==='new' ? 'เอกสารใหม่' : d.lastRequestType==='revision' ? `ปรับปรุง (Rev.${d.lastRequestFrom||'-'} → ${d.rev||'-'})` : d.lastRequestType==='review' ? 'ทบทวนประจำปี (ไม่มีการแก้ไข)' : null;
   const allComments = (d.comments||[]).slice().reverse();
   const shownComments = state.approvalCommentsExpanded ? allComments : allComments.slice(0,5);
@@ -2496,16 +2532,9 @@ function viewApprovalDetail(){
 
     ${renderFormConfirmBox(d)}
     ${renderDcRegisterBox(d)}
-    ${renderPublishBox(d)}
+    ${renderReviewBox(d)}
 
-    ${isApproved ? `
-    <div class="side-box" style="border-color:var(--green-600); background:var(--green-50);">
-      <div class="side-box-title" style="color:var(--green-600);">อนุมัติแล้ว</div>
-      <div style="font-size:13px; color:var(--ink-900); font-weight:700;">${approvedBy || 'ไม่ระบุผู้อนุมัติ'}</div>
-      <div style="font-size:12px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(approvedAt)}</div>
-      ${approvedComment ? `<div style="font-size:12.5px; color:var(--ink-700); margin-top:8px; padding-top:8px; border-top:1px solid var(--line);">${approvedComment}</div>` : ''}
-    </div>
-    ` : ((status==='ร่าง' || (status==='รอทบทวน' && !d.linkSetAt)) && (d.lastRequestType==='new'||d.lastRequestType==='revision')) ? '' : `
+    ${isApproved ? renderApprovedBox(d) : ((status==='ร่าง' || (status==='รอทบทวน' && !d.linkSetAt)) && (d.lastRequestType==='new'||d.lastRequestType==='revision')) ? '' : `
     ${(d.lastRequestType==='new'||d.lastRequestType==='revision') && currentIdx===1 ? `<div style="font-size:11.5px; font-weight:700; color:var(--amber-600); margin-bottom:10px;">${ic('clock','sm-icon')} ขั้นที่ 4: ต้องทบทวนโดย QM หรือ DC</div>` : ''}
     ${(d.lastRequestType==='new'||d.lastRequestType==='revision') && currentIdx===2 ? `<div style="font-size:11.5px; font-weight:700; color:var(--amber-600); margin-bottom:10px;">${ic('clock','sm-icon')} ขั้นที่ 5: ต้องอนุมัติโดย Lab Manager (LM)</div>` : ''}
     <div class="field" style="max-width:320px;"><label>ผู้ดำเนินการ</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()} <span style="color:var(--ink-500); font-weight:600;">(${currentUser.role})</span></div></div>
@@ -2519,6 +2548,8 @@ function viewApprovalDetail(){
       </div>
     </div>
     `}
+
+    ${renderPublishBox(d)}
 
     <div class="panel-head" style="margin:20px 0 10px;">
       <div class="panel-title" style="margin:0;">ประวัติความเห็น ${allComments.length ? `<span style="color:var(--ink-500); font-weight:600; font-size:12px;">(${allComments.length})</span>` : ''}</div>
