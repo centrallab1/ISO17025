@@ -107,10 +107,12 @@ function updateUserBadge(){
   if(badge) badge.onclick = ()=>{
     if(confirm('ออกจากระบบใช่หรือไม่?')){ clearSession(); location.reload(); }
   };
-  // Administration is DC-only (system oversight); Archive stays visible to
-  // everyone (QM/LM can view/upload — DC-only actions are gated inside it)
+  // Administration now stays visible to everyone, like Archive — it hosts
+  // the watermark/print tool that every role can use. The DC-only parts
+  // (Firestore/SharePoint info, Import Master List) are gated inside
+  // viewAdmin() itself, not by hiding the nav entry.
   document.querySelectorAll('.nav-item[data-view="administration"], .nav-item[data-view="admin"]').forEach(el=>{
-    el.style.display = isDC() ? '' : 'none';
+    el.style.display = '';
   });
 }
 
@@ -2924,11 +2926,8 @@ function attachAdminHandlers(){
 // ADMINISTRATION
 // ============================================================
 function viewAdmin(){
-  if(!isDC()){
-    return `<div class="panel">${emptyState('ไม่มีสิทธิ์เข้าถึง', 'หน้า Administration ใช้ได้เฉพาะ Document Control (DC) เท่านั้น')}</div>`;
-  }
   const n = (typeof MASTER_LIST!=='undefined') ? MASTER_LIST.length : 0;
-  return `
+  const dcOnlySections = isDC() ? `
   <div class="panel">
     <div class="panel-head"><div class="panel-title">Administration</div></div>
     <div class="grid grid-3">
@@ -2943,17 +2942,23 @@ function viewAdmin(){
       อัปเดตชื่อ, ลิงก์ SharePoint, วันที่จัดทำ/ประกาศใช้, Revision, สถานะ และชื่อผู้จัดทำ/ทบทวน/อนุมัติ (แปลงรหัสตำแหน่ง LM=รัตนา, TM=พิสิทธินี, QM/DC=พิมพ์ชนก เป็นชื่อจริง) จากไฟล์ Master List ที่โหลดไว้ (${n} รายการ) — จับคู่ตามรหัสเอกสาร เอกสารที่ไม่มีในระบบจะถูกเพิ่มใหม่
     </div>
     <button class="btn primary" id="btnImportMasterList">${ic('doc')} นำเข้า/อัปเดตจาก Master List</button>
-  </div>
-  ${viewWatermarkTool()}`;
+  </div>` : `
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">Administration</div></div>
+    <div style="font-size:12.5px; color:var(--ink-700);">หน้านี้ใช้สำหรับติดลายน้ำและพิมพ์เอกสารควบคุม — ส่วนการตั้งค่าระบบใช้ได้เฉพาะ Document Control (DC)</div>
+  </div>`;
+  return `${dcOnlySections}${viewWatermarkTool()}`;
 }
 
 // ============================================================
-// WATERMARK TOOL — DC-only. DC uploads a PDF, the app stamps a tiled
-// diagonal watermark ("เอกสารออกโดย DC วันที่...") across every page,
-// entirely in the browser, then triggers a download. The uploaded/output
-// PDF is never stored anywhere — only a log entry (document ID, who, when)
-// is kept, so DC can see how many controlled copies of a document have
-// been issued without keeping the files themselves.
+// WATERMARK TOOL — open to every logged-in role. Whoever uses it uploads a
+// PDF and the app stamps ONE centered diagonal watermark per page reading
+// "เอกสารควบคุม (CONTROLLED DOCUMENT) ออกโดย: <ตำแหน่งผู้ใช้> (<ชื่อผู้ใช้>) |
+// วันที่ออก: <วันนี้>", entirely in the browser, then triggers a download.
+// The uploaded/output PDF is never stored anywhere — only a log entry
+// (document ID, who, when) is kept, so anyone can see how many controlled
+// copies of a document have been issued without keeping the files
+// themselves.
 // ============================================================
 function watermarkCountsByDoc(){
   const counts = {};
@@ -2971,7 +2976,7 @@ function viewWatermarkTool(){
   <div class="panel">
     <div class="panel-head"><div class="panel-title">ลายน้ำเอกสาร (Watermark PDF)</div></div>
     <div style="font-size:12.5px; color:var(--ink-700); margin-bottom:14px;">
-      อัปโหลดไฟล์ PDF แล้วระบบจะติดลายน้ำ "เอกสารออกโดย DC วันที่ ${fmtDate(Date.now())}" พาดขวางเต็มหน้าทุกหน้า แล้วดาวน์โหลดไฟล์ให้ทันที — <b>ไม่มีการเก็บไฟล์ไว้ในระบบ</b> เก็บแค่บันทึกว่าเอกสารเลขไหนถูกดาวน์โหลดไปแจกจ่ายกี่ครั้ง
+      อัปโหลดไฟล์ PDF แล้วระบบจะติดลายน้ำพาดขวางกลางหน้า 1 ข้อความในทุกหน้า: "เอกสารควบคุม (CONTROLLED DOCUMENT) ออกโดย: ${currentUser ? (ROLE_LABEL[currentUser.role]||currentUser.role) : 'ตำแหน่ง'} (${currentUser ? currentUser.name : 'ชื่อ'}) | วันที่ออก: ${fmtDate(Date.now())}" แล้วดาวน์โหลดไฟล์ให้ทันที — <b>ไม่มีการเก็บไฟล์ไว้ในระบบ</b> เก็บแค่บันทึกว่าเอกสารเลขไหนถูกดาวน์โหลดไปแจกจ่ายกี่ครั้ง
     </div>
     <div class="field"><label>รหัสเอกสาร</label>
       <input id="wmDocId" list="wmDocIdList" placeholder="เช่น MPIR-LM-001-00 หรือพิมพ์เอง">
@@ -3030,32 +3035,48 @@ async function watermarkAndDownload(file, docId){
     loadPdfLib(), loadFontkit(), loadThaiFontBytes(),
   ]);
   const fontkit = fontkitModule.default || fontkitModule;
-  const watermarkText = `เอกสารออกโดย DC วันที่ ${fmtDate(Date.now())}`;
+  const positionLabel = currentUser ? (ROLE_LABEL[currentUser.role] || currentUser.role) : '—';
+  const personName = currentUser ? currentUser.name : '—';
+  const watermarkText = `เอกสารควบคุม (CONTROLLED DOCUMENT) ออกโดย: ${positionLabel} (${personName}) | วันที่ออก: ${fmtDate(Date.now())}`;
   const bytes = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(bytes);
   pdfDoc.registerFontkit(fontkit);
   const font = await pdfDoc.embedFont(thaiFontBytes, { subset: true });
-  const fontSize = 18;
-  const textWidth = font.widthOfTextAtSize(watermarkText, fontSize);
+  const angleDeg = 45;
+  const angleRad = angleDeg * Math.PI / 180;
   pdfDoc.getPages().forEach(page=>{
     const { width, height } = page.getSize();
-    const stepX = textWidth + 90;
-    const stepY = 130;
-    for(let y = -height*0.5; y < height*1.5; y += stepY){
-      for(let x = -width*0.5; x < width*1.5; x += stepX){
-        page.drawText(watermarkText, {
-          x, y, size: fontSize, font,
-          color: rgb(0.55,0.55,0.55), opacity: 0.28,
-          rotate: degrees(45),
-        });
-      }
-    }
+    // Auto-scale so one line of text reads clearly across the page
+    // diagonal, on both small and large page sizes.
+    const diagonal = Math.sqrt(width*width + height*height);
+    const targetWidth = diagonal * 0.55;
+    const probeSize = 24;
+    const probeWidth = font.widthOfTextAtSize(watermarkText, probeSize);
+    let fontSize = probeWidth > 0 ? probeSize * (targetWidth / probeWidth) : probeSize;
+    fontSize = Math.max(14, Math.min(fontSize, 40));
+    const textWidth = font.widthOfTextAtSize(watermarkText, fontSize);
+    // drawText's (x,y) anchors the unrotated baseline's bottom-left corner,
+    // then rotates around that point — so to land the *visual center* of
+    // the text on the page's center, shift the anchor back along the
+    // rotated text direction (and a small perpendicular correction for
+    // baseline-to-visual-center height).
+    const halfWidth = textWidth / 2;
+    const halfHeight = fontSize * 0.32;
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const anchorX = centerX - (halfWidth * Math.cos(angleRad) - halfHeight * Math.sin(angleRad));
+    const anchorY = centerY - (halfWidth * Math.sin(angleRad) + halfHeight * Math.cos(angleRad));
+    page.drawText(watermarkText, {
+      x: anchorX, y: anchorY, size: fontSize, font,
+      color: rgb(0.5,0.5,0.5), opacity: 0.35,
+      rotate: degrees(angleDeg),
+    });
   });
   const outBytes = await pdfDoc.save();
   const blob = new Blob([outBytes], { type:'application/pdf' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = `${docId}-DC-watermarked.pdf`;
+  a.href = url; a.download = `${docId}-controlled-watermarked.pdf`;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
 }
@@ -3070,7 +3091,7 @@ function attachWatermarkHandlers(){
   const btn = document.getElementById('btnWatermark');
   if(!btn) return;
   btn.addEventListener('click', async ()=>{
-    if(!isDC()) return; // defense in depth — page/section is already DC-only
+    if(!currentUser) return; // must be logged in — everyone with an account can print/watermark
     const errEl = document.getElementById('wmError');
     const statusEl = document.getElementById('wmStatus');
     const docId = document.getElementById('wmDocId').value.trim();
