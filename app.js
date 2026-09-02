@@ -2976,7 +2976,7 @@ function viewWatermarkTool(){
   <div class="panel">
     <div class="panel-head"><div class="panel-title">ลายน้ำเอกสาร (Watermark PDF)</div></div>
     <div style="font-size:12.5px; color:var(--ink-700); margin-bottom:14px;">
-      อัปโหลดไฟล์ PDF แล้วระบบจะติดลายน้ำพาดขวางกลางหน้า 1 ข้อความในทุกหน้า: "CONTROLLED DOCUMENT — Issued by: ${currentUser ? (ROLE_LABEL[currentUser.role]||currentUser.role) : '[role]'} (${currentUser ? currentUser.name : '[name]'}) | Issue date: ${fmtDate(Date.now())}" แล้วดาวน์โหลดไฟล์ให้ทันที — <b>ไม่มีการเก็บไฟล์ไว้ในระบบ</b> เก็บแค่บันทึกว่าเอกสารเลขไหนถูกดาวน์โหลดไปแจกจ่ายกี่ครั้ง
+      อัปโหลดไฟล์ PDF แล้วระบบจะติดลายน้ำพาดขวางกลางหน้าในทุกหน้า 2 บรรทัด: <b>"CONTROLLED DOCUMENT"</b> (ตัวหนา) และ "Issued by ${currentUser ? currentUser.role : '[role]'} (${currentUser ? currentUser.name.split(' ')[0] : '[name]'}) | Issue date: ${fmtDate(Date.now())}" (ตัวปกติ) แล้วดาวน์โหลดไฟล์ให้ทันที — <b>ไม่มีการเก็บไฟล์ไว้ในระบบ</b> เก็บแค่บันทึกว่าเอกสารเลขไหนถูกดาวน์โหลดไปแจกจ่ายกี่ครั้ง
     </div>
     <div class="field"><label>รหัสเอกสาร</label>
       <input id="wmDocId" list="wmDocIdList" placeholder="เช่น MPIR-LM-001-00 หรือพิมพ์เอง">
@@ -3019,57 +3019,66 @@ function loadPdfLib(){
 let FONTKIT_PROMISE = null;
 function loadFontkit(){
   // pdf-lib's built-in StandardFonts (Helvetica etc.) can't encode Thai
-  // characters at all — registering fontkit lets us embed a real font
-  // (below) that has Thai glyphs instead
+  // characters at all — registering fontkit lets us embed real fonts
+  // (below) instead. The watermark text itself is English/numbers today,
+  // but account names could be Thai in the future, so this stays in place
+  // as a safety net rather than reverting to StandardFonts.
   if(!FONTKIT_PROMISE) FONTKIT_PROMISE = import('https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/+esm');
   return FONTKIT_PROMISE;
 }
-let THAI_FONT_BYTES_PROMISE = null;
-function loadThaiFontBytes(){
-  if(!THAI_FONT_BYTES_PROMISE) THAI_FONT_BYTES_PROMISE = fetch('https://raw.githubusercontent.com/google/fonts/main/ofl/sarabun/Sarabun-Regular.ttf')
+let THAI_FONT_REGULAR_PROMISE = null;
+function loadThaiFontRegular(){
+  if(!THAI_FONT_REGULAR_PROMISE) THAI_FONT_REGULAR_PROMISE = fetch('https://raw.githubusercontent.com/google/fonts/main/ofl/sarabun/Sarabun-Regular.ttf')
     .then(r=>{ if(!r.ok) throw new Error('โหลดฟอนต์ไทยไม่สำเร็จ'); return r.arrayBuffer(); });
-  return THAI_FONT_BYTES_PROMISE;
+  return THAI_FONT_REGULAR_PROMISE;
+}
+let THAI_FONT_BOLD_PROMISE = null;
+function loadThaiFontBold(){
+  if(!THAI_FONT_BOLD_PROMISE) THAI_FONT_BOLD_PROMISE = fetch('https://raw.githubusercontent.com/google/fonts/main/ofl/sarabun/Sarabun-Bold.ttf')
+    .then(r=>{ if(!r.ok) throw new Error('โหลดฟอนต์ไทย (ตัวหนา) ไม่สำเร็จ'); return r.arrayBuffer(); });
+  return THAI_FONT_BOLD_PROMISE;
 }
 async function watermarkAndDownload(file, docId){
-  const [{ PDFDocument, rgb, degrees }, fontkitModule, thaiFontBytes] = await Promise.all([
-    loadPdfLib(), loadFontkit(), loadThaiFontBytes(),
+  const [{ PDFDocument, rgb, degrees }, fontkitModule, regularBytes, boldBytes] = await Promise.all([
+    loadPdfLib(), loadFontkit(), loadThaiFontRegular(), loadThaiFontBold(),
   ]);
   const fontkit = fontkitModule.default || fontkitModule;
-  const positionLabel = currentUser ? (ROLE_LABEL[currentUser.role] || currentUser.role) : '—';
-  const personName = currentUser ? currentUser.name : '—';
-  const watermarkText = `CONTROLLED DOCUMENT — Issued by: ${positionLabel} (${personName}) | Issue date: ${fmtDate(Date.now())}`;
+  const positionLabel = currentUser ? currentUser.role : '—';
+  const firstName = currentUser ? (currentUser.name.split(' ')[0]) : '—';
+  const lines = [
+    { text: 'CONTROLLED DOCUMENT', size: 12, bold: true },
+    { text: `Issued by ${positionLabel} (${firstName}) | Issue date: ${fmtDate(Date.now())}`, size: 10, bold: false },
+  ];
   const bytes = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(bytes);
   pdfDoc.registerFontkit(fontkit);
-  const font = await pdfDoc.embedFont(thaiFontBytes, { subset: true });
+  const regularFont = await pdfDoc.embedFont(regularBytes, { subset: true });
+  const boldFont = await pdfDoc.embedFont(boldBytes, { subset: true });
   const angleDeg = 45;
   const angleRad = angleDeg * Math.PI / 180;
+  const lineGap = 16; // baseline-to-baseline spacing between the two lines
   pdfDoc.getPages().forEach(page=>{
     const { width, height } = page.getSize();
-    // Auto-scale so one line of text reads clearly across the page
-    // diagonal, on both small and large page sizes.
-    const diagonal = Math.sqrt(width*width + height*height);
-    const targetWidth = diagonal * 0.55;
-    const probeSize = 24;
-    const probeWidth = font.widthOfTextAtSize(watermarkText, probeSize);
-    let fontSize = probeWidth > 0 ? probeSize * (targetWidth / probeWidth) : probeSize;
-    fontSize = Math.max(14, Math.min(fontSize, 40));
-    const textWidth = font.widthOfTextAtSize(watermarkText, fontSize);
-    // drawText's (x,y) anchors the unrotated baseline's bottom-left corner,
-    // then rotates around that point — so to land the *visual center* of
-    // the text on the page's center, shift the anchor back along the
-    // rotated text direction (and a small perpendicular correction for
-    // baseline-to-visual-center height).
-    const halfWidth = textWidth / 2;
-    const halfHeight = fontSize * 0.32;
-    const centerX = width / 2;
-    const centerY = height / 2;
-    const anchorX = centerX - (halfWidth * Math.cos(angleRad) - halfHeight * Math.sin(angleRad));
-    const anchorY = centerY - (halfWidth * Math.sin(angleRad) + halfHeight * Math.cos(angleRad));
-    page.drawText(watermarkText, {
-      x: anchorX, y: anchorY, size: fontSize, font,
-      color: rgb(0.5,0.5,0.5), opacity: 0.35,
-      rotate: degrees(angleDeg),
+    const centerX = width / 2, centerY = height / 2;
+    const n = lines.length;
+    lines.forEach((line, i)=>{
+      const font = line.bold ? boldFont : regularFont;
+      const textWidth = font.widthOfTextAtSize(line.text, line.size);
+      // this line's stacked offset in the local (unrotated) text frame —
+      // first line above the block's center, subsequent lines below it
+      const localY = (n-1)/2*lineGap - i*lineGap;
+      const halfWidth = textWidth / 2;
+      const halfHeight = line.size * 0.32;
+      // rotate both the horizontal-centering offset and the vertical-stack
+      // offset from local text space into page space, then anchor relative
+      // to the page's true center point
+      const x = centerX - (halfWidth*Math.cos(angleRad) - halfHeight*Math.sin(angleRad)) - localY*Math.sin(angleRad);
+      const y = centerY - (halfWidth*Math.sin(angleRad) + halfHeight*Math.cos(angleRad)) + localY*Math.cos(angleRad);
+      page.drawText(line.text, {
+        x, y, size: line.size, font,
+        color: rgb(0.5,0.5,0.5), opacity: 0.35,
+        rotate: degrees(angleDeg),
+      });
     });
   });
   const outBytes = await pdfDoc.save();
