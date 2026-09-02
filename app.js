@@ -1574,6 +1574,7 @@ function archiveModal(){
         </div>
         <div class="field"><label>ข้อกำหนด ISO 17025 (ถ้ามี — Evidence/Support)</label>
           <select id="archiveClause"><option value="">ไม่ระบุ</option>${CLAUSES.map(([c,l])=>`<option value="${c}" ${a.clause===c?'selected':''}>${l}</option>`).join('')}</select>
+          <div id="archiveClauseSuggest" class="suggest-hint"></div>
         </div>
         <div class="field"><label>ลิงก์เอกสาร</label><input id="archiveLink" value="${a.link||''}" placeholder="https://mitrphol.sharepoint.com/..."></div>
         <div class="field"><label>ผู้อัปโหลด</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()}</div></div>
@@ -1594,6 +1595,26 @@ function wireArchiveModalControls(){
   document.getElementById('archiveModalCloseBtn').addEventListener('click', closeArchiveModal);
   document.getElementById('archiveModalCancelBtn').addEventListener('click', closeArchiveModal);
   backdrop.addEventListener('click', e=>{ if(e.target===backdrop) closeArchiveModal(); });
+
+  // live clause suggestion, based on the title — same keyword matcher used
+  // for regular documents
+  const archiveTitleInput = document.getElementById('archiveTitle');
+  const archiveClauseSel = document.getElementById('archiveClause');
+  const archiveClauseHint = document.getElementById('archiveClauseSuggest');
+  function refreshArchiveClauseSuggest(){
+    if(!archiveClauseHint) return;
+    const name = archiveTitleInput ? archiveTitleInput.value.trim() : '';
+    const suggested = suggestClause(name);
+    if(suggested && archiveClauseSel && archiveClauseSel.value !== suggested){
+      archiveClauseHint.innerHTML = `💡 แนะนำ: ${clauseLabel(suggested)} <button type="button" class="suggest-accept" id="acceptArchiveClauseSuggest">ใช้คำแนะนำนี้</button>`;
+      const btn = document.getElementById('acceptArchiveClauseSuggest');
+      if(btn) btn.addEventListener('click', ()=>{ archiveClauseSel.value = suggested; refreshArchiveClauseSuggest(); });
+    } else {
+      archiveClauseHint.innerHTML = '';
+    }
+  }
+  if(archiveTitleInput) archiveTitleInput.addEventListener('input', refreshArchiveClauseSuggest);
+  refreshArchiveClauseSuggest();
 
   const saveBtn = document.getElementById('archiveModalSaveBtn');
   if(!saveBtn) return;
