@@ -3102,7 +3102,7 @@ async function watermarkAndDownload(file, docId){
   const fullName = currentUser ? currentUser.name : '—';
   const lines = [
     { text: 'CONTROLLED DOCUMENT', size: 36, bold: true },
-    { text: `Issued by ${positionLabel} (${fullName}) | Issue date: ${fmtDate(Date.now())}`, size: 32, bold: false },
+    { text: `Issued by ${positionLabel} (${fullName}) | Issue date: ${fmtDate(Date.now())}`, size: 24, bold: false },
   ];
   const bytes = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(bytes);
