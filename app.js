@@ -2980,7 +2980,7 @@ function viewWatermarkTool(){
   <div class="panel">
     <div class="panel-head"><div class="panel-title">ลายน้ำเอกสาร (Watermark PDF)</div></div>
     <div style="font-size:12.5px; color:var(--ink-700); margin-bottom:14px;">
-      อัปโหลดไฟล์ PDF แล้วระบบจะติดลายน้ำพาดขวางกลางหน้าในทุกหน้า 2 บรรทัด: <b>"CONTROLLED DOCUMENT"</b> (ตัวหนา) และ "Issued by ${currentUser ? currentUser.role : '[role]'} (${currentUser ? currentUser.name.split(' ')[0] : '[name]'}) | Issue date: ${fmtDate(Date.now())}" (ตัวปกติ) แล้วดาวน์โหลดไฟล์ให้ทันที — <b>ไม่มีการเก็บไฟล์ไว้ในระบบ</b> เก็บแค่บันทึกว่าเอกสารเลขไหนถูกดาวน์โหลดไปแจกจ่ายกี่ครั้ง
+      อัปโหลดไฟล์ PDF แล้วระบบจะติดลายน้ำพาดขวางกลางหน้าในทุกหน้า 2 บรรทัด: <b>"CONTROLLED DOCUMENT"</b> (ตัวหนา ขนาด 36) และ "Issued by ${currentUser ? (ROLE_LABEL[currentUser.role]||currentUser.role) : '[ตำแหน่งเต็ม]'} (${currentUser ? currentUser.name : '[ชื่อเต็ม]'}) | Issue date: ${fmtDate(Date.now())}" (ตัวปกติ ขนาด 32) แล้วดาวน์โหลดไฟล์ให้ทันที — <b>ไม่มีการเก็บไฟล์ไว้ในระบบ</b> เก็บแค่บันทึกว่าเอกสารเลขไหนถูกดาวน์โหลดไปแจกจ่ายกี่ครั้ง
     </div>
     <div class="field"><label>รหัสเอกสาร</label>
       <input id="wmDocId" list="wmDocIdList" placeholder="เช่น MPIR-LM-001-00 หรือพิมพ์เอง">
@@ -3099,11 +3099,11 @@ async function watermarkAndDownload(file, docId){
     loadPdfLib(), loadFontkit(), loadThaiFontRegular(), loadThaiFontBold(),
   ]);
   const fontkit = fontkitModule.default || fontkitModule;
-  const positionLabel = currentUser ? currentUser.role : '—';
-  const firstName = currentUser ? (currentUser.name.split(' ')[0]) : '—';
+  const positionLabel = currentUser ? (ROLE_LABEL[currentUser.role] || currentUser.role) : '—';
+  const fullName = currentUser ? currentUser.name : '—';
   const lines = [
-    { text: 'CONTROLLED DOCUMENT', size: 12, bold: true },
-    { text: `Issued by ${positionLabel} (${firstName}) | Issue date: ${fmtDate(Date.now())}`, size: 10, bold: false },
+    { text: 'CONTROLLED DOCUMENT', size: 36, bold: true },
+    { text: `Issued by ${positionLabel} (${fullName}) | Issue date: ${fmtDate(Date.now())}`, size: 32, bold: false },
   ];
   const bytes = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(bytes);
@@ -3112,7 +3112,7 @@ async function watermarkAndDownload(file, docId){
   const boldFont = await pdfDoc.embedFont(boldBytes, { subset: true });
   const angleDeg = 45;
   const angleRad = angleDeg * Math.PI / 180;
-  const lineGap = 16; // baseline-to-baseline spacing between the two lines
+  const lineGap = 42; // baseline-to-baseline spacing between the two lines — scaled up to match the larger font sizes
   pdfDoc.getPages().forEach(page=>{
     const { width, height } = page.getSize();
     const centerX = width / 2, centerY = height / 2;
