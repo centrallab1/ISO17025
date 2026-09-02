@@ -714,7 +714,7 @@ function render(){
     case 'audit': el.innerHTML = renderAuditHubTabs() + viewAudit(); attachAuditHandlers(); break;
     case 'calendar': el.innerHTML = viewCalendar(); attachCalHandlers(); break;
     case 'audittrail': el.innerHTML = renderAuditHubTabs() + viewAuditTrail(); break;
-    case 'admin': el.innerHTML = viewAdmin(); attachAdminHandlers(); attachWatermarkHandlers(); break;
+    case 'admin': el.innerHTML = viewAdmin(); attachWatermarkHandlers(); break;
     case 'docdetail': el.innerHTML = viewDocDetail(state.selectedDoc); attachDetailActionHandlers(); break;
     default: el.innerHTML = viewDashboard();
   }
@@ -2916,42 +2916,16 @@ async function runMasterListImport(){
   alert(`นำเข้าเสร็จแล้ว — อัปเดต ${updated} รายการ, เพิ่มใหม่ ${created} รายการ`);
   render();
 }
-function attachAdminHandlers(){
-  const btn = document.getElementById('btnImportMasterList');
-  if(btn) btn.addEventListener('click', async ()=>{
-    const n = (typeof MASTER_LIST!=='undefined') ? MASTER_LIST.length : 0;
-    if(!confirm(`นำเข้า/อัปเดตข้อมูลจาก Master List (${n} รายการ)?\n\nจะอัปเดตชื่อ, ลิงก์, วันที่, สถานะ, และชื่อผู้จัดทำ/ทบทวน/อนุมัติ (จากรหัสตำแหน่ง LM/TM/QM/DC) ของเอกสารที่ตรงกัน — และเพิ่มเอกสารใหม่ถ้ายังไม่มีในระบบ`)) return;
-    btn.disabled = true; btn.textContent = 'กำลังนำเข้า…';
-    await runMasterListImport();
-  });
-}
+// attachAdminHandlers() was removed along with the Import Master List UI —
+// runMasterListImport() (below) is kept in case this needs a UI entry point
+// again later, just not wired to anything currently.
+
 
 // ============================================================
 // ADMINISTRATION
 // ============================================================
 function viewAdmin(){
-  const n = (typeof MASTER_LIST!=='undefined') ? MASTER_LIST.length : 0;
-  const dcOnlySections = isDC() ? `
-  <div class="panel">
-    <div class="panel-head"><div class="panel-title">Administration</div></div>
-    <div class="grid grid-3">
-      <div class="side-box"><div class="side-box-title">Firestore</div><div style="font-size:12.5px; color:var(--ink-700);">Project: iso17025-b46ae<br>Collection: iso17025 / documents<br><span class="sync-pill" style="margin-top:8px;"><span class="dot"></span>Connected</span></div></div>
-      <div class="side-box"><div class="side-box-title">SharePoint</div><div style="font-size:12.5px; color:var(--ink-700);">mitrphol.sharepoint.com/sites/ServiceLab</div></div>
-      <div class="side-box"><div class="side-box-title">Document Types</div><div style="font-size:12.5px; color:var(--ink-700);">${Object.entries(DOC_TYPE_MAP).map(([k,v])=>`${k}: ${v}`).join('<br>')}</div></div>
-    </div>
-  </div>
-  <div class="panel">
-    <div class="panel-head"><div class="panel-title">Import Master List</div></div>
-    <div style="font-size:12.5px; color:var(--ink-700); margin-bottom:14px;">
-      อัปเดตชื่อ, ลิงก์ SharePoint, วันที่จัดทำ/ประกาศใช้, Revision, สถานะ และชื่อผู้จัดทำ/ทบทวน/อนุมัติ (แปลงรหัสตำแหน่ง LM=รัตนา, TM=พิสิทธินี, QM/DC=พิมพ์ชนก เป็นชื่อจริง) จากไฟล์ Master List ที่โหลดไว้ (${n} รายการ) — จับคู่ตามรหัสเอกสาร เอกสารที่ไม่มีในระบบจะถูกเพิ่มใหม่
-    </div>
-    <button class="btn primary" id="btnImportMasterList">${ic('doc')} นำเข้า/อัปเดตจาก Master List</button>
-  </div>` : `
-  <div class="panel">
-    <div class="panel-head"><div class="panel-title">Administration</div></div>
-    <div style="font-size:12.5px; color:var(--ink-700);">หน้านี้ใช้สำหรับติดลายน้ำและพิมพ์เอกสารควบคุม — ส่วนการตั้งค่าระบบใช้ได้เฉพาะ Document Control (DC)</div>
-  </div>`;
-  return `${dcOnlySections}${viewWatermarkTool()}`;
+  return viewWatermarkTool();
 }
 
 // ============================================================
