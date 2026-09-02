@@ -2953,8 +2953,8 @@ function viewAdmin(){
 // ============================================================
 // WATERMARK TOOL — open to every logged-in role. Whoever uses it uploads a
 // PDF and the app stamps ONE centered diagonal watermark per page reading
-// "เอกสารควบคุม (CONTROLLED DOCUMENT) ออกโดย: <ตำแหน่งผู้ใช้> (<ชื่อผู้ใช้>) |
-// วันที่ออก: <วันนี้>", entirely in the browser, then triggers a download.
+// "CONTROLLED DOCUMENT — Issued by: <user's role> (<user's name>) |
+// Issue date: <today>", entirely in the browser, then triggers a download.
 // The uploaded/output PDF is never stored anywhere — only a log entry
 // (document ID, who, when) is kept, so anyone can see how many controlled
 // copies of a document have been issued without keeping the files
@@ -2976,7 +2976,7 @@ function viewWatermarkTool(){
   <div class="panel">
     <div class="panel-head"><div class="panel-title">ลายน้ำเอกสาร (Watermark PDF)</div></div>
     <div style="font-size:12.5px; color:var(--ink-700); margin-bottom:14px;">
-      อัปโหลดไฟล์ PDF แล้วระบบจะติดลายน้ำพาดขวางกลางหน้า 1 ข้อความในทุกหน้า: "เอกสารควบคุม (CONTROLLED DOCUMENT) ออกโดย: ${currentUser ? (ROLE_LABEL[currentUser.role]||currentUser.role) : 'ตำแหน่ง'} (${currentUser ? currentUser.name : 'ชื่อ'}) | วันที่ออก: ${fmtDate(Date.now())}" แล้วดาวน์โหลดไฟล์ให้ทันที — <b>ไม่มีการเก็บไฟล์ไว้ในระบบ</b> เก็บแค่บันทึกว่าเอกสารเลขไหนถูกดาวน์โหลดไปแจกจ่ายกี่ครั้ง
+      อัปโหลดไฟล์ PDF แล้วระบบจะติดลายน้ำพาดขวางกลางหน้า 1 ข้อความในทุกหน้า: "CONTROLLED DOCUMENT — Issued by: ${currentUser ? (ROLE_LABEL[currentUser.role]||currentUser.role) : '[role]'} (${currentUser ? currentUser.name : '[name]'}) | Issue date: ${fmtDate(Date.now())}" แล้วดาวน์โหลดไฟล์ให้ทันที — <b>ไม่มีการเก็บไฟล์ไว้ในระบบ</b> เก็บแค่บันทึกว่าเอกสารเลขไหนถูกดาวน์โหลดไปแจกจ่ายกี่ครั้ง
     </div>
     <div class="field"><label>รหัสเอกสาร</label>
       <input id="wmDocId" list="wmDocIdList" placeholder="เช่น MPIR-LM-001-00 หรือพิมพ์เอง">
@@ -3037,7 +3037,7 @@ async function watermarkAndDownload(file, docId){
   const fontkit = fontkitModule.default || fontkitModule;
   const positionLabel = currentUser ? (ROLE_LABEL[currentUser.role] || currentUser.role) : '—';
   const personName = currentUser ? currentUser.name : '—';
-  const watermarkText = `เอกสารควบคุม (CONTROLLED DOCUMENT) ออกโดย: ${positionLabel} (${personName}) | วันที่ออก: ${fmtDate(Date.now())}`;
+  const watermarkText = `CONTROLLED DOCUMENT — Issued by: ${positionLabel} (${personName}) | Issue date: ${fmtDate(Date.now())}`;
   const bytes = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(bytes);
   pdfDoc.registerFontkit(fontkit);
