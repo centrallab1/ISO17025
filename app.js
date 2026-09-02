@@ -254,6 +254,7 @@ const state = {
   dcPublishEditing: false,
   archiveFilter: { category:'All', status:'All', q:'' },
   archiveModal: null, // { mode:'new'|'edit'|'verify', id }
+  wmManualModal: false,
   archiveFolder: { year:null, category:null },
   approvalPage: 1,
   approvalTypeFilter: 'All',
@@ -514,6 +515,9 @@ function renderModalLayer(){
   } else if(state.archiveModal){
     layer.innerHTML = archiveModal();
     wireArchiveModalControls();
+  } else if(state.wmManualModal){
+    layer.innerHTML = wmManualModal();
+    wireWmManualModal();
   } else {
     layer.innerHTML = '';
   }
@@ -2984,8 +2988,12 @@ function viewWatermarkTool(){
     </div>
     <div class="field"><label>ไฟล์ PDF</label><input type="file" id="wmFile" accept="application/pdf"></div>
     <div class="field-error" id="wmError" style="display:none;"></div>
-    <button class="btn primary" id="btnWatermark">${ic('doc')} ติดลายน้ำและดาวน์โหลด</button>
-    <span id="wmStatus" style="font-size:12px; color:var(--ink-500); margin-left:10px;"></span>
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <button class="btn primary" id="btnWatermark">${ic('doc')} ติดลายน้ำและดาวน์โหลด</button>
+      <button class="btn ghost" id="btnWmManualOpen">${ic('plus')} เพิ่มบันทึกแจกจ่ายด้วยตนเอง</button>
+      <span id="wmStatus" style="font-size:12px; color:var(--ink-500);"></span>
+    </div>
+    <div style="font-size:11px; color:var(--ink-500); margin-top:6px;">ใช้ปุ่ม "เพิ่มบันทึกแจกจ่ายด้วยตนเอง" เมื่อแจกจ่ายสำเนาที่พิมพ์ไว้แล้วนอกระบบ (เช่น แจกในที่ประชุม) โดยไม่ต้องอัปโหลดไฟล์ซ้ำ</div>
 
     <div style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line);">
       <div style="font-size:12.5px; font-weight:800; color:var(--ink-900); margin-bottom:10px;">ประวัติการแจกจ่าย (${WATERMARK_LOG.length} ครั้ง จาก ${docIds.length} เอกสาร)</div>
@@ -3003,13 +3011,61 @@ function viewWatermarkTool(){
             <td>${ic('chevronDown','sm-icon')}</td>
           </tr>
           <tr class="wm-detail-row" data-wm-detail="${id}" style="display:none;"><td colspan="4">
-            ${c.entries.slice().sort((a,b)=>b.at-a.at).map(e=>`<div style="font-size:11.5px; color:var(--ink-700); padding:4px 0;">${e.by} — ${fmtDateTime(e.at)}</div>`).join('')}
+            ${c.entries.slice().sort((a,b)=>b.at-a.at).map(e=>`<div style="font-size:11.5px; color:var(--ink-700); padding:4px 0;">${e.by} — ${fmtDateTime(e.at)}${e.manual ? ` <span style="color:var(--amber-600); font-weight:700;">(บันทึกด้วยตนเอง${e.note ? ': '+e.note : ''})</span>` : ''}</div>`).join('')}
           </td></tr>`;
           }).join('')}
         </tbody>
       </table></div>` : `<div style="font-size:12.5px; color:var(--ink-500);">ยังไม่มีประวัติการแจกจ่าย</div>`}
     </div>
   </div>`;
+}
+function wmManualModal(){
+  return `
+  <div class="modal-backdrop" id="wmManualBackdrop">
+    <div class="modal">
+      <div class="modal-head"><div class="modal-title">เพิ่มบันทึกแจกจ่ายด้วยตนเอง</div><button class="modal-close" id="wmManualCloseBtn">✕</button></div>
+      <div class="modal-body">
+        <div style="font-size:11.5px; color:var(--ink-500); margin-bottom:14px;">สำหรับสำเนาที่พิมพ์/แจกจ่ายไปแล้วนอกระบบ (เช่น แจกในที่ประชุม) — บันทึกไว้เพื่อการนับจำนวนเท่านั้น ไม่มีการสร้างหรือเก็บไฟล์</div>
+        <div class="field"><label>รหัสเอกสาร</label>
+          <input id="wmManualDocId" list="wmDocIdList" placeholder="เช่น MPIR-LM-001-00 หรือพิมพ์เอง">
+        </div>
+        <div class="field"><label>จำนวนสำเนาที่แจกจ่าย</label>
+          <input id="wmManualQty" type="number" min="1" value="1"></div>
+        <div class="field"><label>หมายเหตุ (ไม่บังคับ)</label>
+          <input id="wmManualNote" placeholder="เช่น แจกในที่ประชุมทบทวนฝ่ายบริหาร"></div>
+        <div class="field-error" id="wmManualError" style="display:none;"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="wmManualCancelBtn">ยกเลิก</button>
+        <button class="btn primary" id="wmManualSaveBtn">บันทึก</button>
+      </div>
+    </div>
+  </div>`;
+}
+function wireWmManualModal(){
+  const backdrop = document.getElementById('wmManualBackdrop');
+  if(!backdrop) return;
+  const close = ()=>{ state.wmManualModal = false; renderModalLayer(); };
+  document.getElementById('wmManualCloseBtn').addEventListener('click', close);
+  document.getElementById('wmManualCancelBtn').addEventListener('click', close);
+  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) close(); });
+  document.getElementById('wmManualSaveBtn').addEventListener('click', async ()=>{
+    const errEl = document.getElementById('wmManualError');
+    const docId = document.getElementById('wmManualDocId').value.trim();
+    const qtyRaw = document.getElementById('wmManualQty').value;
+    const qty = parseInt(qtyRaw, 10);
+    const note = document.getElementById('wmManualNote').value.trim();
+    if(!docId){ errEl.textContent = 'กรอกรหัสเอกสารก่อน'; errEl.style.display='block'; return; }
+    if(!qty || qty < 1){ errEl.textContent = 'จำนวนสำเนาต้องเป็นตัวเลขตั้งแต่ 1 ขึ้นไป'; errEl.style.display='block'; return; }
+    const actor = currentActorName();
+    const now = Date.now();
+    for(let i=0; i<qty; i++){
+      WATERMARK_LOG.push({ docId, by: actor, at: now, manual: true, note: note || undefined });
+    }
+    state.wmManualModal = false;
+    render();
+    await persistWatermarkLog();
+  });
 }
 let PDF_LIB_PROMISE = null;
 function loadPdfLib(){
@@ -3090,6 +3146,8 @@ async function watermarkAndDownload(file, docId){
   URL.revokeObjectURL(url);
 }
 function attachWatermarkHandlers(){
+  const manualOpenBtn = document.getElementById('btnWmManualOpen');
+  if(manualOpenBtn) manualOpenBtn.addEventListener('click', ()=>{ state.wmManualModal = true; renderModalLayer(); });
   document.querySelectorAll('[data-wm-toggle]').forEach(row=>{
     row.addEventListener('click', ()=>{
       const id = row.dataset.wmToggle;
