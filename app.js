@@ -255,6 +255,7 @@ const state = {
   archiveFilter: { category:'All', status:'All', q:'' },
   archiveModal: null, // { mode:'new'|'edit'|'verify', id }
   wmManualModal: false,
+  wmExpandedDoc: null,
   archiveFolder: { year:null, category:null },
   approvalPage: 1,
   approvalTypeFilter: 'All',
@@ -2941,8 +2942,9 @@ function viewAdmin(){
 function watermarkCountsByDoc(){
   const counts = {};
   WATERMARK_LOG.forEach(e=>{
-    counts[e.docId] = counts[e.docId] || { count:0, entries:[] };
-    counts[e.docId].count++;
+    counts[e.docId] = counts[e.docId] || { total:0, recalled:0, entries:[] };
+    counts[e.docId].total++;
+    if(e.recalled) counts[e.docId].recalled++;
     counts[e.docId].entries.push(e);
   });
   return counts;
@@ -2954,13 +2956,14 @@ function viewWatermarkTool(){
   <div class="panel">
     <div class="panel-head"><div class="panel-title">ลายน้ำเอกสาร (Watermark PDF)</div></div>
     <div style="font-size:12.5px; color:var(--ink-700); margin-bottom:14px;">
-      อัปโหลดไฟล์ PDF แล้วระบบจะติดลายน้ำพาดขวางกลางหน้าในทุกหน้า 2 บรรทัด: <b>"CONTROLLED DOCUMENT"</b> (ตัวหนา ขนาด 36) และ "Issued by ${currentUser ? (ROLE_LABEL[currentUser.role]||currentUser.role) : '[ตำแหน่งเต็ม]'} (${currentUser ? currentUser.name : '[ชื่อเต็ม]'}) | Issue date: ${fmtDate(Date.now())}" (ตัวปกติ ขนาด 32) แล้วดาวน์โหลดไฟล์ให้ทันที — <b>ไม่มีการเก็บไฟล์ไว้ในระบบ</b> เก็บแค่บันทึกว่าเอกสารเลขไหนถูกดาวน์โหลดไปแจกจ่ายกี่ครั้ง
+      อัปโหลดไฟล์ PDF แล้วระบบจะติดลายน้ำพาดขวางกลางหน้าในทุกหน้า 2 บรรทัด: <b>"CONTROLLED DOCUMENT"</b> (ตัวหนา ขนาด 36) และ "Issued by ${currentUser ? (ROLE_LABEL[currentUser.role]||currentUser.role) : '[ตำแหน่งเต็ม]'} (${currentUser ? currentUser.name : '[ชื่อเต็ม]'}) | Issue date: ${fmtDate(Date.now())}" (ตัวปกติ ขนาด 32) แล้วดาวน์โหลดไฟล์ให้ทันที — <b>ไม่มีการเก็บไฟล์ไว้ในระบบ</b> เก็บแค่ทะเบียนสำเนาที่แจกจ่ายไป (ใคร วันที่ ให้ใคร) เพื่อให้เรียกคืนได้ในอนาคตหากจำเป็น
     </div>
     <div class="field"><label>รหัสเอกสาร</label>
       <input id="wmDocId" list="wmDocIdList" placeholder="เช่น MPIR-LM-001-00 หรือพิมพ์เอง">
       <datalist id="wmDocIdList">${DOCUMENTS.map(d=>`<option value="${d.id}">`).join('')}</datalist>
     </div>
     <div class="field"><label>ไฟล์ PDF</label><input type="file" id="wmFile" accept="application/pdf"></div>
+    <div class="field"><label>แจกจ่ายให้ (ไม่บังคับ)</label><input id="wmRecipient" placeholder="เช่น ทีมประกันคุณภาพ, ผู้ตรวจติดตาม"></div>
     <div class="field-error" id="wmError" style="display:none;"></div>
     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
       <button class="btn primary" id="btnWatermark">${ic('doc')} ติดลายน้ำและดาวน์โหลด</button>
@@ -2970,26 +2973,38 @@ function viewWatermarkTool(){
     <div style="font-size:11px; color:var(--ink-500); margin-top:6px;">ใช้ปุ่ม "เพิ่มบันทึกแจกจ่ายด้วยตนเอง" เมื่อแจกจ่ายสำเนาที่พิมพ์ไว้แล้วนอกระบบ (เช่น แจกในที่ประชุม) โดยไม่ต้องอัปโหลดไฟล์ซ้ำ</div>
 
     <div style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line);">
-      <div style="font-size:12.5px; font-weight:800; color:var(--ink-900); margin-bottom:10px;">ประวัติการแจกจ่าย (${WATERMARK_LOG.length} ครั้ง จาก ${docIds.length} เอกสาร)</div>
+      <div style="font-size:12.5px; font-weight:800; color:var(--ink-900); margin-bottom:10px;">ทะเบียนสำเนาแจกจ่าย (${WATERMARK_LOG.length} ฉบับ จาก ${docIds.length} เอกสาร)</div>
       ${docIds.length ? `<div class="table-wrap"><table class="dtable">
-        <thead><tr><th>รหัสเอกสาร</th><th>จำนวนที่ดาวน์โหลด</th><th>ล่าสุด</th><th></th></tr></thead>
+        <thead><tr><th>รหัสเอกสาร</th><th>แจกจ่ายแล้ว</th><th>เรียกคืนแล้ว</th><th>คงเหลือนอกระบบ</th><th>ล่าสุด</th><th></th></tr></thead>
         <tbody>
           ${docIds.map(id=>{
             const c = counts[id];
+            const outstanding = c.total - c.recalled;
             const last = c.entries.slice().sort((a,b)=>b.at-a.at)[0];
             return `
           <tr data-wm-toggle="${id}" style="cursor:pointer;">
             <td class="mono">${id}</td>
-            <td>${c.count}</td>
+            <td>${c.total}</td>
+            <td>${c.recalled}</td>
+            <td>${outstanding>0 ? `<b style="color:var(--amber-600);">${outstanding}</b>` : outstanding}</td>
             <td>${last ? `${last.by} · ${fmtDateTime(last.at)}` : '—'}</td>
             <td>${ic('chevronDown','sm-icon')}</td>
           </tr>
-          <tr class="wm-detail-row" data-wm-detail="${id}" style="display:none;"><td colspan="4">
-            ${c.entries.slice().sort((a,b)=>b.at-a.at).map(e=>`<div style="font-size:11.5px; color:var(--ink-700); padding:4px 0;">${e.by} — ${fmtDateTime(e.at)}${e.manual ? ` <span style="color:var(--amber-600); font-weight:700;">(บันทึกด้วยตนเอง${e.note ? ': '+e.note : ''})</span>` : ''}</div>`).join('')}
+          <tr class="wm-detail-row" data-wm-detail="${id}" style="display:${state.wmExpandedDoc===id?'table-row':'none'};"><td colspan="6">
+            ${c.entries.slice().sort((a,b)=>b.at-a.at).map(e=>`
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 0; border-bottom:1px solid var(--line);">
+              <div style="font-size:11.5px; color:var(--ink-700);">
+                ${e.by} — ${fmtDateTime(e.at)}
+                ${e.recipient ? ` · ให้: ${e.recipient}` : ''}
+                ${e.manual ? ` <span style="color:var(--amber-600); font-weight:700;">(บันทึกด้วยตนเอง${e.note ? ': '+e.note : ''})</span>` : ''}
+                ${e.recalled ? `<br><span style="color:var(--green-600); font-weight:700;">✓ เรียกคืนแล้ว ${fmtDateTime(e.recalledAt)} โดย ${e.recalledBy}</span>` : ''}
+              </div>
+              <button class="btn ${e.recalled?'ghost':'success'}" data-wm-recall="${e.id}" style="flex-shrink:0; font-size:11px; padding:5px 10px;">${e.recalled ? 'ยกเลิกการเรียกคืน' : 'ทำเครื่องหมายว่าเรียกคืนแล้ว'}</button>
+            </div>`).join('')}
           </td></tr>`;
           }).join('')}
         </tbody>
-      </table></div>` : `<div style="font-size:12.5px; color:var(--ink-500);">ยังไม่มีประวัติการแจกจ่าย</div>`}
+      </table></div>` : `<div style="font-size:12.5px; color:var(--ink-500);">ยังไม่มีทะเบียนสำเนาแจกจ่าย</div>`}
     </div>
   </div>`;
 }
@@ -3005,6 +3020,8 @@ function wmManualModal(){
         </div>
         <div class="field"><label>จำนวนสำเนาที่แจกจ่าย</label>
           <input id="wmManualQty" type="number" min="1" value="1"></div>
+        <div class="field"><label>แจกจ่ายให้ (ไม่บังคับ)</label>
+          <input id="wmManualRecipient" placeholder="เช่น ทีมประกันคุณภาพ, ผู้ตรวจติดตาม"></div>
         <div class="field"><label>หมายเหตุ (ไม่บังคับ)</label>
           <input id="wmManualNote" placeholder="เช่น แจกในที่ประชุมทบทวนฝ่ายบริหาร"></div>
         <div class="field-error" id="wmManualError" style="display:none;"></div>
@@ -3029,12 +3046,20 @@ function wireWmManualModal(){
     const qtyRaw = document.getElementById('wmManualQty').value;
     const qty = parseInt(qtyRaw, 10);
     const note = document.getElementById('wmManualNote').value.trim();
+    const recipient = document.getElementById('wmManualRecipient').value.trim();
     if(!docId){ errEl.textContent = 'กรอกรหัสเอกสารก่อน'; errEl.style.display='block'; return; }
     if(!qty || qty < 1){ errEl.textContent = 'จำนวนสำเนาต้องเป็นตัวเลขตั้งแต่ 1 ขึ้นไป'; errEl.style.display='block'; return; }
     const actor = currentActorName();
     const now = Date.now();
+    // Firestore's setDoc() rejects `undefined` field values outright — always
+    // use '' (empty string) for optional text fields the user left blank,
+    // never `undefined`
     for(let i=0; i<qty; i++){
-      WATERMARK_LOG.push({ docId, by: actor, at: now, manual: true, note: note || undefined });
+      WATERMARK_LOG.push({
+        id: 'WM-' + now.toString(36) + Math.random().toString(36).slice(2,7) + '-' + i,
+        docId, by: actor, at: now, manual: true, note, recipient,
+        recalled: false, recalledAt: null, recalledBy: null,
+      });
     }
     state.wmManualModal = false;
     render();
@@ -3125,8 +3150,22 @@ function attachWatermarkHandlers(){
   document.querySelectorAll('[data-wm-toggle]').forEach(row=>{
     row.addEventListener('click', ()=>{
       const id = row.dataset.wmToggle;
-      const detail = document.querySelector(`[data-wm-detail="${CSS && CSS.escape ? CSS.escape(id) : id}"]`);
-      if(detail) detail.style.display = detail.style.display==='none' ? 'table-row' : 'none';
+      state.wmExpandedDoc = state.wmExpandedDoc===id ? null : id;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-wm-recall]').forEach(recallBtn=>{
+    recallBtn.addEventListener('click', async (e)=>{
+      e.stopPropagation();
+      const entry = WATERMARK_LOG.find(x=>x.id===recallBtn.dataset.wmRecall);
+      if(!entry) return;
+      if(entry.recalled){
+        entry.recalled = false; entry.recalledAt = null; entry.recalledBy = null;
+      } else {
+        entry.recalled = true; entry.recalledAt = Date.now(); entry.recalledBy = currentActorName();
+      }
+      render();
+      await persistWatermarkLog();
     });
   });
   const btn = document.getElementById('btnWatermark');
@@ -3147,10 +3186,18 @@ function attachWatermarkHandlers(){
     try{
       await watermarkAndDownload(file, docId);
       const actor = currentActorName();
-      WATERMARK_LOG.push({ docId, by: actor, at: Date.now() });
+      const recipientInput = document.getElementById('wmRecipient');
+      const recipient = recipientInput ? recipientInput.value.trim() : '';
+      const now = Date.now();
+      WATERMARK_LOG.push({
+        id: 'WM-' + now.toString(36) + Math.random().toString(36).slice(2,7),
+        docId, by: actor, at: now, manual: false, note: '', recipient,
+        recalled: false, recalledAt: null, recalledBy: null,
+      });
       await persistWatermarkLog();
       statusEl.textContent = 'เสร็จแล้ว — ดาวน์โหลดไฟล์และบันทึกประวัติแล้ว';
       fileInput.value = '';
+      if(recipientInput) recipientInput.value = '';
       render();
     } catch(e){
       console.error('watermark failed', e);
