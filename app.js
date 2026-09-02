@@ -2949,8 +2949,7 @@ function applyMasterListRow(row, d){
 }
 async function runMasterListImport(){
   if(typeof MASTER_LIST === 'undefined'){
-    alert('ไม่พบไฟล์ masterlist.js');
-    return;
+    return { ok:false, message:'ไม่พบไฟล์ masterlist.js' };
   }
   let updated = 0, created = 0;
   MASTER_LIST.forEach(row=>{
@@ -2970,19 +2969,42 @@ async function runMasterListImport(){
     }
   });
   await persistDocs();
-  alert(`นำเข้าเสร็จแล้ว — อัปเดต ${updated} รายการ, เพิ่มใหม่ ${created} รายการ`);
-  render();
+  return { ok:true, updated, created };
 }
-// attachAdminHandlers() was removed along with the Import Master List UI —
-// runMasterListImport() (below) is kept in case this needs a UI entry point
-// again later, just not wired to anything currently.
 
 
 // ============================================================
 // ADMINISTRATION
 // ============================================================
 function viewAdmin(){
-  return viewWatermarkTool();
+  return viewWatermarkTool() + viewImportMasterListPanel();
+}
+
+// ============================================================
+// IMPORT MASTER LIST — UI entry point for runMasterListImport()
+// (see the MASTER LIST IMPORT section below for the merge logic).
+// DC-only, matching the other admin-only tools on this page.
+// ============================================================
+function viewImportMasterListPanel(){
+  if(!isDC()) return '';
+  const hasList = typeof MASTER_LIST !== 'undefined';
+  const total = hasList ? MASTER_LIST.length : 0;
+  const existingIds = new Set(DOCUMENTS.map(d=>d.id));
+  const newCount = hasList ? MASTER_LIST.filter(r=>!existingIds.has(r.id)).length : 0;
+  const updateCount = total - newCount;
+  return `
+  <div class="panel" style="margin-top:20px;">
+    <div class="panel-head"><div class="panel-title">นำเข้ารายการเอกสารหลัก (Import Master List)</div></div>
+    ${hasList ? `
+    <div style="font-size:12.5px; color:var(--ink-700); margin-bottom:14px;">
+      นำเข้าเอกสารจาก <code>masterlist.js</code> (${total} รายการ) เข้าสู่ทะเบียนเอกสาร — <b>ไม่ผ่านขั้นตอนอนุมัติในระบบ</b> เอกสารที่มีสถานะ "ควบคุม" หรือ "แจกจ่าย" ในรายการหลักจะถูกตั้งเป็น <b>"อนุมัติแล้ว"</b> ทันที โดยใช้ <b>วันที่จัดทำ</b> และ <b>วันที่ประกาศใช้</b> ตามที่ระบุไว้ในรายการหลักของแต่ละเอกสาร รหัสที่ตรงกับเอกสารเดิม (${updateCount} รายการ) จะถูกอัปเดตข้อมูล ส่วนรหัสใหม่ (${newCount} รายการ) จะถูกเพิ่มเข้าทะเบียน
+    </div>
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <button class="btn primary" id="btnImportMasterList">${ic('plus')} นำเข้ารายการเอกสารหลัก (${total} รายการ)</button>
+      <span id="importMlStatus" style="font-size:12px; color:var(--ink-500);"></span>
+    </div>` : `
+    <div style="font-size:12.5px; color:var(--ink-700);">ไม่พบไฟล์ <code>masterlist.js</code> — ตรวจสอบว่าไฟล์นี้ถูกโหลดในหน้าเว็บแล้ว</div>`}
+  </div>`;
 }
 
 // ============================================================
@@ -3238,6 +3260,24 @@ async function watermarkAndDownload(file, docId){
   URL.revokeObjectURL(url);
 }
 function attachWatermarkHandlers(){
+  const importBtn = document.getElementById('btnImportMasterList');
+  if(importBtn){
+    importBtn.addEventListener('click', async ()=>{
+      if(!isDC()) return; // defense in depth — button only renders for DC anyway
+      if(!confirm('นำเข้ารายการเอกสารหลักทั้งหมด?\n\nเอกสารที่มีสถานะ "ควบคุม"/"แจกจ่าย" จะถูกตั้งเป็น "อนุมัติแล้ว" ทันที โดยไม่ผ่านขั้นตอนอนุมัติในระบบ และใช้วันที่จัดทำ/ประกาศใช้ตามรายการหลัก')) return;
+      const statusEl = document.getElementById('importMlStatus');
+      importBtn.disabled = true;
+      if(statusEl) statusEl.textContent = 'กำลังนำเข้า...';
+      const result = await runMasterListImport();
+      importBtn.disabled = false;
+      if(!result.ok){
+        if(statusEl) statusEl.textContent = result.message;
+        return;
+      }
+      if(statusEl) statusEl.textContent = `นำเข้าเสร็จแล้ว — อัปเดต ${result.updated} รายการ, เพิ่มใหม่ ${result.created} รายการ`;
+      render();
+    });
+  }
   const manualOpenBtn = document.getElementById('btnWmManualOpen');
   if(manualOpenBtn) manualOpenBtn.addEventListener('click', ()=>{ state.wmManualModal = true; renderModalLayer(); });
   const typeSel = document.getElementById('wmType');
