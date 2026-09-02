@@ -2010,6 +2010,24 @@ function renderApprovedBox(d){
     ${approvedComment ? `<div style="font-size:12.5px; color:var(--ink-700); margin-top:8px; padding-top:8px; border-top:1px solid var(--line);">${approvedComment}</div>` : ''}
   </div>`;
 }
+// once a request is rejected it's a dead end — no more Approve/Reject
+// buttons should be reachable, otherwise a stray click could push the
+// status through STATUS_FLOW from index -1 (rejected isn't part of the
+// flow array) and silently reset it back to 'ร่าง'
+function renderRejectedBox(d){
+  if(d.approvalStatus !== 'ไม่อนุมัติ') return '';
+  const lastComment = (d.comments||[])[(d.comments||[]).length-1];
+  const rejectedBy = lastComment ? lastComment.by : '';
+  const rejectedAt = lastComment ? lastComment.time : d.lastUpdated;
+  const rejectedComment = lastComment ? lastComment.text : '';
+  return `
+  <div class="side-box" style="border-color:var(--red-600); background:var(--red-50); margin-bottom:18px;">
+    <div class="side-box-title" style="color:var(--red-600);">ไม่อนุมัติ (Rejected)</div>
+    <div style="font-size:13px; color:var(--ink-900); font-weight:700;">${rejectedBy || 'ไม่ระบุผู้พิจารณา'}</div>
+    <div style="font-size:12px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(rejectedAt)}</div>
+    ${rejectedComment ? `<div style="font-size:12.5px; color:var(--ink-700); margin-top:8px; padding-top:8px; border-top:1px solid var(--line);">${rejectedComment}</div>` : ''}
+  </div>`;
+}
 function renderPublishBox(d){
   if(d.approvalStatus !== 'อนุมัติแล้ว') return '';
   if(d.lastRequestType !== 'new' && d.lastRequestType !== 'revision') return '';
@@ -2534,7 +2552,7 @@ function viewApprovalDetail(){
     ${renderDcRegisterBox(d)}
     ${renderReviewBox(d)}
 
-    ${isApproved ? renderApprovedBox(d) : ((status==='ร่าง' || (status==='รอทบทวน' && !d.linkSetAt)) && (d.lastRequestType==='new'||d.lastRequestType==='revision')) ? '' : `
+    ${isApproved ? renderApprovedBox(d) : isRejected ? renderRejectedBox(d) : ((status==='ร่าง' || (status==='รอทบทวน' && !d.linkSetAt)) && (d.lastRequestType==='new'||d.lastRequestType==='revision')) ? '' : `
     ${(d.lastRequestType==='new'||d.lastRequestType==='revision') && currentIdx===1 ? `<div style="font-size:11.5px; font-weight:700; color:var(--amber-600); margin-bottom:10px;">${ic('clock','sm-icon')} ขั้นที่ 4: ต้องทบทวนโดย QM หรือ DC</div>` : ''}
     ${(d.lastRequestType==='new'||d.lastRequestType==='revision') && currentIdx===2 ? `<div style="font-size:11.5px; font-weight:700; color:var(--amber-600); margin-bottom:10px;">${ic('clock','sm-icon')} ขั้นที่ 5: ต้องอนุมัติโดย Lab Manager (LM)</div>` : ''}
     <div class="field" style="max-width:320px;"><label>ผู้ดำเนินการ</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()} <span style="color:var(--ink-500); font-weight:600;">(${currentUser.role})</span></div></div>
