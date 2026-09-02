@@ -2922,7 +2922,13 @@ function viewAuditTrail(){
 // SharePoint master list export) into DOCUMENTS by matching on id.
 // Updates name/link/dates/rev/note and maps role codes (LM/TM/QM/DC)
 // to real names for preparedBy/reviewerName/approverName.
+//
+// Rows with note "ยกเลิก" (cancelled) never land in DOCUMENTS — they're
+// moved into ARCHIVE_ITEMS under the "เอกสารยกเลิก" folder instead, and
+// visibleDocuments() also hides any note==='ยกเลิก' doc as a second line
+// of defense (e.g. if one gets set that way outside of an import).
 // ============================================================
+const CANCELLED_ARCHIVE_CATEGORY = 'เอกสารยกเลิก';
 function toEpoch(isoDateStr){
   if(!isoDateStr) return null;
   const t = new Date(isoDateStr + 'T00:00:00').getTime();
@@ -2938,7 +2944,12 @@ function applyMasterListRow(row, d){
   d.preparedBy = roleName(row.prep) || d.preparedBy || '';
   d.reviewerName = roleName(row.reviewer) || d.reviewerName || '';
   d.approverName = roleName(row.approver) || d.approverName || '';
-  if(d.note==='ควบคุม' || d.note==='แจกจ่าย'){
+  // ควบคุม/แจกจ่าย = documents actively in force · สนับสนุน = reference/
+  // support material · ยกเลิก = retired documents (routed to the archive
+  // below). All four are already-settled records coming from the master
+  // list, not new/in-progress requests, so none of them need to go
+  // through the app's internal approval workflow.
+  if(['ควบคุม','แจกจ่าย','สนับสนุน','ยกเลิก'].includes(d.note)){
     d.approvalStatus = 'อนุมัติแล้ว';
     if(!d.approvedBy){
       d.approvedBy = d.approverName || '';
@@ -2947,13 +2958,48 @@ function applyMasterListRow(row, d){
   }
   d.lastUpdated = Date.now();
 }
+// Creates/updates the archive entry for a cancelled document. Matched on
+// sourceDocId so re-running the import updates the same archive item
+// instead of creating a duplicate each time.
+function archiveCancelledRow(row, existingDoc){
+  const uploadedAt = toEpoch(row.effective) || toEpoch(row.created) || (existingDoc && existingDoc.lastUpdated) || Date.now();
+  const approver = roleName(row.approver) || '';
+  let a = ARCHIVE_ITEMS.find(x=> x.sourceDocId===row.id);
+  if(a){
+    a.title = row.name || a.title;
+    a.link = row.link || a.link;
+    a.uploadedAt = uploadedAt;
+  } else {
+    ARCHIVE_ITEMS.push({
+      id: 'ARC-' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+      sourceDocId: row.id, title: row.name || row.id, category: CANCELLED_ARCHIVE_CATEGORY,
+      clause:'', link: row.link || '', uploadedBy: approver || 'Master List Import',
+      uploadedAt, status:'ยืนยันแล้ว', verifiedBy: approver || null, verifiedAt: uploadedAt,
+    });
+  }
+}
 async function runMasterListImport(){
   if(typeof MASTER_LIST === 'undefined'){
     return { ok:false, message:'ไม่พบไฟล์ masterlist.js' };
   }
-  let updated = 0, created = 0;
+  // Cancelled rows get merged into ARCHIVE_ITEMS below — make sure the
+  // existing archive has actually loaded first, or persistArchive() would
+  // overwrite it with an empty/partial in-memory array.
+  if(!ARCHIVE_LOADED){
+    await loadArchive();
+    if(!ARCHIVE_LOADED){
+      return { ok:false, message: 'โหลดคลังเอกสารไม่สำเร็จ ลองใหม่อีกครั้ง: ' + (ARCHIVE_ERROR||'') };
+    }
+  }
+  let updated = 0, created = 0, archived = 0;
   MASTER_LIST.forEach(row=>{
     let d = DOCUMENTS.find(x=>x.id===row.id);
+    if(row.note === 'ยกเลิก'){
+      archiveCancelledRow(row, d);
+      archived++;
+      if(d) DOCUMENTS = DOCUMENTS.filter(x=>x.id!==row.id); // move out of the doc register
+      return;
+    }
     if(d){
       applyMasterListRow(row, d);
       updated++;
@@ -2969,7 +3015,8 @@ async function runMasterListImport(){
     }
   });
   await persistDocs();
-  return { ok:true, updated, created };
+  if(archived>0) await persistArchive();
+  return { ok:true, updated, created, archived };
 }
 
 
@@ -2989,15 +3036,18 @@ function viewImportMasterListPanel(){
   if(!isDC()) return '';
   const hasList = typeof MASTER_LIST !== 'undefined';
   const total = hasList ? MASTER_LIST.length : 0;
+  const cancelledCount = hasList ? MASTER_LIST.filter(r=>r.note==='ยกเลิก').length : 0;
+  const activeRows = hasList ? MASTER_LIST.filter(r=>r.note!=='ยกเลิก') : [];
   const existingIds = new Set(DOCUMENTS.map(d=>d.id));
-  const newCount = hasList ? MASTER_LIST.filter(r=>!existingIds.has(r.id)).length : 0;
-  const updateCount = total - newCount;
+  const newCount = activeRows.filter(r=>!existingIds.has(r.id)).length;
+  const updateCount = activeRows.length - newCount;
   return `
   <div class="panel" style="margin-top:20px;">
     <div class="panel-head"><div class="panel-title">นำเข้ารายการเอกสารหลัก (Import Master List)</div></div>
     ${hasList ? `
     <div style="font-size:12.5px; color:var(--ink-700); margin-bottom:14px;">
-      นำเข้าเอกสารจาก <code>masterlist.js</code> (${total} รายการ) เข้าสู่ทะเบียนเอกสาร — <b>ไม่ผ่านขั้นตอนอนุมัติในระบบ</b> เอกสารที่มีสถานะ "ควบคุม" หรือ "แจกจ่าย" ในรายการหลักจะถูกตั้งเป็น <b>"อนุมัติแล้ว"</b> ทันที โดยใช้ <b>วันที่จัดทำ</b> และ <b>วันที่ประกาศใช้</b> ตามที่ระบุไว้ในรายการหลักของแต่ละเอกสาร รหัสที่ตรงกับเอกสารเดิม (${updateCount} รายการ) จะถูกอัปเดตข้อมูล ส่วนรหัสใหม่ (${newCount} รายการ) จะถูกเพิ่มเข้าทะเบียน
+      นำเข้าเอกสารจาก <code>masterlist.js</code> (${total} รายการ) เข้าสู่ทะเบียนเอกสาร — <b>ไม่ผ่านขั้นตอนอนุมัติในระบบ</b> เอกสารที่มีสถานะ "ควบคุม" "แจกจ่าย" "สนับสนุน" หรือ "ยกเลิก" ในรายการหลักจะถูกตั้งเป็น <b>"อนุมัติแล้ว"</b> ทันที โดยใช้ <b>วันที่จัดทำ</b> และ <b>วันที่ประกาศใช้</b> ตามที่ระบุไว้ในรายการหลักของแต่ละเอกสาร รหัสที่ตรงกับเอกสารเดิม (${updateCount} รายการ) จะถูกอัปเดตข้อมูล ส่วนรหัสใหม่ (${newCount} รายการ) จะถูกเพิ่มเข้าทะเบียน<br>
+      เอกสารที่มีสถานะ <b>"ยกเลิก"</b> (${cancelledCount} รายการ) จะ<b>ไม่แสดงในรายการเอกสารเลย</b> — จะถูกย้ายไปไว้ที่ คลังเอกสาร → โฟลเดอร์ "${CANCELLED_ARCHIVE_CATEGORY}" แทน
     </div>
     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
       <button class="btn primary" id="btnImportMasterList">${ic('plus')} นำเข้ารายการเอกสารหลัก (${total} รายการ)</button>
@@ -3264,7 +3314,7 @@ function attachWatermarkHandlers(){
   if(importBtn){
     importBtn.addEventListener('click', async ()=>{
       if(!isDC()) return; // defense in depth — button only renders for DC anyway
-      if(!confirm('นำเข้ารายการเอกสารหลักทั้งหมด?\n\nเอกสารที่มีสถานะ "ควบคุม"/"แจกจ่าย" จะถูกตั้งเป็น "อนุมัติแล้ว" ทันที โดยไม่ผ่านขั้นตอนอนุมัติในระบบ และใช้วันที่จัดทำ/ประกาศใช้ตามรายการหลัก')) return;
+      if(!confirm('นำเข้ารายการเอกสารหลักทั้งหมด?\n\nเอกสารที่มีสถานะ "ควบคุม"/"แจกจ่าย"/"สนับสนุน"/"ยกเลิก" จะถูกตั้งเป็น "อนุมัติแล้ว" ทันที โดยไม่ผ่านขั้นตอนอนุมัติในระบบ และใช้วันที่จัดทำ/ประกาศใช้ตามรายการหลัก\n\nเอกสารสถานะ "ยกเลิก" จะไม่แสดงในรายการเอกสาร — ย้ายไปคลังเอกสาร โฟลเดอร์ "เอกสารยกเลิก" แทน')) return;
       const statusEl = document.getElementById('importMlStatus');
       importBtn.disabled = true;
       if(statusEl) statusEl.textContent = 'กำลังนำเข้า...';
@@ -3274,7 +3324,7 @@ function attachWatermarkHandlers(){
         if(statusEl) statusEl.textContent = result.message;
         return;
       }
-      if(statusEl) statusEl.textContent = `นำเข้าเสร็จแล้ว — อัปเดต ${result.updated} รายการ, เพิ่มใหม่ ${result.created} รายการ`;
+      if(statusEl) statusEl.textContent = `นำเข้าเสร็จแล้ว — อัปเดต ${result.updated} รายการ, เพิ่มใหม่ ${result.created} รายการ, ย้ายไปคลังเอกสาร (ยกเลิก) ${result.archived} รายการ`;
       render();
     });
   }
