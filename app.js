@@ -543,7 +543,7 @@ async function startApp(){
     renderBootError(DOCS_ERROR);
     return;
   }
-  loadArchive().then(()=>{ if(state.view==='archive') render(); }); // best-effort, non-blocking — Archive is a separate store
+  loadArchive().then(()=>{ if(state.view==='archive' || state.view==='records') render(); }); // best-effort, non-blocking — Archive is a separate store; 'records' also needs it now that Evidence/Support shows clause-tagged archive items too
   loadWatermarkLog().then(()=>{ if(state.view==='admin') render(); }); // best-effort, non-blocking
   removeBootScreen();
   wireNav();
@@ -1297,12 +1297,48 @@ function wireModalControls(){
 // grouped by ISO clause, shown as clickable document-name links to
 // the pasted SharePoint URL (replaces the old "Records" page).
 // ============================================================
+function evidenceDocRow(d){
+  const link = displayLink(d);
+  return `
+  <div class="evidence-item">
+    <div class="file-ic">${ic('file')}</div>
+    <div class="evi-main">
+      ${link
+        ? `<a class="evi-name" href="${link}" target="_blank" rel="noopener">${cleanName(d)}</a>`
+        : `<span class="evi-name evi-nolink">${cleanName(d)}</span>`}
+      <div class="evi-sub">${d.id}${!link ? ' · ยังไม่มีลิงก์' : ''}</div>
+    </div>
+    <div class="row-actions">
+      ${isDC() ? `<button data-edit="${d.id}" title="แก้ไข">${ic('edit')}</button>
+      <button data-del="${d.id}" class="del" title="ลบ">${ic('trash')}</button>` : ''}
+    </div>
+  </div>`;
+}
+function evidenceArchiveRow(a){
+  return `
+  <div class="evidence-item">
+    <div class="file-ic">${ic('folder','sm-icon')}</div>
+    <div class="evi-main">
+      ${a.link
+        ? `<a class="evi-name" href="${a.link}" target="_blank" rel="noopener">${a.title}</a>`
+        : `<span class="evi-name evi-nolink">${a.title}</span>`}
+      <div class="evi-sub"><span style="color:var(--blue-600); font-weight:700;">คลังเอกสาร</span> · ${a.category||'ไม่ระบุหมวดหมู่'} · ${archiveStatusBadge(a.status)}</div>
+    </div>
+    <div class="row-actions">
+      ${(a.status!=='ยืนยันแล้ว' && isDC()) ? `<button data-verify="${a.id}" title="ยืนยัน (DC)">${ic('check')}</button>` : ''}
+      ${isDC() ? `<button data-archive-edit="${a.id}" title="แก้ไข">${ic('edit')}</button>
+      <button data-archive-del="${a.id}" class="del" title="ลบ">${ic('trash')}</button>` : ''}
+    </div>
+  </div>`;
+}
 function viewEvidence(){
-  const items = visibleDocuments().filter(d=> d.note==='สนับสนุน');
+  const docItems = visibleDocuments().filter(d=> d.note==='สนับสนุน').map(d=>({ clause: d.clause, html: evidenceDocRow(d) }));
+  const archiveItems = ARCHIVE_ITEMS.filter(a=> a.clause).map(a=>({ clause: a.clause, html: evidenceArchiveRow(a) }));
+  const allItems = [...docItems, ...archiveItems];
   const byClause = {};
-  items.forEach(d=>{
-    const key = d.clause || '';
-    (byClause[key] = byClause[key]||[]).push(d);
+  allItems.forEach(item=>{
+    const key = item.clause || '';
+    (byClause[key] = byClause[key]||[]).push(item);
   });
   const orderedKeys = [...CLAUSES.map(c=>c[0]), ''];
   const sections = orderedKeys.filter(k=> byClause[k] && byClause[k].length);
@@ -1312,38 +1348,22 @@ function viewEvidence(){
     <div class="panel-head">
       <div>
         <div class="panel-title">Evidence / Support</div>
-        <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">เอกสารสนับสนุน/หลักฐาน (ใบรับรอง มาตรฐานอ้างอิง ฯลฯ) จัดกลุ่มตามข้อกำหนด ISO 17025 — วางลิงก์ SharePoint แล้วกดชื่อเพื่อเปิดได้เลย</div>
+        <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">เอกสารสนับสนุน/หลักฐาน (ใบรับรอง มาตรฐานอ้างอิง ฯลฯ) จัดกลุ่มตามข้อกำหนด ISO 17025 — รวมทั้งเอกสารสนับสนุนที่ขึ้นทะเบียนโดยตรง และเอกสารจากคลังเอกสารที่ระบุข้อกำหนดไว้ — วางลิงก์ SharePoint แล้วกดชื่อเพื่อเปิดได้เลย</div>
       </div>
       <button class="btn primary" id="btnNewEvidence">${ic('plus')} เพิ่มรายการสนับสนุน</button>
     </div>
   </div>
   ${sections.length ? sections.map(key=>{
-    const docs = byClause[key];
+    const wrapped = byClause[key];
     const label = key ? clauseLabel(key) : 'ไม่ระบุข้อกำหนด';
     return `
     <div class="panel">
-      <div class="panel-title" style="margin-bottom:12px;">${label} <span style="color:var(--ink-500); font-weight:600; font-size:12px;">(${docs.length})</span></div>
+      <div class="panel-title" style="margin-bottom:12px;">${label} <span style="color:var(--ink-500); font-weight:600; font-size:12px;">(${wrapped.length})</span></div>
       <div style="display:flex; flex-direction:column; gap:2px;">
-        ${docs.map(d=>{
-          const link = displayLink(d);
-          return `
-          <div class="evidence-item">
-            <div class="file-ic">${ic('file')}</div>
-            <div class="evi-main">
-              ${link
-                ? `<a class="evi-name" href="${link}" target="_blank" rel="noopener">${cleanName(d)}</a>`
-                : `<span class="evi-name evi-nolink">${cleanName(d)}</span>`}
-              <div class="evi-sub">${d.id}${!link ? ' · ยังไม่มีลิงก์' : ''}</div>
-            </div>
-            <div class="row-actions">
-              ${isDC() ? `<button data-edit="${d.id}" title="แก้ไข">${ic('edit')}</button>
-              <button data-del="${d.id}" class="del" title="ลบ">${ic('trash')}</button>` : ''}
-            </div>
-          </div>`;
-        }).join('')}
+        ${wrapped.map(item=>item.html).join('')}
       </div>
     </div>`;
-  }).join('') : `<div class="panel">${emptyState('ยังไม่มีเอกสารสนับสนุน','เพิ่มรายการแรกได้จากปุ่ม "เพิ่มรายการสนับสนุน" ด้านบน')}</div>`}
+  }).join('') : `<div class="panel">${emptyState('ยังไม่มีเอกสารสนับสนุน','เพิ่มรายการแรกได้จากปุ่ม "เพิ่มรายการสนับสนุน" ด้านบน หรือระบุข้อกำหนด ISO ให้เอกสารในคลังเอกสาร')}</div>`}
   `;
 }
 function attachEvidenceHandlers(){
@@ -1358,6 +1378,7 @@ function attachEvidenceHandlers(){
     await persistDocs();
     render();
   }));
+  wireArchiveItemActions();
 }
 
 // ============================================================
@@ -1497,6 +1518,18 @@ function viewArchive(){
   ${body}
   `;
 }
+function wireArchiveItemActions(){
+  document.querySelectorAll('[data-archive-edit]').forEach(b=> b.addEventListener('click', ()=> openArchiveModal({ mode:'edit', id:b.dataset.archiveEdit })));
+  document.querySelectorAll('[data-verify]').forEach(b=> b.addEventListener('click', ()=> openArchiveModal({ mode:'verify', id:b.dataset.verify })));
+  document.querySelectorAll('[data-archive-del]').forEach(b=> b.addEventListener('click', async ()=>{
+    const a = ARCHIVE_ITEMS.find(x=>x.id===b.dataset.archiveDel);
+    if(!a) return;
+    if(!confirm(`ลบเอกสาร "${a.title}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
+    ARCHIVE_ITEMS = ARCHIVE_ITEMS.filter(x=>x.id!==a.id);
+    await persistArchive();
+    render();
+  }));
+}
 function attachArchiveHandlers(){
   const search = document.getElementById('archiveSearch');
   if(search) search.addEventListener('input', e=>{
@@ -1512,16 +1545,7 @@ function attachArchiveHandlers(){
   if(fs) fs.addEventListener('change', e=>{ state.archiveFilter.status = e.target.value; render(); });
   const newBtn = document.getElementById('btnNewArchive');
   if(newBtn) newBtn.addEventListener('click', ()=> openArchiveModal({ mode:'new' }));
-  document.querySelectorAll('[data-archive-edit]').forEach(b=> b.addEventListener('click', ()=> openArchiveModal({ mode:'edit', id:b.dataset.archiveEdit })));
-  document.querySelectorAll('[data-verify]').forEach(b=> b.addEventListener('click', ()=> openArchiveModal({ mode:'verify', id:b.dataset.verify })));
-  document.querySelectorAll('[data-archive-del]').forEach(b=> b.addEventListener('click', async ()=>{
-    const a = ARCHIVE_ITEMS.find(x=>x.id===b.dataset.archiveDel);
-    if(!a) return;
-    if(!confirm(`ลบเอกสาร "${a.title}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
-    ARCHIVE_ITEMS = ARCHIVE_ITEMS.filter(x=>x.id!==a.id);
-    await persistArchive();
-    render();
-  }));
+  wireArchiveItemActions();
   // folder navigation
   document.querySelectorAll('[data-open-year]').forEach(el=> el.addEventListener('click', ()=>{
     state.archiveFolder = { year: Number(el.dataset.openYear), category:null }; render();
