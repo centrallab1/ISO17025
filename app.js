@@ -1039,11 +1039,20 @@ function docModal(){
     // STEP 1 only — everything else (form confirmation, DC link+clause,
     // review, approval, publish) happens as lifecycle cards on the
     // document's own detail page after this reserves the number
+    const isEvidence = state.modal.presetNote === 'สนับสนุน';
     bodyFields = `
+        ${isEvidence ? `
+        <div class="field"><label>หมวดบันทึกผล</label>
+          <select id="mfEvidenceCategory">
+            <option value="">— เลือกหมวด (ไม่บังคับ) —</option>
+            ${EVIDENCE_CATEGORIES.map((c,i)=>`<option value="${i}">${c.label} (ข้อ ${c.clause})</option>`).join('')}
+          </select>
+          <div style="font-size:11px; color:var(--ink-500); margin-top:5px;">เลือกหมวดเพื่อเติมชื่อเอกสารและข้อกำหนด ISO ให้อัตโนมัติ — แก้ไขได้หลังจากนั้น</div>
+        </div>` : ''}
         <div class="field"><label>ประเภทเอกสาร</label>
           <select id="mfTypePrefix">
             <option value="">— เลือกประเภท —</option>
-            ${Object.entries(DOC_TYPE_MAP).map(([k,v])=>`<option value="${k}">${k} — ${v}</option>`).join('')}
+            ${Object.entries(DOC_TYPE_MAP).map(([k,v])=>`<option value="${k}" ${isEvidence && k==='LS' ? 'selected':''}>${k} — ${v}</option>`).join('')}
           </select></div>
         <div class="field"><label>ชื่อเอกสาร</label>
           <input id="mfName" placeholder="ชื่อเอกสาร"></div>
@@ -1054,6 +1063,7 @@ function docModal(){
           </div>
           <div style="font-size:11px; color:var(--ink-500); margin-top:5px;">เลือกประเภทด้านบนเพื่อออกเลขอัตโนมัติ — ระบบจะเติมเลขที่ยังว่างอยู่ก่อนเสมอ</div>
         </div>
+        <input type="hidden" id="mfPresetClause" value="">
         <div class="field-error" id="mfError" style="display:none;"></div>`;
   } else {
     // revising: target document already chosen — just confirm
@@ -1125,6 +1135,20 @@ function wireModalControls(){
   if(idInput) idInput.addEventListener('input', refreshSuggestions);
   refreshSuggestions();
 
+  const evidenceCategorySel = document.getElementById('mfEvidenceCategory');
+  if(evidenceCategorySel) evidenceCategorySel.addEventListener('change', ()=>{
+    const idx = evidenceCategorySel.value;
+    const nameInput = document.getElementById('mfName');
+    const presetClauseInput = document.getElementById('mfPresetClause');
+    if(idx===''){
+      if(presetClauseInput) presetClauseInput.value = '';
+      return;
+    }
+    const cat = EVIDENCE_CATEGORIES[parseInt(idx,10)];
+    if(!cat) return;
+    if(nameInput && !nameInput.value.trim()) nameInput.value = cat.label;
+    if(presetClauseInput) presetClauseInput.value = cat.clause;
+  });
   const typePrefixSel = document.getElementById('mfTypePrefix');
   const autoNumBtn = document.getElementById('btnAutoNumber');
   function doAutoNumber(){
@@ -1155,8 +1179,11 @@ function wireModalControls(){
       if(DOCUMENTS.some(x=>x.id===id)){ errEl.textContent = 'รหัสเอกสารนี้มีอยู่แล้ว'; errEl.style.display='block'; return; }
       const actor = currentActorName();
       const now = Date.now();
+      const presetClauseEl = document.getElementById('mfPresetClause');
+      const clause = presetClauseEl ? presetClauseEl.value : '';
+      const note = state.modal.presetNote || 'ว่าง';
       DOCUMENTS.push({
-        id, name, clause:'', link:'', note:'ว่าง', rev:'0',
+        id, name, clause, link:'', note, rev:'0',
         approvalStatus:'ร่าง', reviewerName:'', approverName:'', preparedBy:actor,
         comments:[{ by:actor, text:'ขั้นที่ 1: จองเลขเอกสาร', time: now }], lastUpdated: now, createdDate: now, effectiveDate:null,
         approvedBy:null, approvedAt:null, approvedComment:null, lastRequestType:'new', requestedBy: actor,
@@ -1805,7 +1832,7 @@ function renderDcRegisterBox(d){
     <div class="field"><label>ลิงก์เอกสาร</label>
       <input id="dcLinkInput" placeholder="https://mitrphol.sharepoint.com/..." style="border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px; width:100%; box-sizing:border-box;"></div>
     <div class="field"><label>ข้อกำหนด ISO 17025</label>
-      <select id="dcClauseInput" style="width:100%;"><option value="">ไม่ระบุ</option>${CLAUSES.map(([c,l])=>`<option value="${c}">${l}</option>`).join('')}</select></div>
+      <select id="dcClauseInput" style="width:100%;"><option value="">ไม่ระบุ</option>${CLAUSES.map(([c,l])=>`<option value="${c}" ${d.clause===c?'selected':''}>${l}</option>`).join('')}</select></div>
     <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
       <div style="font-size:12px; color:var(--ink-500);">โดย ${currentActorName()}</div>
       <button class="btn success" id="btnDcRegister">${ic('link')} บันทึก</button>
