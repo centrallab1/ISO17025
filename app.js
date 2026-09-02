@@ -2968,6 +2968,19 @@ function applyMasterListRow(row, d){
   d.preparedBy = roleName(row.prep) || d.preparedBy || '';
   d.reviewerName = roleName(row.reviewer) || d.reviewerName || '';
   d.approverName = roleName(row.approver) || d.approverName || '';
+  // auto-classify the ISO 17025 clause from the document name using the
+  // same keyword suggester as the "new document" form (suggestClause in
+  // data.js). Only fills in a BLANK clause — never overwrites a clause
+  // someone already set or corrected by hand, on this import or a prior
+  // one. This is a heuristic based on the document title only, so it's
+  // meant to save re-classifying all 112 items by hand, not to be
+  // treated as an authoritative ISO determination — unclassifiedDocs()
+  // still surfaces anything the keyword list couldn't match, and any
+  // suggestion here should get a quick sanity check from QM.
+  if(!d.clause){
+    const suggested = suggestClause(row.name);
+    if(suggested) d.clause = suggested;
+  }
   // ควบคุม/แจกจ่าย = documents actively in force · สนับสนุน = reference/
   // support material · ยกเลิก = retired documents (routed to the archive
   // below). All four are already-settled records coming from the master
@@ -2994,17 +3007,19 @@ function archiveCancelledRow(row, existingDoc){
   // than guessing it equals the effective/created date.
   const cancelledDate = toEpoch(row.cancelled) || (existingDoc && existingDoc.cancelledDate) || null;
   const approver = roleName(row.approver) || '';
+  const suggestedClause = suggestClause(row.name) || '';
   let a = ARCHIVE_ITEMS.find(x=> x.sourceDocId===row.id);
   if(a){
     a.title = row.name || a.title;
     a.link = row.link || a.link;
     a.uploadedAt = uploadedAt;
     if(cancelledDate) a.cancelledDate = cancelledDate;
+    if(!a.clause && suggestedClause) a.clause = suggestedClause;
   } else {
     ARCHIVE_ITEMS.push({
       id: 'ARC-' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
       sourceDocId: row.id, title: row.name || row.id, category: CANCELLED_ARCHIVE_CATEGORY,
-      clause:'', link: row.link || '', uploadedBy: approver || 'Master List Import',
+      clause: suggestedClause, link: row.link || '', uploadedBy: approver || 'Master List Import',
       uploadedAt, cancelledDate, status:'ยืนยันแล้ว', verifiedBy: approver || null, verifiedAt: uploadedAt,
     });
   }
