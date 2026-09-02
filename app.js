@@ -267,6 +267,28 @@ function pendingQueue(){
   return DOCUMENTS.filter(d=> d.approvalStatus==='ร่าง' || d.approvalStatus==='รอทบทวน' || d.approvalStatus==='รออนุมัติ')
     .sort((a,b)=> (a.lastUpdated||0)-(b.lastUpdated||0));
 }
+// whether it's specifically the logged-in user's turn to act on this
+// request right now — mirrors the approve-button gating rules exactly, so
+// notifications only ever point at something that person can actually do
+function isMyTurn(d){
+  if(!currentUser) return false;
+  if(isDC()) return true; // DC oversees the whole system and can act at every step
+  if(d.lastRequestType!=='new' && d.lastRequestType!=='revision') return false;
+  if(d.approvalStatus==='ร่าง') return d.requestedBy === currentUser.name;
+  if(d.approvalStatus==='รอทบทวน'){
+    if(!d.linkSetAt) return false; // waiting on DC first
+    return currentUser.role==='QM' && d.requestedBy !== currentUser.name;
+  }
+  if(d.approvalStatus==='รออนุมัติ') return currentUser.role==='LM';
+  return false;
+}
+// the notification bell only shows requests waiting specifically on the
+// logged-in person — NOTE: this is a static site with no backend/push
+// notifications, so this can only alert someone once they're actually
+// logged into the app; it can't message an offline account
+function myActionQueue(){
+  return pendingQueue().filter(isMyTurn);
+}
 let notifOpen = false;
 let helpOpen = false;
 let settingsOpen = false;
@@ -291,7 +313,7 @@ function wireNotifBell(){
 function updateNotifBadge(){
   const dot = document.getElementById('notifDot');
   if(!dot) return;
-  const n = pendingQueue().length;
+  const n = myActionQueue().length;
   dot.style.display = n>0 ? 'block' : 'none';
 }
 function wireBackButton(){
@@ -422,11 +444,11 @@ function renderNotifPanel(){
   if(!wrap) return;
   updateNotifBadge();
   if(!notifOpen){ wrap.style.display = 'none'; wrap.innerHTML=''; return; }
-  const queue = pendingQueue();
+  const queue = myActionQueue();
   wrap.className = 'notif-panel';
   wrap.style.display = 'block';
   wrap.innerHTML = `
-    <div class="notif-head">คำขอรอดำเนินการ (${queue.length})</div>
+    <div class="notif-head">รอคุณดำเนินการ (${queue.length})</div>
     ${queue.length ? queue.map(d=>{
       const label = d.lastRequestType==='new' ? 'คำขอเอกสารใหม่' : d.lastRequestType==='revision' ? `คำขอปรับปรุง Rev.${d.lastRequestFrom||'-'} → ${d.rev||'-'}` : d.lastRequestType==='review' ? 'คำขอทบทวนประจำปี' : 'รอดำเนินการ';
       return `
@@ -1750,7 +1772,7 @@ function eitem(opts){
 function renderFormConfirmBox(d){
   if(d.lastRequestType !== 'new' && d.lastRequestType !== 'revision') return '';
   if(!d.formConfirmedAt && d.approvalStatus !== 'ร่าง') return ''; // shouldn't normally happen
-  const isRequester = currentUser && d.requestedBy === currentUser.name;
+  const isRequester = currentUser && (d.requestedBy === currentUser.name || isDC());
   if(d.formConfirmedAt){
     return `
     <div class="side-box" style="border-color:var(--green-600); background:var(--green-50); margin-bottom:18px;">
@@ -2391,6 +2413,8 @@ function viewApprovalDetail(){
       ${approvedComment ? `<div style="font-size:12.5px; color:var(--ink-700); margin-top:8px; padding-top:8px; border-top:1px solid var(--line);">${approvedComment}</div>` : ''}
     </div>
     ` : (status==='ร่าง' && (d.lastRequestType==='new'||d.lastRequestType==='revision')) ? '' : `
+    ${(d.lastRequestType==='new'||d.lastRequestType==='revision') && currentIdx===1 ? `<div style="font-size:11.5px; font-weight:700; color:var(--amber-600); margin-bottom:10px;">${ic('clock','sm-icon')} ขั้นที่ 4: ต้องทบทวนโดย QM หรือ DC</div>` : ''}
+    ${(d.lastRequestType==='new'||d.lastRequestType==='revision') && currentIdx===2 ? `<div style="font-size:11.5px; font-weight:700; color:var(--amber-600); margin-bottom:10px;">${ic('clock','sm-icon')} ขั้นที่ 5: ต้องอนุมัติโดย Lab Manager (LM)</div>` : ''}
     <div class="field" style="max-width:320px;"><label>ผู้ดำเนินการ</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()} <span style="color:var(--ink-500); font-weight:600;">(${currentUser.role})</span></div></div>
     <div class="comment-box">
       <label style="font-size:12px; font-weight:700; color:var(--ink-700); display:block; margin-bottom:8px;">ความเห็น (จำเป็นถ้ากด "ไม่อนุมัติ")</label>
@@ -2468,20 +2492,23 @@ function attachApprovalHandlers(){
     // by anyone (rule 2 requires LM specifically for that step). The
     // independent-review requirement still applies in full at the middle
     // step (รอทบทวน→รออนุมัติ), which is where it matters most.
-    if(currentIdx > 0 && nextStatus!=='อนุมัติแล้ว' && d.requestedBy && d.requestedBy === actor){
+    // DC oversees the whole system (can already edit/delete anything), so
+    // DC is exempt from every role/creator restriction below and can carry
+    // a request through every step itself if needed.
+    if(!isDC() && currentIdx > 0 && nextStatus!=='อนุมัติแล้ว' && d.requestedBy && d.requestedBy === actor){
       errEl.textContent = `ผู้ทบทวนต้องไม่ใช่ผู้สร้างคำขอเอง (${d.requestedBy})`;
       errEl.style.display = 'block';
       return;
     }
     // rule 2: the final approval step must be done by the Lab Manager (LM)
-    if(nextStatus==='อนุมัติแล้ว' && currentUser.role!=='LM'){
+    if(!isDC() && nextStatus==='อนุมัติแล้ว' && currentUser.role!=='LM'){
       errEl.textContent = 'ผู้อนุมัติขั้นสุดท้ายต้องเป็น Lab Manager (LM) เท่านั้น';
       errEl.style.display = 'block';
       return;
     }
     // rule 3: step 4 (the actual review, รอทบทวน→รออนุมัติ) can only be
     // done by DC or QM — not LM (LM's role is reserved for final approval)
-    if(currentIdx===1 && (d.lastRequestType==='new'||d.lastRequestType==='revision') && !['DC','QM'].includes(currentUser.role)){
+    if(!isDC() && currentIdx===1 && (d.lastRequestType==='new'||d.lastRequestType==='revision') && !['DC','QM'].includes(currentUser.role)){
       errEl.textContent = 'ขั้นตอนทบทวนต้องดำเนินการโดย DC หรือ QM เท่านั้น';
       errEl.style.display = 'block';
       return;
@@ -2542,7 +2569,7 @@ function attachApprovalHandlers(){
     const actor = currentActorName();
     const comment = document.getElementById('approvalComment').value.trim();
     const errEl = document.getElementById('approvalError');
-    if(currentIdx > 0 && d.requestedBy && d.requestedBy === actor){
+    if(!isDC() && currentIdx > 0 && d.requestedBy && d.requestedBy === actor){
       errEl.textContent = `ผู้ทบทวน/อนุมัติต้องไม่ใช่ผู้สร้างคำขอเอง (${d.requestedBy})`;
       errEl.style.display = 'block';
       return;
