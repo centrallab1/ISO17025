@@ -304,9 +304,15 @@ function unclassifiedDocs(){
 // lastRequestType==='new' origin) or to documents already published
 // once before (a revision-in-progress keeps showing its last published
 // link/version until the new revision's own publish step completes).
+//
+// Cancelled documents (note === 'ยกเลิก') are hidden here too. The
+// master list import (see app.js) actively moves them out of DOCUMENTS
+// and into the Archive's "เอกสารยกเลิก" folder — this check is a second
+// line of defense in case a document's note is ever set to 'ยกเลิก'
+// some other way (e.g. a manual edit) without that move happening.
 // ============================================================
 function isHiddenFromLists(d){
-  return d.lastRequestType==='new' && !d.publishedLink;
+  return (d.lastRequestType==='new' && !d.publishedLink) || d.note==='ยกเลิก';
 }
 function visibleDocuments(){
   return DOCUMENTS.filter(d=> !isHiddenFromLists(d));
@@ -326,7 +332,7 @@ function displayLink(d){
 // Stored in its own Firestore doc (iso17025/archive) so it never mixes
 // with the controlled DOCUMENTS array.
 // ============================================================
-const ARCHIVE_CATEGORY_SUGGESTIONS = ['สรุปประชุม', 'เอกสารสอบเทียบ', 'ใบรับรอง/Certificate', 'รายงานผลทดสอบภายนอก', 'อื่นๆ'];
+const ARCHIVE_CATEGORY_SUGGESTIONS = ['สรุปประชุม', 'เอกสารสอบเทียบ', 'ใบรับรอง/Certificate', 'รายงานผลทดสอบภายนอก', 'เอกสารยกเลิก', 'อื่นๆ'];
 var ARCHIVE_ITEMS = [];
 var ARCHIVE_LOADED = false;
 var ARCHIVE_ERROR = null;
