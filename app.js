@@ -1360,7 +1360,10 @@ function evidenceArchiveRow(a){
 }
 function viewEvidence(){
   const docItems = visibleDocuments().filter(d=> d.note==='สนับสนุน').map(d=>({ clause: d.clause, html: evidenceDocRow(d) }));
-  const archiveItems = ARCHIVE_ITEMS.filter(a=> a.clause).map(a=>({ clause: a.clause, html: evidenceArchiveRow(a) }));
+  // exclude cancelled/retired documents from the archive — they're kept
+  // in "เอกสารยกเลิก" for record-keeping, not as usable supporting
+  // evidence, even if they happen to have an ISO clause guess attached.
+  const archiveItems = ARCHIVE_ITEMS.filter(a=> a.clause && a.category!==CANCELLED_ARCHIVE_CATEGORY).map(a=>({ clause: a.clause, html: evidenceArchiveRow(a) }));
   const allItems = [...docItems, ...archiveItems];
   const byClause = {};
   allItems.forEach(item=>{
@@ -2999,20 +3002,24 @@ function applyMasterListRow(row, d){
 // sourceDocId so re-running the import updates the same archive item
 // instead of creating a duplicate each time.
 function archiveCancelledRow(row, existingDoc){
-  const uploadedAt = toEpoch(row.effective) || toEpoch(row.created) || (existingDoc && existingDoc.lastUpdated) || Date.now();
-  // actual cancellation date, kept separate from uploadedAt (which is only
-  // a grouping date, not necessarily when the document was retired). Only
-  // set when the master list actually has a "cancelled" column — otherwise
-  // left blank for someone to fill in via the archive edit modal, rather
-  // than guessing it equals the effective/created date.
-  const cancelledDate = toEpoch(row.cancelled) || (existingDoc && existingDoc.cancelledDate) || null;
+  let a = ARCHIVE_ITEMS.find(x=> x.sourceDocId===row.id);
+  // actual cancellation date. The master list export has no "cancelled"
+  // column, so this only ever comes from a.cancelledDate — filled in by
+  // hand later via the archive edit modal — until/unless the source list
+  // gains that column.
+  const cancelledDate = toEpoch(row.cancelled) || (a && a.cancelledDate) || (existingDoc && existingDoc.cancelledDate) || null;
+  // the date the cancelled-doc archive folder actually groups/sorts by —
+  // cancellation date if known, otherwise creation date. Deliberately NOT
+  // the effective date: "effective" is when the (now-retired) document
+  // went into force, which has nothing to do with when it was cancelled
+  // and was putting these in the wrong year folder.
+  const groupDate = cancelledDate || toEpoch(row.created) || (existingDoc && existingDoc.lastUpdated) || (a && a.uploadedAt) || Date.now();
   const approver = roleName(row.approver) || '';
   const suggestedClause = suggestClause(row.name) || '';
-  let a = ARCHIVE_ITEMS.find(x=> x.sourceDocId===row.id);
   if(a){
     a.title = row.name || a.title;
     a.link = row.link || a.link;
-    a.uploadedAt = uploadedAt;
+    a.uploadedAt = groupDate;
     if(cancelledDate) a.cancelledDate = cancelledDate;
     if(!a.clause && suggestedClause) a.clause = suggestedClause;
   } else {
@@ -3020,7 +3027,7 @@ function archiveCancelledRow(row, existingDoc){
       id: 'ARC-' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
       sourceDocId: row.id, title: row.name || row.id, category: CANCELLED_ARCHIVE_CATEGORY,
       clause: suggestedClause, link: row.link || '', uploadedBy: approver || 'Master List Import',
-      uploadedAt, cancelledDate, status:'ยืนยันแล้ว', verifiedBy: approver || null, verifiedAt: uploadedAt,
+      uploadedAt: groupDate, cancelledDate, status:'ยืนยันแล้ว', verifiedBy: approver || null, verifiedAt: groupDate,
     });
   }
 }
