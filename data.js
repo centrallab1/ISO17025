@@ -76,6 +76,35 @@ const DOC_TYPE_MAP = {
   'LF': 'แบบฟอร์ม (Form)',
   'LS': 'เอกสารสนับสนุน (Support)',
 };
+// preset categories for "หลักฐาน/สนับสนุน" (Evidence/Support) records —
+// each maps to the ISO/IEC 17025 clause it's evidence for, so the creator
+// doesn't have to remember/type the mapping by hand
+const EVIDENCE_CATEGORIES = [
+  { label:'ผลประเมินสมรรถนะเจ้าหน้าที่ (Competency)', clause:'6.2' },
+  { label:'บันทึกการฝึกอบรม / ใบรับรองการอบรม', clause:'6.2' },
+  { label:'บันทึกอุณหภูมิ/ความชื้นห้องปฏิบัติการ', clause:'6.3' },
+  { label:'บันทึกการสอบเทียบเครื่องมือ', clause:'6.4' },
+  { label:'บันทึกการตรวจสอบระหว่างใช้งาน (Intermediate Check)', clause:'6.4' },
+  { label:'บันทึกการบำรุงรักษาเครื่องมือ', clause:'6.4' },
+  { label:'บันทึกความสามารถสอบกลับได้ทางมาตรวิทยา', clause:'6.5' },
+  { label:'ผลประเมินผู้ขาย/ผู้ให้บริการภายนอก', clause:'6.6' },
+  { label:'บันทึกทบทวนคำขอ/สัญญา', clause:'7.1' },
+  { label:'ผลตรวจสอบความใช้ได้ของวิธี (Method Validation)', clause:'7.2' },
+  { label:'บันทึกการชักตัวอย่าง', clause:'7.3' },
+  { label:'บันทึกการรับ-จัดเก็บตัวอย่าง', clause:'7.4' },
+  { label:'ผลประเมินค่าความไม่แน่นอนของการวัด', clause:'7.6' },
+  { label:'ผล QC / แผนภูมิควบคุม (Control Chart)', clause:'7.7' },
+  { label:'ผลการทดสอบความชำนาญ (PT) / เปรียบเทียบผลระหว่างห้องปฏิบัติการ (ILC)', clause:'7.7' },
+  { label:'บันทึกข้อร้องเรียนและการจัดการ', clause:'7.9' },
+  { label:'บันทึกงานที่ไม่เป็นไปตามข้อกำหนด (NCR)', clause:'7.10' },
+  { label:'ผลประเมินความเสี่ยงต่อความเป็นกลาง', clause:'4.1' },
+  { label:'บันทึกการรักษาความลับ/ข้อตกลง', clause:'4.2' },
+  { label:'ผลประเมินความเสี่ยงและโอกาสของระบบ', clause:'8.5' },
+  { label:'บันทึกโอกาสในการปรับปรุง / ผลสำรวจความพึงพอใจลูกค้า', clause:'8.6' },
+  { label:'บันทึกการปฏิบัติการแก้ไข (CAR)', clause:'8.7' },
+  { label:'รายงานผลตรวจติดตามภายใน', clause:'8.8' },
+  { label:'รายงาน/มติการทบทวนการบริหาร', clause:'8.9' },
+];
 function docTypeCode(d){
   const src = String((d && d.id) || '') + ' ' + String((d && d.name) || '');
   const m = src.match(/(?:RDI|MPIR)-([A-Z]+)-/);
