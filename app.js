@@ -794,7 +794,7 @@ function svgDonut(segments, opts={}){
   const cx = size/2, cy = size/2;
   const circumference = 2 * Math.PI * r;
   const total = segments.reduce((s,x)=>s+x.value, 0);
-  if(!total) return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}"><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="${stroke}"/></svg>`;
+  if(!total) return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}"><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#e7e8f2" stroke-width="${stroke}"/></svg>`;
   let offsetVal = 0;
   const arcs = segments.filter(s=>s.value>0).map(seg=>{
     const frac = seg.value / total;
@@ -821,8 +821,8 @@ function svgBarChart(bars, opts={}){
     const y = padTop + (chartH - h);
     return `
     <rect x="${x}" y="${y}" width="${barW}" height="${Math.max(h,2)}" rx="4" fill="${b.color}"/>
-    <text x="${x+barW/2}" y="${height-8}" text-anchor="middle" font-size="9.5" fill="#8890b8">${b.label}</text>
-    <text x="${x+barW/2}" y="${y-6}" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">${b.value}</text>`;
+    <text x="${x+barW/2}" y="${height-8}" text-anchor="middle" font-size="9.5" fill="#767a94">${b.label}</text>
+    <text x="${x+barW/2}" y="${y-6}" text-anchor="middle" font-size="10.5" font-weight="700" fill="#171a2b">${b.value}</text>`;
   }).join('');
   return `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" preserveAspectRatio="xMidYMid meet">${body}</svg>`;
 }
@@ -838,7 +838,7 @@ function svgGauge(pct, opts={}){
   return `
   <svg viewBox="0 0 ${size} ${size/2+18}" width="${size}" height="${size/2+18}">
     <defs><linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#14b8a6"/><stop offset="100%" stop-color="#8b5cf6"/></linearGradient></defs>
-    <path d="M ${cx-r} ${cy} A ${r} ${r} 0 0 1 ${cx+r} ${cy}" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="${stroke}" stroke-linecap="round"/>
+    <path d="M ${cx-r} ${cy} A ${r} ${r} 0 0 1 ${cx+r} ${cy}" fill="none" stroke="#e7e8f2" stroke-width="${stroke}" stroke-linecap="round"/>
     <path d="M ${cx-r} ${cy} A ${r} ${r} 0 0 1 ${cx+r} ${cy}" fill="none" stroke="url(#${gid})" stroke-width="${stroke}" stroke-linecap="round" stroke-dasharray="${dash} ${circumference}"/>
   </svg>`;
 }
@@ -853,14 +853,14 @@ function viewDashboard(){
   const unclassified = unclassifiedDocs().length;
 
   // status distribution (donut) — real counts across all visible documents
-  const STATUS_COLORS = { 'ร่าง':'#8890b8', 'รอทบทวน':'#f59e0b', 'รออนุมัติ':'#3b82f6', 'อนุมัติแล้ว':'#14b8a6', 'ไม่อนุมัติ':'#ef4444' };
+  const STATUS_COLORS = { 'ร่าง':'#a1a4b8', 'รอทบทวน':'#e08a1f', 'รออนุมัติ':'#2f6fed', 'อนุมัติแล้ว':'#0f9e94', 'ไม่อนุมัติ':'#e0483f' };
   const statusSegments = [...STATUS_FLOW,'ไม่อนุมัติ'].map(st=>({
-    label: st, value: visibleDocuments().filter(d=>d.approvalStatus===st).length, color: STATUS_COLORS[st]||'#8890b8',
+    label: st, value: visibleDocuments().filter(d=>d.approvalStatus===st).length, color: STATUS_COLORS[st]||'#a1a4b8',
   }));
   const overallPct = s.total ? Math.round((visibleDocuments().filter(d=>d.approvalStatus==='อนุมัติแล้ว').length / s.total) * 100) : 0;
 
   // documents by type (bar)
-  const TYPE_COLORS = ['#3b82f6','#8b5cf6','#14b8a6','#f59e0b','#ec4899'];
+  const TYPE_COLORS = ['#2f6fed','#7c5cff','#0f9e94','#e08a1f','#e0227e'];
   const typeBars = Object.keys(DOC_TYPE_MAP).map((k,i)=>({
     label:k, value: visibleDocuments().filter(d=>docTypeCode(d)===k).length, color: TYPE_COLORS[i%TYPE_COLORS.length],
   }));
@@ -871,116 +871,108 @@ function viewDashboard(){
   const dueSoonCount = DOCUMENTS.filter(d=>{ const nrd = nextReviewDate(d); return nrd>=now && nrd<=now+90*86400000; }).length;
 
   return `
-  <div class="dash-dark">
-    <div class="dash-title">Laboratory Dashboard</div>
-    <div class="dash-sub">ภาพรวมระบบเอกสาร ISO/IEC 17025:2017 — ข้อมูลจริงจากระบบ อัปเดตอัตโนมัติ</div>
+  <div class="panel">
+    <div class="panel-title">Laboratory Dashboard</div>
+    <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">ภาพรวมระบบเอกสาร ISO/IEC 17025:2017 — ข้อมูลจริงจากระบบ อัปเดตอัตโนมัติ</div>
+  </div>
 
-    <div class="dstat-row">
-      <div class="dstat-card" data-go="documents" data-preset="all">
-        <div class="dstat-icon" style="background:rgba(59,130,246,.18);">${ic('doc')}</div>
-        <div class="dstat-num">${s.total}</div><div class="dstat-label">Documents ทั้งหมด</div>
-      </div>
-      <div class="dstat-card" data-go="documents" data-preset="active">
-        <div class="dstat-icon" style="background:rgba(20,184,166,.18);">${ic('check')}</div>
-        <div class="dstat-num">${s.active}</div><div class="dstat-label">ควบคุม / แจกจ่าย</div>
-      </div>
-      <div class="dstat-card" data-go="documents" data-preset="pending">
-        <div class="dstat-icon" style="background:rgba(245,158,11,.18);">${ic('clock')}</div>
-        <div class="dstat-num">${s.pending}</div><div class="dstat-label">รอทบทวน / รออนุมัติ</div>
-      </div>
-      <div class="dstat-card" data-go="documents" data-preset="attention">
-        <div class="dstat-icon" style="background:rgba(239,68,68,.18);">${ic('alert')}</div>
-        <div class="dstat-num">${s.attention}</div><div class="dstat-label">ต้องตรวจสอบ</div>
+  <div class="stat-row">
+    <div class="stat-card" data-go="documents" data-preset="all" style="cursor:pointer;"><div class="stat-icon blue">${ic('doc')}</div>
+      <div><div class="stat-num">${s.total}</div><div class="stat-label">Documents ทั้งหมด</div></div></div>
+    <div class="stat-card" data-go="documents" data-preset="active" style="cursor:pointer;"><div class="stat-icon green" style="background:linear-gradient(135deg,var(--teal-500),var(--teal-600));">${ic('check')}</div>
+      <div><div class="stat-num">${s.active}</div><div class="stat-label">ควบคุม / แจกจ่าย</div></div></div>
+    <div class="stat-card" data-go="documents" data-preset="pending" style="cursor:pointer;"><div class="stat-icon amber">${ic('clock')}</div>
+      <div><div class="stat-num">${s.pending}</div><div class="stat-label">รอทบทวน / รออนุมัติ</div></div></div>
+    <div class="stat-card" data-go="documents" data-preset="attention" style="cursor:pointer;"><div class="stat-icon red">${ic('alert')}</div>
+      <div><div class="stat-num">${s.attention}</div><div class="stat-label">ต้องตรวจสอบ</div></div></div>
+  </div>
+
+  <div class="grid grid-3">
+    <div class="panel" style="margin-bottom:0;">
+      <div class="panel-title" style="margin-bottom:2px;">สถานะเอกสาร</div>
+      <div style="font-size:11px; color:var(--ink-500); font-weight:600; margin-bottom:14px;">จำนวนตามสถานะการอนุมัติ</div>
+      <div style="display:flex; align-items:center; gap:16px;">
+        ${svgDonut(statusSegments)}
+        <div class="dlegend">
+          ${statusSegments.map(seg=>`<div class="dlegend-row"><span class="dlegend-dot" style="background:${seg.color};"></span>${seg.label}<span class="dlegend-val">${seg.value}</span></div>`).join('')}
+        </div>
       </div>
     </div>
+    <div class="panel" style="margin-bottom:0; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+      <div class="panel-title" style="align-self:flex-start; margin-bottom:2px;">ภาพรวมความสอดคล้อง</div>
+      <div style="font-size:11px; color:var(--ink-500); font-weight:600; align-self:flex-start; margin-bottom:6px;">% เอกสารที่อนุมัติแล้ว</div>
+      ${svgGauge(overallPct, {gradId:'dashGaugeMain'})}
+      <div style="font-size:26px; font-weight:800; color:var(--ink-900); margin-top:-8px;">${overallPct}%</div>
+      <div style="font-size:10.5px; color:var(--ink-500);">${visibleDocuments().filter(d=>d.approvalStatus==='อนุมัติแล้ว').length} / ${s.total} เอกสาร</div>
+    </div>
+    <div class="panel" style="margin-bottom:0;">
+      <div class="panel-title" style="margin-bottom:2px;">ประเภทเอกสาร</div>
+      <div style="font-size:11px; color:var(--ink-500); font-weight:600; margin-bottom:6px;">จำนวนตามประเภท (LM/LP/WI/LF/LS)</div>
+      ${svgBarChart(typeBars)}
+    </div>
+  </div>
 
-    <div class="dgrid dgrid-3">
-      <div class="dcard">
-        <div class="dcard-title">สถานะเอกสาร</div>
-        <div class="dcard-sub">จำนวนตามสถานะการอนุมัติ</div>
-        <div style="display:flex; align-items:center; gap:16px;">
-          ${svgDonut(statusSegments)}
-          <div class="dlegend">
-            ${statusSegments.map(seg=>`<div class="dlegend-row"><span class="dlegend-dot" style="background:${seg.color};"></span>${seg.label}<span class="dlegend-val">${seg.value}</span></div>`).join('')}
+  <div class="grid grid-2">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">Compliance ตามหมวดข้อกำหนด</div><div style="font-size:11px; color:var(--ink-500); font-weight:600;">% เอกสารที่อนุมัติแล้ว</div></div>
+      ${comp.map(c=>`
+        <div class="prog-row">
+          <div class="prog-badge">${c.id}</div>
+          <div class="prog-label">${c.label}</div>
+          <div class="prog-track"><div class="prog-fill" style="background:linear-gradient(90deg,var(--teal-500),var(--purple-600));width:${c.pct}%"></div></div>
+          <div class="prog-pct">${c.pct}%</div>
+        </div>`).join('')}
+      ${unclassified ? `<div style="margin-top:12px; font-size:11.5px; color:var(--ink-500);">มีเอกสาร <b style="color:var(--ink-900);">${unclassified}</b> รายการที่ยังไม่ได้ระบุข้อกำหนด <span class="panel-link" data-go="documents" data-preset="unclassified" style="cursor:pointer;">ดูรายการ</span></div>` : ''}
+    </div>
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">กำหนดทบทวนเอกสาร</div></div>
+      <div class="action-item" data-go="revision" style="cursor:pointer;">
+        <div class="action-dot red">${ic('bell')}</div>
+        <div class="action-text">เกินกำหนดทบทวน</div>
+        <div class="action-count">${overdueCount} รายการ</div>
+      </div>
+      <div class="action-item" data-go="revision" style="cursor:pointer;">
+        <div class="action-dot amber">${ic('clock')}</div>
+        <div class="action-text">ใกล้ครบกำหนด (3 เดือน)</div>
+        <div class="action-count">${dueSoonCount} รายการ</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">Recently Updated</div><button class="panel-link" data-go="documents">View all</button></div>
+      ${recent.map(d=>`
+        <div class="rowline" data-open-doc="${d.id}" style="cursor:pointer">
+          <div class="file-ic">${ic('file')}</div>
+          <div class="rl-main">
+            <div class="rl-title">${d.id} &nbsp;${cleanName(d)}</div>
+            <div class="rl-sub">${fmtDateTime(d.lastUpdated)} · ${docTypeLabel(d)}</div>
           </div>
-        </div>
-      </div>
-      <div class="dcard" style="display:flex; flex-direction:column; align-items:center; justify-content:center;">
-        <div class="dcard-title" style="align-self:flex-start;">ภาพรวมความสอดคล้อง</div>
-        <div class="dcard-sub" style="align-self:flex-start;">% เอกสารที่อนุมัติแล้ว</div>
-        ${svgGauge(overallPct, {gradId:'dashGaugeMain'})}
-        <div style="font-size:26px; font-weight:800; color:#fff; margin-top:-8px;">${overallPct}%</div>
-        <div style="font-size:10.5px; color:#8890b8;">${visibleDocuments().filter(d=>d.approvalStatus==='อนุมัติแล้ว').length} / ${s.total} เอกสาร</div>
-      </div>
-      <div class="dcard">
-        <div class="dcard-title">ประเภทเอกสาร</div>
-        <div class="dcard-sub">จำนวนตามประเภท (LM/LP/WI/LF/LS)</div>
-        ${svgBarChart(typeBars)}
-      </div>
+          ${statusBadge(d.note)}
+        </div>`).join('')}
     </div>
-
-    <div class="dgrid dgrid-2">
-      <div class="dcard">
-        <div class="dcard-title">Compliance ตามหมวดข้อกำหนด</div>
-        <div class="dcard-sub">% เอกสารที่อนุมัติแล้ว ต่อหมวด</div>
-        ${comp.map(c=>`
-          <div class="prog-row">
-            <div class="prog-badge" style="background:rgba(59,130,246,.18); color:#7dc4ff;">${c.id}</div>
-            <div class="prog-label" style="color:#c3c7e4;">${c.label}</div>
-            <div class="prog-track" style="background:rgba(255,255,255,.08);"><div class="prog-fill" style="width:${c.pct}%; background:linear-gradient(90deg,#14b8a6,#8b5cf6);"></div></div>
-            <div class="prog-pct" style="color:#e8eaf5;">${c.pct}%</div>
-          </div>`).join('')}
-        ${unclassified ? `<div style="margin-top:12px; font-size:11px; color:#8890b8;">มีเอกสาร <b style="color:#fff;">${unclassified}</b> รายการที่ยังไม่ได้ระบุข้อกำหนด <span class="panel-link" data-go="documents" data-preset="unclassified" style="cursor:pointer; color:#7dd3fc;">ดูรายการ</span></div>` : ''}
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">Action Required</div></div>
+      <div class="action-item" data-go="documents" data-preset="missing" style="cursor:pointer;">
+        <div class="action-dot red">${ic('alert')}</div>
+        <div class="action-text">เอกสารสถานะ "ไม่พบ" ในทะเบียน</div>
+        <div class="action-count">${DOCUMENTS.filter(d=>d.note==='ไม่พบ').length} รายการ</div>
       </div>
-      <div class="dcard">
-        <div class="dcard-title">กำหนดทบทวนเอกสาร</div>
-        <div class="dcard-sub">ติดตามรอบทบทวนเอกสารควบคุม</div>
-        <div class="dlist-row" data-go="revision">
-          <div class="dstat-icon" style="background:rgba(239,68,68,.18); width:28px; height:28px; margin-bottom:0;">${ic('bell')}</div>
-          <div><div class="dlist-title">เกินกำหนดทบทวน</div><div class="dlist-sub">คลิกเพื่อดูรายการ</div></div>
-          <div class="dbadge" style="margin-left:auto; background:rgba(239,68,68,.18); color:#ff8a8a;">${overdueCount} รายการ</div>
-        </div>
-        <div class="dlist-row" data-go="revision">
-          <div class="dstat-icon" style="background:rgba(245,158,11,.18); width:28px; height:28px; margin-bottom:0;">${ic('clock')}</div>
-          <div><div class="dlist-title">ใกล้ครบกำหนด (3 เดือน)</div><div class="dlist-sub">คลิกเพื่อดูรายการ</div></div>
-          <div class="dbadge" style="margin-left:auto; background:rgba(245,158,11,.18); color:#ffc670;">${dueSoonCount} รายการ</div>
-        </div>
+      <div class="action-item" data-go="documents" data-preset="rejected" style="cursor:pointer;">
+        <div class="action-dot red">${ic('alert')}</div>
+        <div class="action-text">ถูกปฏิเสธการอนุมัติ (ไม่อนุมัติ)</div>
+        <div class="action-count">${DOCUMENTS.filter(d=>d.approvalStatus==='ไม่อนุมัติ').length} รายการ</div>
       </div>
-    </div>
-
-    <div class="dgrid dgrid-2" style="margin-bottom:0;">
-      <div class="dcard">
-        <div class="dcard-title">Recently Updated</div>
-        <div class="dcard-sub">เอกสารที่แก้ไขล่าสุด</div>
-        ${recent.map(d=>`
-          <div class="dlist-row" data-open-doc="${d.id}">
-            <div class="dstat-icon" style="background:rgba(59,130,246,.18); width:28px; height:28px; margin-bottom:0;">${ic('file')}</div>
-            <div><div class="dlist-title">${d.id}&nbsp; ${cleanName(d)}</div><div class="dlist-sub">${fmtDateTime(d.lastUpdated)}</div></div>
-          </div>`).join('')}
+      <div class="action-item" data-go="documents" data-preset="waitingreview" style="cursor:pointer;">
+        <div class="action-dot amber">${ic('clock')}</div>
+        <div class="action-text">รอทบทวน</div>
+        <div class="action-count">${DOCUMENTS.filter(d=>d.approvalStatus==='รอทบทวน').length} รายการ</div>
       </div>
-      <div class="dcard">
-        <div class="dcard-title">Action Required</div>
-        <div class="dcard-sub">รายการที่ต้องดำเนินการ</div>
-        <div class="dlist-row" data-go="documents" data-preset="missing">
-          <div class="dstat-icon" style="background:rgba(239,68,68,.18); width:28px; height:28px; margin-bottom:0;">${ic('alert')}</div>
-          <div><div class="dlist-title">เอกสารสถานะ "ไม่พบ"</div></div>
-          <div class="dbadge" style="margin-left:auto; background:rgba(239,68,68,.18); color:#ff8a8a;">${DOCUMENTS.filter(d=>d.note==='ไม่พบ').length}</div>
-        </div>
-        <div class="dlist-row" data-go="documents" data-preset="rejected">
-          <div class="dstat-icon" style="background:rgba(239,68,68,.18); width:28px; height:28px; margin-bottom:0;">${ic('alert')}</div>
-          <div><div class="dlist-title">ถูกปฏิเสธการอนุมัติ</div></div>
-          <div class="dbadge" style="margin-left:auto; background:rgba(239,68,68,.18); color:#ff8a8a;">${DOCUMENTS.filter(d=>d.approvalStatus==='ไม่อนุมัติ').length}</div>
-        </div>
-        <div class="dlist-row" data-go="documents" data-preset="waitingreview">
-          <div class="dstat-icon" style="background:rgba(245,158,11,.18); width:28px; height:28px; margin-bottom:0;">${ic('clock')}</div>
-          <div><div class="dlist-title">รอทบทวน</div></div>
-          <div class="dbadge" style="margin-left:auto; background:rgba(245,158,11,.18); color:#ffc670;">${DOCUMENTS.filter(d=>d.approvalStatus==='รอทบทวน').length}</div>
-        </div>
-        <div class="dlist-row" data-go="documents" data-preset="waitingapproval">
-          <div class="dstat-icon" style="background:rgba(245,158,11,.18); width:28px; height:28px; margin-bottom:0;">${ic('clock')}</div>
-          <div><div class="dlist-title">รออนุมัติ</div></div>
-          <div class="dbadge" style="margin-left:auto; background:rgba(245,158,11,.18); color:#ffc670;">${DOCUMENTS.filter(d=>d.approvalStatus==='รออนุมัติ').length}</div>
-        </div>
+      <div class="action-item" data-go="documents" data-preset="waitingapproval" style="cursor:pointer;">
+        <div class="action-dot amber">${ic('clock')}</div>
+        <div class="action-text">รออนุมัติ</div>
+        <div class="action-count">${DOCUMENTS.filter(d=>d.approvalStatus==='รออนุมัติ').length} รายการ</div>
       </div>
     </div>
   </div>
