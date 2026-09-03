@@ -1649,6 +1649,26 @@ function renderDocumentsInto(){
   const presetActive = state.docFilter.preset && state.docFilter.preset!=='all';
 
   el.innerHTML = `
+  <style>
+    /* Mobile fixes for the Document List: filter dropdowns were overflowing
+       the screen edge when two sat side-by-side, and the table was cramming
+       8 columns into a narrow viewport. Below 700px we stack each filter
+       full-width, and collapse the table down to ID / Name / Clause only —
+       tap a row to see the rest (Type, Status, Approval, Updated, actions). */
+    @media (max-width: 700px){
+      #content .toolbar select.select{ flex:1 1 100%; width:100%; max-width:100%; box-sizing:border-box; }
+      #content .toolbar .search{ flex:1 1 100%; }
+      #content .toolbar .spacer{ display:none; }
+      #content table.dtable th:nth-child(4), #content table.dtable td:nth-child(4),
+      #content table.dtable th:nth-child(5), #content table.dtable td:nth-child(5),
+      #content table.dtable th:nth-child(6), #content table.dtable td:nth-child(6),
+      #content table.dtable th:nth-child(7), #content table.dtable td:nth-child(7),
+      #content table.dtable th:nth-child(8), #content table.dtable td:nth-child(8){
+        display:none;
+      }
+      #content table.dtable td.name{ white-space:normal; }
+    }
+  </style>
   ${renderDocHubTabs()}
   <div class="panel">
     <div class="panel-head"><div class="panel-title">Document List <span id="syncPill" class="sync-pill" style="margin-left:10px;"><span class="dot"></span>Synced with Firestore</span></div>
@@ -2295,6 +2315,11 @@ function archiveModal(){
         <div class="modal-body">
           <div style="font-size:13px; font-weight:700; color:var(--ink-900); margin-bottom:4px;">${a.title}</div>
           <div style="font-size:11.5px; color:var(--ink-500); margin-bottom:16px;">${a.category||'ไม่ระบุหมวดหมู่'}${a.clause?` · ข้อกำหนด ${clauseLabel(a.clause)}`:''} · อัปโหลดโดย ${a.uploadedBy||'ไม่ระบุ'}</div>
+          <div id="archiveDropZone" class="archive-dropzone" style="border:1.5px dashed var(--ink-300,#c7cdd6); border-radius:9px; padding:14px; text-align:center; margin-bottom:10px; transition:background .12s,border-color .12s;">
+            ${ic('file','')} <span style="font-size:12px; color:var(--ink-700); font-weight:600;">ลากไฟล์มาวางตรงนี้</span>
+            <div style="font-size:10.5px; color:var(--ink-500); margin-top:2px;">จะเปิดฟอร์มให้อัตโนมัติ พร้อมบอกชื่อไฟล์ที่ต้องแนบ</div>
+          </div>
+          <div id="archiveDropStatus" style="font-size:11.5px; color:var(--green-600); font-weight:700; margin-bottom:8px; display:none;"></div>
           <div class="field"><label>ลิงก์เอกสาร</label><input id="archiveVerifyLink" value="${a.link||''}" placeholder="https://mitrphol.sharepoint.com/..."></div>
           <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:8px;">DC เป็นผู้วางลิงก์เอกสารจริงที่นี่ก่อนยืนยัน</div>
           <a class="btn ghost" href="${ARCHIVE_REQUEST_FORM_LINK}" target="_blank" rel="noopener" style="margin-bottom:14px;">${ic('link')} เปิดฟอร์ม</a>
@@ -2317,6 +2342,11 @@ function archiveModal(){
         <div style="background:var(--bg); border-radius:9px; padding:12px 14px; margin-bottom:16px;">
           <div style="font-size:12.5px; font-weight:800; color:var(--amber-600); margin-bottom:6px;">กรอกแบบฟอร์มก่อนบันทึก</div>
           <div style="font-size:11.5px; color:var(--ink-700); margin-bottom:10px;">${isDC() ? 'เปิดฟอร์มด้านล่างเพื่อกรอก/อ้างอิงรายละเอียดเอกสาร แล้ววางลิงก์เอกสารจริงในช่องด้านล่างนี้ได้เลย' : 'เปิดฟอร์มด้านล่าง กรอกรายละเอียดเอกสาร แล้วค่อยกลับมากรอกข้อมูลย่อในนี้และกด "เพิ่มเอกสาร" — DC จะเป็นผู้วางลิงก์เอกสารจริงและกดยืนยันในขั้นตอนถัดไป'}</div>
+          <div id="archiveDropZone" class="archive-dropzone" style="border:1.5px dashed var(--ink-300,#c7cdd6); border-radius:9px; padding:14px; text-align:center; margin-bottom:10px; transition:background .12s,border-color .12s;">
+            ${ic('file','')} <span style="font-size:12px; color:var(--ink-700); font-weight:600;">ลากไฟล์มาวางตรงนี้</span>
+            <div style="font-size:10.5px; color:var(--ink-500); margin-top:2px;">เติมชื่อเอกสารให้ + เปิดฟอร์มให้อัตโนมัติ</div>
+          </div>
+          <div id="archiveDropStatus" style="font-size:11.5px; color:var(--green-600); font-weight:700; margin-bottom:8px; display:none;"></div>
           <a class="btn ghost" href="${ARCHIVE_REQUEST_FORM_LINK}" target="_blank" rel="noopener">${ic('link')} เปิดฟอร์ม</a>
         </div>
         <div class="field"><label>ชื่อเอกสาร</label><input id="archiveTitle" value="${(a.title||'').replace(/"/g,'&quot;')}" placeholder="เช่น สรุปประชุมทบทวนฝ่ายบริหาร ม.ค. 2569"></div>
@@ -2344,12 +2374,60 @@ function archiveModal(){
     </div>
   </div>`;
 }
+// Turns "สรุปประชุม_ทบทวนฝ่ายบริหาร-มค69.pdf" into "สรุปประชุม ทบทวนฝ่ายบริหาร มค69"
+// — best-effort cleanup only, user can still edit the title field after.
+function fileNameToTitleGuess(fileName){
+  const noExt = fileName.replace(/\.[a-zA-Z0-9]{1,6}$/, '');
+  return noExt.replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function wireArchiveDropZone(){
+  const zone = document.getElementById('archiveDropZone');
+  if(!zone) return;
+  const statusEl = document.getElementById('archiveDropStatus');
+  const titleInput = document.getElementById('archiveTitle'); // absent in verify mode
+  const highlightOn = ()=>{ zone.style.borderColor = 'var(--green-600, #1a7f5a)'; zone.style.background = 'var(--bg)'; };
+  const highlightOff = ()=>{ zone.style.borderColor = ''; zone.style.background = ''; };
+  ['dragenter','dragover'].forEach(evt=>{
+    zone.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); highlightOn(); });
+  });
+  ['dragleave','dragend'].forEach(evt=>{
+    zone.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); highlightOff(); });
+  });
+  zone.addEventListener('drop', e=>{
+    e.preventDefault(); e.stopPropagation(); highlightOff();
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if(!file) return;
+
+    // Fill in the document title from the file name, if there's a title
+    // field on this screen and it's currently empty.
+    if(titleInput && !titleInput.value.trim()){
+      titleInput.value = fileNameToTitleGuess(file.name);
+      titleInput.dispatchEvent(new Event('input')); // triggers clause suggestion
+    }
+
+    // Open the real SharePoint form automatically — file uploads can't be
+    // handed off across domains by code, so the user still has to drag
+    // (or attach) the file into that form themselves.
+    window.open(ARCHIVE_REQUEST_FORM_LINK, '_blank', 'noopener');
+
+    if(statusEl){
+      statusEl.style.display = 'block';
+      statusEl.textContent = `📎 ลากไฟล์ "${file.name}" ไปวางที่ปุ่ม "+ เพิ่มสิ่งที่แนบมา" ในแท็บฟอร์มที่เพิ่งเปิดขึ้นได้เลย`;
+    }
+  });
+}
 function wireArchiveModalControls(){
   const backdrop = document.getElementById('archiveModalBackdrop');
   if(!backdrop) return;
   document.getElementById('archiveModalCloseBtn').addEventListener('click', closeArchiveModal);
   document.getElementById('archiveModalCancelBtn').addEventListener('click', closeArchiveModal);
   backdrop.addEventListener('click', e=>{ if(e.target===backdrop) closeArchiveModal(); });
+
+  // Drag-and-drop shortcut: dropping a file here doesn't upload it (this
+  // app has no file storage of its own — the real file always has to land
+  // on the external SharePoint form), but it removes the two most
+  // clicky/typy steps: opening the form and typing the document name.
+  wireArchiveDropZone();
 
   // live clause suggestion, based on the title — same keyword matcher used
   // for regular documents
@@ -3025,6 +3103,25 @@ function viewRevisionDashboard(){
   }
 
   return `
+  <style>
+    /* Scoped fixes for this dashboard: the clause filter dropdown has long
+       option labels which was forcing the <select> itself to render very
+       wide (native browser sizing), pushing the toolbar — and the whole
+       page — past the right edge. Also constrain the 5 stat cards so they
+       wrap onto a second row instead of overflowing on narrower desktop
+       windows. The Type/Status dropdowns are left exactly as they were. */
+    .revdash-wrap{ overflow-x:hidden; }
+    .revdash-wrap .stat-row-5{ grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+    .revdash-wrap .toolbar{ flex-wrap:wrap; }
+    .revdash-wrap .toolbar select.select#revFClause{
+      max-width:260px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+    @media (max-width:700px){
+      .revdash-wrap .toolbar select.select{ flex:1 1 100%; max-width:100%; }
+      .revdash-wrap .grid-2{ grid-template-columns:1fr; }
+    }
+  </style>
+  <div class="revdash-wrap">
   <div class="panel">
     <div class="panel-title">History</div>
     <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">ติดตามการแก้ไขและประวัติการอนุมัติเอกสาร</div>
@@ -3098,6 +3195,7 @@ function viewRevisionDashboard(){
           <div class="ac-meta">${a.by ? `โดย ${a.by} · ` : ''}${fmtDateTime(a.time)}</div>
         </div>`).join('') : `<div style="grid-column:1/-1; color:var(--ink-500); font-size:12.5px; text-align:center; padding:20px;">ยังไม่มีกิจกรรม</div>`}
     </div>
+  </div>
   </div>`;
 }
 function attachRevisionDashboardHandlers(){
