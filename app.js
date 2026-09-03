@@ -69,6 +69,9 @@ function renderLoginScreen(){
   el.className = 'login-screen';
   el.id = 'loginScreen';
   el.innerHTML = `
+    <div class="login-banner" style="width:100%; max-width:520px; margin:0 auto 20px; border-radius:16px; overflow:hidden; box-shadow:0 8px 24px rgba(0,60,140,0.18);">
+      <img src="assets/login-banner.webp" alt="MPIR Central Lab" style="display:block; width:100%; height:auto;">
+    </div>
     <div class="login-card">
       <img class="login-logo" src="assets/logo-icon.png" alt="MPIR Central Lab">
       <div class="login-title">MPIR Central Lab</div>
@@ -2147,7 +2150,8 @@ function renderDcRegisterBox(d){
     <div class="field"><label>ลิงก์เอกสาร</label>
       <input id="dcLinkInput" placeholder="https://mitrphol.sharepoint.com/..." style="border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px; width:100%; box-sizing:border-box;"></div>
     <div class="field"><label>ข้อกำหนด ISO 17025</label>
-      <select id="dcClauseInput" style="width:100%;"><option value="">ไม่ระบุ</option>${CLAUSES.map(([c,l])=>`<option value="${c}" ${d.clause===c?'selected':''}>${l}</option>`).join('')}</select></div>
+      <select id="dcClauseInput" style="width:100%;"><option value="">ไม่ระบุ</option>${CLAUSES.map(([c,l])=>`<option value="${c}" ${d.clause===c?'selected':''}>${l}</option>`).join('')}</select>
+      <div id="dcClauseSuggest" class="suggest-hint"></div></div>
     <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
       <div style="font-size:12px; color:var(--ink-500);">โดย ${currentActorName()}</div>
       <button class="btn success" id="btnDcRegister">${ic('link')} บันทึก</button>
@@ -2155,6 +2159,25 @@ function renderDcRegisterBox(d){
   </div>`;
 }
 function wireDcRegister(){
+  // live clause suggestion, based on the document's own name — same
+  // keyword matcher used everywhere else in the app (suggestClause)
+  const clauseSel = document.getElementById('dcClauseInput');
+  const clauseHint = document.getElementById('dcClauseSuggest');
+  if(clauseSel && clauseHint){
+    const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
+    const suggested = d ? suggestClause(d.name) : '';
+    const refresh = ()=>{
+      if(suggested && clauseSel.value !== suggested){
+        clauseHint.innerHTML = `💡 แนะนำ: ${clauseLabel(suggested)} <button type="button" class="suggest-accept" id="acceptDcClauseSuggest">ใช้คำแนะนำนี้</button>`;
+        const acceptBtn = document.getElementById('acceptDcClauseSuggest');
+        if(acceptBtn) acceptBtn.addEventListener('click', ()=>{ clauseSel.value = suggested; refresh(); });
+      } else {
+        clauseHint.innerHTML = '';
+      }
+    };
+    clauseSel.addEventListener('change', refresh);
+    refresh();
+  }
   const btn = document.getElementById('btnDcRegister');
   if(!btn) return;
   btn.addEventListener('click', async ()=>{
