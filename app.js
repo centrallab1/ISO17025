@@ -1607,7 +1607,8 @@ function archiveModal(){
           <div style="font-size:13px; font-weight:700; color:var(--ink-900); margin-bottom:4px;">${a.title}</div>
           <div style="font-size:11.5px; color:var(--ink-500); margin-bottom:16px;">${a.category||'ไม่ระบุหมวดหมู่'}${a.clause?` · ข้อกำหนด ${clauseLabel(a.clause)}`:''} · อัปโหลดโดย ${a.uploadedBy||'ไม่ระบุ'}</div>
           <div class="field"><label>ลิงก์เอกสาร</label><input id="archiveVerifyLink" value="${a.link||''}" placeholder="https://mitrphol.sharepoint.com/..."></div>
-          <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:14px;">DC เป็นผู้วางลิงก์เอกสารจริงที่นี่ก่อนยืนยัน</div>
+          <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:8px;">DC เป็นผู้วางลิงก์เอกสารจริงที่นี่ก่อนยืนยัน</div>
+          <a class="btn ghost" href="${ARCHIVE_REQUEST_FORM_LINK}" target="_blank" rel="noopener" style="margin-bottom:14px;">${ic('link')} เปิดฟอร์ม</a>
           <div class="field"><label>ผู้ยืนยัน (DC)</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()}</div></div>
           <div class="field-error" id="archiveModalError" style="display:none;"></div>
         </div>
@@ -1624,12 +1625,11 @@ function archiveModal(){
     <div class="modal">
       <div class="modal-head"><div class="modal-title">${editing ? 'แก้ไขเอกสาร' : 'เพิ่มเอกสารในคลัง'}</div><button class="modal-close" id="archiveModalCloseBtn">✕</button></div>
       <div class="modal-body">
-        ${!isDC() ? `
         <div style="background:var(--bg); border-radius:9px; padding:12px 14px; margin-bottom:16px;">
           <div style="font-size:12.5px; font-weight:800; color:var(--amber-600); margin-bottom:6px;">กรอกแบบฟอร์มก่อนบันทึก</div>
-          <div style="font-size:11.5px; color:var(--ink-700); margin-bottom:10px;">เปิดฟอร์มด้านล่าง กรอกรายละเอียดเอกสาร แล้วค่อยกลับมากรอกข้อมูลย่อในนี้และกด "เพิ่มเอกสาร" — DC จะเป็นผู้วางลิงก์เอกสารจริงและกดยืนยันในขั้นตอนถัดไป</div>
+          <div style="font-size:11.5px; color:var(--ink-700); margin-bottom:10px;">${isDC() ? 'เปิดฟอร์มด้านล่างเพื่อกรอก/อ้างอิงรายละเอียดเอกสาร แล้ววางลิงก์เอกสารจริงในช่องด้านล่างนี้ได้เลย' : 'เปิดฟอร์มด้านล่าง กรอกรายละเอียดเอกสาร แล้วค่อยกลับมากรอกข้อมูลย่อในนี้และกด "เพิ่มเอกสาร" — DC จะเป็นผู้วางลิงก์เอกสารจริงและกดยืนยันในขั้นตอนถัดไป'}</div>
           <a class="btn ghost" href="${ARCHIVE_REQUEST_FORM_LINK}" target="_blank" rel="noopener">${ic('link')} เปิดฟอร์ม</a>
-        </div>` : ''}
+        </div>
         <div class="field"><label>ชื่อเอกสาร</label><input id="archiveTitle" value="${(a.title||'').replace(/"/g,'&quot;')}" placeholder="เช่น สรุปประชุมทบทวนฝ่ายบริหาร ม.ค. 2569"></div>
         <div class="field"><label>หมวดหมู่</label>
           <input id="archiveCategory" list="archiveCategoryList" value="${(a.category||'').replace(/"/g,'&quot;')}" placeholder="เลือกหรือพิมพ์หมวดหมู่ใหม่">
