@@ -1428,7 +1428,7 @@ function archiveItemRow(a){
     <div class="file-ic">${ic('file')}</div>
     <div class="evi-main">
       ${a.link ? `<a class="evi-name" href="${a.link}" target="_blank" rel="noopener">${a.title}</a>` : `<span class="evi-name evi-nolink">${a.title}</span>`}
-      <div class="evi-sub">${a.clause ? `ข้อกำหนด ${clauseLabel(a.clause)} · ` : ''}อัปโหลดโดย ${a.uploadedBy||'—'} · ยืนยันโดย ${a.verifiedBy ? `<b style="color:var(--green-600);">${a.verifiedBy}</b>` : 'ยังไม่ยืนยัน'} · ${fmtDate(a.uploadedAt)}${a.cancelledDate ? ` · ยกเลิกเมื่อ ${fmtDate(a.cancelledDate)}` : ''}</div>
+      <div class="evi-sub">${a.sourceDocId ? `<span class="mono">${a.sourceDocId}</span> · ` : ''}${a.clause ? `ข้อกำหนด ${clauseLabel(a.clause)} · ` : ''}อัปโหลดโดย ${a.uploadedBy||'—'} · ยืนยันโดย ${a.verifiedBy ? `<b style="color:var(--green-600);">${a.verifiedBy}</b>` : 'ยังไม่ยืนยัน'} · ${fmtDate(a.uploadedAt)}${a.cancelledDate ? ` · ยกเลิกเมื่อ ${fmtDate(a.cancelledDate)}` : ''}</div>
     </div>
     ${archiveStatusBadge(a.status)}
     <div class="row-actions" style="margin-left:10px;">
