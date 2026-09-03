@@ -64,22 +64,78 @@ function clearSession(){
 function isDC(){ return !!currentUser && currentUser.role==='DC'; }
 function currentActorName(){ return currentUser ? currentUser.name : 'ไม่ระบุ'; }
 
+const LOGIN_V2_CSS = `
+#loginScreen.lv2-screen{ position:fixed; inset:0; z-index:9999; display:flex; align-items:center; justify-content:flex-end;
+  background:#0d3a66 url('login-bg.webp') center/cover no-repeat; padding:4vh 6vw; box-sizing:border-box; }
+#loginScreen .lv2-card{ width:100%; max-width:460px; background:#fff; border-radius:22px; padding:38px 36px 32px;
+  box-shadow:0 24px 60px rgba(8,35,70,0.28); box-sizing:border-box; max-height:92vh; overflow-y:auto; }
+#loginScreen .lv2-logo-wrap{ display:flex; justify-content:center; margin-bottom:14px; }
+#loginScreen .lv2-logo-wrap img{ width:76px; height:76px; border-radius:50%; object-fit:cover; box-shadow:0 4px 14px rgba(8,35,70,0.18); }
+#loginScreen .lv2-title{ text-align:center; font-size:22px; font-weight:800; color:#0f2a4a; }
+#loginScreen .lv2-sub{ text-align:center; font-size:12.5px; color:#8a97a8; margin-top:4px; margin-bottom:26px; }
+#loginScreen .lv2-field{ margin-bottom:16px; }
+#loginScreen .lv2-field label{ display:block; font-size:12.5px; font-weight:700; color:#33455e; margin-bottom:6px; }
+#loginScreen .lv2-input-wrap{ display:flex; align-items:center; gap:8px; border:1.5px solid #e3e8ef; border-radius:11px;
+  padding:10px 13px; background:#fbfcfe; transition:border-color .15s; }
+#loginScreen .lv2-input-wrap:focus-within{ border-color:#2f7bdb; background:#fff; }
+#loginScreen .lv2-input-wrap svg{ width:17px; height:17px; color:#9aa7b8; flex:none; }
+#loginScreen .lv2-input-wrap input{ border:none; outline:none; background:transparent; flex:1; font-size:13.5px; color:#1c2a3a; min-width:0; }
+#loginScreen .lv2-eye{ border:none; background:none; padding:0; cursor:pointer; color:#9aa7b8; display:flex; }
+#loginScreen .lv2-row{ display:flex; align-items:center; justify-content:space-between; margin:2px 0 20px; flex-wrap:wrap; gap:8px; }
+#loginScreen .lv2-remember{ display:flex; align-items:center; gap:7px; font-size:12.5px; color:#33455e; cursor:pointer; user-select:none; }
+#loginScreen .lv2-remember input{ width:15px; height:15px; accent-color:#2f7bdb; }
+#loginScreen .lv2-forgot{ font-size:12.5px; color:#2f7bdb; text-decoration:none; cursor:pointer; background:none; border:none; font-family:inherit; }
+#loginScreen .lv2-forgot:hover{ text-decoration:underline; }
+#loginScreen .lv2-btn-primary{ width:100%; border:none; border-radius:11px; padding:13px; font-size:14px; font-weight:800; color:#fff;
+  background:linear-gradient(135deg,#2f7bdb,#0d4fa8); cursor:pointer; box-shadow:0 10px 22px rgba(47,123,219,0.32); }
+#loginScreen .lv2-btn-primary:hover{ filter:brightness(1.05); }
+#loginScreen .lv2-divider{ display:flex; align-items:center; gap:12px; margin:18px 0; font-size:12px; color:#9aa7b8; }
+#loginScreen .lv2-divider::before, #loginScreen .lv2-divider::after{ content:''; flex:1; height:1px; background:#e6eaf0; }
+#loginScreen .lv2-btn-ms{ width:100%; display:flex; align-items:center; justify-content:center; gap:10px; border:1.5px solid #e3e8ef;
+  border-radius:11px; padding:11px; font-size:13.5px; font-weight:700; color:#33455e; background:#fff; cursor:pointer; }
+#loginScreen .lv2-btn-ms:hover{ background:#f7f9fc; }
+#loginScreen .field-error{ font-size:12px; color:#d64545; margin:-6px 0 14px; }
+@media (max-width:720px){
+  #loginScreen.lv2-screen{ justify-content:center; padding:5vw; }
+  #loginScreen .lv2-card{ max-width:420px; }
+}
+`;
+function ensureLoginV2Style(){
+  if(document.getElementById('lv2LoginStyle')) return;
+  const styleEl = document.createElement('style');
+  styleEl.id = 'lv2LoginStyle';
+  styleEl.textContent = LOGIN_V2_CSS;
+  document.head.appendChild(styleEl);
+}
 function renderLoginScreen(){
+  ensureLoginV2Style();
   const el = document.createElement('div');
-  el.className = 'login-screen';
+  el.className = 'lv2-screen';
   el.id = 'loginScreen';
   el.innerHTML = `
-    <div class="login-banner" style="width:100%; max-width:520px; margin:0 auto 20px; border-radius:16px; overflow:hidden; box-shadow:0 8px 24px rgba(0,60,140,0.18);">
-      <img src="assets/login-banner.webp" alt="MPIR Central Lab" style="display:block; width:100%; height:auto;">
-    </div>
-    <div class="login-card">
-      <img class="login-logo" src="assets/logo-icon.png" alt="MPIR Central Lab">
-      <div class="login-title">MPIR Central Lab</div>
-      <div class="login-sub">ระบบเอกสาร ISO/IEC 17025:2017 — เข้าสู่ระบบ</div>
-      <div class="field"><label>รหัสผู้ใช้ (ID)</label><input id="loginId" placeholder="เช่น yaraponp" autocomplete="username"></div>
-      <div class="field"><label>รหัสผ่าน</label><input id="loginPw" type="password" placeholder="Password" autocomplete="current-password"></div>
+    <div class="lv2-card">
+      <div class="lv2-logo-wrap"><img src="assets/logo-icon.png" alt="MPIR Central Lab"></div>
+      <div class="lv2-title">เข้าสู่ระบบ</div>
+      <div class="lv2-sub">ระบบเอกสาร ISO/IEC 17025:2017</div>
+      <div class="lv2-field"><label>รหัสผู้ใช้ (ID)</label>
+        <div class="lv2-input-wrap">${ic('user')}<input id="loginId" placeholder="กรุณากรอกรหัสผู้ใช้" autocomplete="username"></div>
+      </div>
+      <div class="lv2-field"><label>รหัสผ่าน</label>
+        <div class="lv2-input-wrap">${ic('lock')}<input id="loginPw" type="password" placeholder="กรุณากรอกรหัสผ่าน" autocomplete="current-password">
+          <button type="button" class="lv2-eye" id="loginPwToggle">${ic('eye')}</button>
+        </div>
+      </div>
       <div class="field-error" id="loginError" style="display:none;"></div>
-      <button class="btn primary" id="loginBtn" style="width:100%; justify-content:center; margin-top:8px;">เข้าสู่ระบบ</button>
+      <div class="lv2-row">
+        <label class="lv2-remember"><input type="checkbox" id="loginRemember" checked> จดจำฉันไว้ในระบบ</label>
+        <button type="button" class="lv2-forgot" id="loginForgot">ลืมรหัสผ่าน?</button>
+      </div>
+      <button class="lv2-btn-primary" id="loginBtn">เข้าสู่ระบบ</button>
+      <div class="lv2-divider"><span>หรือ</span></div>
+      <button type="button" class="lv2-btn-ms" id="loginMsBtn">
+        <svg width="16" height="16" viewBox="0 0 16 16"><rect x="0" y="0" width="7" height="7" fill="#f35325"/><rect x="9" y="0" width="7" height="7" fill="#81bc06"/><rect x="0" y="9" width="7" height="7" fill="#05a6f0"/><rect x="9" y="9" width="7" height="7" fill="#ffba08"/></svg>
+        เข้าสู่ระบบด้วย Microsoft 365
+      </button>
     </div>`;
   document.body.appendChild(el);
   const doLogin = ()=>{
@@ -89,14 +145,36 @@ function renderLoginScreen(){
     const user = USERS.find(u=>u.id===id && u.password===pw);
     if(!user){ errEl.textContent = 'รหัสผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'; errEl.style.display='block'; return; }
     currentUser = { id:user.id, name:user.name, role:user.role };
-    saveSession();
+    const rememberBox = document.getElementById('loginRemember');
+    if(!rememberBox || rememberBox.checked) saveSession(); else clearRememberedSessionOnly();
     const screen = document.getElementById('loginScreen');
     if(screen) screen.remove();
     startApp();
   };
   document.getElementById('loginBtn').addEventListener('click', doLogin);
   document.getElementById('loginPw').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+  document.getElementById('loginId').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
   document.getElementById('loginId').focus();
+  const pwToggle = document.getElementById('loginPwToggle');
+  const pwInput = document.getElementById('loginPw');
+  if(pwToggle && pwInput) pwToggle.addEventListener('click', ()=>{
+    const showing = pwInput.type === 'text';
+    pwInput.type = showing ? 'password' : 'text';
+    pwToggle.innerHTML = showing ? ic('eye') : ic('eyeOff');
+  });
+  const forgotBtn = document.getElementById('loginForgot');
+  if(forgotBtn) forgotBtn.addEventListener('click', ()=>{
+    alert('ระบบนี้ยังไม่มีการรีเซ็ตรหัสผ่านอัตโนมัติ — กรุณาติดต่อ Document Control (DC) เพื่อขอรหัสผ่านใหม่');
+  });
+  const msBtn = document.getElementById('loginMsBtn');
+  if(msBtn) msBtn.addEventListener('click', ()=>{
+    alert('ยังไม่ได้เชื่อมต่อการเข้าสู่ระบบด้วย Microsoft 365 — ตอนนี้ปุ่มนี้เป็นเพียงตัวอย่างหน้าตา ต้องตั้งค่า Azure AD app registration ก่อนจึงจะใช้งานได้จริง');
+  });
+}
+// currentUser stays logged in for this tab even when "remember me" is
+// unchecked — this only makes sure no session survives a reload/reopen
+function clearRememberedSessionOnly(){
+  try{ localStorage.removeItem(SESSION_KEY); } catch(e){}
 }
 function updateUserBadge(){
   if(!currentUser) return;
@@ -301,6 +379,9 @@ const ICONS = {
   filter: `<path d="M4 4h16l-6 8v6l-4 2v-8L4 4Z"/>`,
   folder: `<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>`,
   logout: `<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>`,
+  lock: `<rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>`,
+  eye: `<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/><circle cx="12" cy="12" r="3"/>`,
+  eyeOff: `<path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a20.7 20.7 0 0 1 5.06-5.94M9.9 4.24A10.4 10.4 0 0 1 12 4c7 0 11 7 11 7a20.6 20.6 0 0 1-2.29 3.31M14.12 14.12a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/>`,
 };
 function ic(name, cls=''){ return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||''}</svg>`; }
 
