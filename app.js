@@ -2428,6 +2428,18 @@ function initials(name){
   return name.trim().slice(0,2);
 }
 
+function requestTypeLabel(d){
+  return d.lastRequestType==='new' ? 'เอกสารใหม่'
+    : d.lastRequestType==='revision' ? `ปรับปรุง (Rev.${d.lastRequestFrom||'-'} → ${d.rev||'-'})`
+    : d.lastRequestType==='review' ? 'ทบทวนประจำปี (ไม่มีการแก้ไข)'
+    : null;
+}
+function requestTypeBadge(d){
+  const label = requestTypeLabel(d);
+  if(!label) return '<span style="color:var(--ink-400);">—</span>';
+  const cls = d.lastRequestType==='revision' ? 'review' : d.lastRequestType==='review' ? 'pending' : 'active';
+  return `<span class="badge ${cls}">${label}</span>`;
+}
 function viewApproval(){
   const queue = pendingQueue();
   if(!state.selectedDoc) state.selectedDoc = (queue[0] || DOCUMENTS[0] || {}).id;
@@ -2488,6 +2500,7 @@ function viewApproval(){
       </div>
       <div style="display:flex; gap:8px;">
         <select class="select" id="apTypeFilter">${typeOpts.map(([v,l])=>`<option value="${v}" ${v===state.approvalTypeFilter?'selected':''}>${l}</option>`).join('')}</select>
+        <button class="btn ghost" id="btnApReviseDoc">${ic('history')} ขอปรับปรุง (Revision)</button>
         <button class="btn primary" id="btnApNewDoc">${ic('plus')} นำรายการใหม่</button>
       </div>
     </div>
@@ -2497,7 +2510,7 @@ function viewApproval(){
     </div>
 
     <div class="table-wrap"><table class="dtable">
-      <thead><tr><th>รหัสเอกสาร</th><th>ชื่อเอกสาร</th><th>สถานะ</th><th>ขั้นตอนปัจจุบัน</th><th>ผู้ดำเนินการ</th><th>อัปเดตล่าสุด</th>${isDC() ? '<th></th>' : ''}</tr></thead>
+      <thead><tr><th>รหัสเอกสาร</th><th>ชื่อเอกสาร</th><th>ประเภทคำขอ</th><th>สถานะ</th><th>ขั้นตอนปัจจุบัน</th><th>ผู้ดำเนินการ</th><th>อัปเดตล่าสุด</th>${isDC() ? '<th></th>' : ''}</tr></thead>
       <tbody>
         ${pageItems.length ? pageItems.map(d=>{
           const actor = actorForDoc(d);
@@ -2505,13 +2518,14 @@ function viewApproval(){
         <tr class="${d.id===state.selectedDoc?'current-row':''}" data-select-approval="${d.id}">
           <td class="mono">${d.id}</td>
           <td class="name" title="${cleanName(d).replace(/"/g,'&quot;')}">${cleanName(d)}</td>
+          <td>${requestTypeBadge(d)}</td>
           <td>${approvalBadge(d.approvalStatus)}</td>
           <td>${stepIndicator(d.approvalStatus||'ร่าง')}</td>
           <td><div class="actor-cell"><div class="row-avatar">${initials(actor.name)}</div><div><div class="actor-name">${actor.name||'—'}</div><div class="actor-role">${actor.role}</div></div></div></td>
           <td>${fmtDateTime(d.lastUpdated)}</td>
           ${isDC() ? `<td><div class="row-actions" onclick="event.stopPropagation()"><button data-del-request="${d.id}" class="del" title="ลบคำขอ">${ic('trash')}</button></div></td>` : ''}
         </tr>`;
-        }).join('') : `<tr><td colspan="${isDC()?7:6}" style="text-align:center; padding:40px 0; color:var(--ink-500);">ไม่มีเอกสารในหมวดนี้</td></tr>`}
+        }).join('') : `<tr><td colspan="${isDC()?8:7}" style="text-align:center; padding:40px 0; color:var(--ink-500);">ไม่มีเอกสารในหมวดนี้</td></tr>`}
       </tbody>
     </table></div>
     <div class="pagination">
@@ -2540,7 +2554,7 @@ function viewApprovalDetail(){
   });
 
   const isApproved = status === 'อนุมัติแล้ว';
-  const requestLabel = d.lastRequestType==='new' ? 'เอกสารใหม่' : d.lastRequestType==='revision' ? `ปรับปรุง (Rev.${d.lastRequestFrom||'-'} → ${d.rev||'-'})` : d.lastRequestType==='review' ? 'ทบทวนประจำปี (ไม่มีการแก้ไข)' : null;
+  const requestLabel = requestTypeLabel(d);
   const allComments = (d.comments||[]).slice().reverse();
   const shownComments = state.approvalCommentsExpanded ? allComments : allComments.slice(0,5);
 
@@ -2616,6 +2630,8 @@ function attachApprovalHandlers(){
   if(typeFilter) typeFilter.addEventListener('change', e=>{ state.approvalTypeFilter = e.target.value; state.approvalPage = 1; render(); });
   const newBtn = document.getElementById('btnApNewDoc');
   if(newBtn) newBtn.addEventListener('click', ()=> openModal({ mode:'new' }));
+  const reviseBtn = document.getElementById('btnApReviseDoc');
+  if(reviseBtn) reviseBtn.addEventListener('click', ()=> openModal({ mode:'revise', id:null }));
   document.querySelectorAll('[data-appg]').forEach(b=>b.addEventListener('click', ()=>{ state.approvalPage=parseInt(b.dataset.appg,10); render(); }));
   const pgPrev = document.getElementById('apPgPrev'); if(pgPrev) pgPrev.addEventListener('click', ()=>{ state.approvalPage=Math.max(1,state.approvalPage-1); render(); });
   const pgNext = document.getElementById('apPgNext'); if(pgNext) pgNext.addEventListener('click', ()=>{ state.approvalPage=state.approvalPage+1; render(); });
