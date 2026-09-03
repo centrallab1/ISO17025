@@ -62,7 +62,7 @@
 html,body{height:100%;}
 body{
   margin:0;
-  font-family:'Inter','Noto Sans Thai',sans-serif;
+  font-family:'Noto Sans Thai','Inter',sans-serif;
   background:var(--bg);
   color:var(--ink-900);
   -webkit-font-smoothing:antialiased;
