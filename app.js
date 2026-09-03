@@ -40,7 +40,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
   { id:'thidarati', password:'ISO123',       name:'Thitarat Intakham',  role:'QM' },
-  { id:'pimchanokb', password:'mpir1234',     name:'Pimchanok Busayapong', role:'LM' },
+  { id:'pimchanok', password:'mpir1234',     name:'Pimchanok Busayapongchai', role:'LM' },
 ];
 const ROLE_LABEL = { DC:'Document Control', QM:'Quality Manager', LM:'Lab Manager' };
 let currentUser = null;
