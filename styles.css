@@ -198,7 +198,7 @@ body{
   box-shadow:var(--shadow); padding:18px 20px;
 }
 .panel + .panel{margin-top:16px;}
-.panel-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
+.panel-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; flex-wrap:wrap; gap:10px;}
 .panel-title{font-size:14.5px; font-weight:700; color:var(--ink-900);}
 .panel-link{font-size:12px; font-weight:600; color:var(--blue-600); background:none; border:none; cursor:pointer; text-decoration:none;}
 .panel-link:hover{text-decoration:underline;}
@@ -323,7 +323,7 @@ body{
 .tab.active .cnt{background:rgba(255,255,255,.18); color:#fff;}
 
 /* tables */
-.table-wrap{overflow-x:auto;}
+.table-wrap{overflow-x:auto; -webkit-overflow-scrolling:touch;}
 table.dtable{width:100%; border-collapse:collapse; font-size:12.5px;}
 table.dtable th{
   text-align:left; padding:9px 12px; color:var(--ink-500); font-weight:700; font-size:11px;
@@ -657,7 +657,7 @@ table.dtable td.name{color:var(--ink-900); font-weight:650; font-size:13.5px; ma
 .row-actions button:active{transform:translateY(0) scale(.92);}
 .row-actions button.del:hover svg{stroke:var(--red-600);}
 
-.sync-pill{display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:700; color:var(--green-600); background:var(--green-50); padding:4px 10px; border-radius:999px; box-shadow:0 1px 2px rgba(16,24,40,.04);}
+.sync-pill{display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:700; color:var(--green-600); background:var(--green-50); padding:4px 10px; border-radius:999px; box-shadow:0 1px 2px rgba(16,24,40,.04); white-space:nowrap;}
 .sync-pill .dot{width:6px; height:6px; border-radius:50%; background:var(--green-600);}
 .sync-pill.saving{color:var(--amber-600); background:var(--amber-50);}
 .sync-pill.saving .dot{background:var(--amber-600); animation:pulse 1s ease-in-out infinite;}
@@ -672,6 +672,31 @@ table.dtable td.name{color:var(--ink-900); font-weight:650; font-size:13.5px; ma
   .stat-row, .grid-4, .audit-stat-grid, .audit-cols, .stat-row-5{grid-template-columns:repeat(2,1fr);}
   .grid-2, .grid-3{grid-template-columns:1fr;}
   .search{width:200px;}
+}
+
+/* phones — the 980px breakpoint above still leaves the topbar (search +
+   4-5 icon buttons + avatar/name/role) too wide for a ~375-430px screen,
+   and .panel-head's title+pill vs. action-buttons row has nowhere to wrap
+   to, so both visibly overflow/collide. This tightens things further and
+   lets the pieces that need it drop to their own line instead of
+   overlapping or getting clipped. */
+@media (max-width: 640px){
+  .topbar{padding:0 10px; gap:4px;}
+  .search{flex:1 1 auto; width:auto; max-width:none; min-width:0; padding:7px 10px;}
+  .topbar-right{gap:0;}
+  .icon-btn{width:32px; height:32px;}
+  .user{padding-left:8px; margin-left:2px; gap:0; border-left:none;}
+  .user-text{display:none;}
+  .content{padding:14px 12px 40px;}
+  .panel{padding:14px 14px;}
+  .panel-head > div:last-child{width:100%;}
+  .panel-head .btn{flex:1; justify-content:center;}
+  .toolbar{gap:8px;}
+  .toolbar .search{width:100%; flex:1 1 100%;}
+  .toolbar .select{flex:1 1 130px;}
+  table.dtable td.name{max-width:170px;}
+  .detail-head{flex-direction:column;}
+  .stat-row, .grid-4, .audit-stat-grid, .audit-cols, .stat-row-5{grid-template-columns:1fr 1fr;}
 }
 
 /* ============================================================
