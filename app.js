@@ -35,6 +35,7 @@ const watermarkLogRef = doc(dbFirestore, "iso17025", "watermarklog");
 // requester fills out at step 2 of a new/revision request (step 3 is a
 // separate, per-document working link that DC pastes in later)
 const EXTERNAL_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/ServiceLab/JADi783WMc0gT6wo8iS0ojrJAc8VFmVEeOfR9ClBWLZ8qRA?nav=MWZmZDZkOGItZDc3Zi00NjcwLWI3M2MtNTZkN2YwNzNkZDc5';
+const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/ServiceLab/JADhGyH13Pk6SqlllkAu7GzNATtPwZWsYXJ41ls_zZh4CWc?nav=ODllNjg3ODktZDk0ZS00YmU2LTk0OTgtYzlmZmUxNjlhZTQz';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -1605,6 +1606,8 @@ function archiveModal(){
         <div class="modal-body">
           <div style="font-size:13px; font-weight:700; color:var(--ink-900); margin-bottom:4px;">${a.title}</div>
           <div style="font-size:11.5px; color:var(--ink-500); margin-bottom:16px;">${a.category||'ไม่ระบุหมวดหมู่'}${a.clause?` · ข้อกำหนด ${clauseLabel(a.clause)}`:''} · อัปโหลดโดย ${a.uploadedBy||'ไม่ระบุ'}</div>
+          <div class="field"><label>ลิงก์เอกสาร</label><input id="archiveVerifyLink" value="${a.link||''}" placeholder="https://mitrphol.sharepoint.com/..."></div>
+          <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:14px;">DC เป็นผู้วางลิงก์เอกสารจริงที่นี่ก่อนยืนยัน</div>
           <div class="field"><label>ผู้ยืนยัน (DC)</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()}</div></div>
           <div class="field-error" id="archiveModalError" style="display:none;"></div>
         </div>
@@ -1621,6 +1624,12 @@ function archiveModal(){
     <div class="modal">
       <div class="modal-head"><div class="modal-title">${editing ? 'แก้ไขเอกสาร' : 'เพิ่มเอกสารในคลัง'}</div><button class="modal-close" id="archiveModalCloseBtn">✕</button></div>
       <div class="modal-body">
+        ${!isDC() ? `
+        <div style="background:var(--bg); border-radius:9px; padding:12px 14px; margin-bottom:16px;">
+          <div style="font-size:12.5px; font-weight:800; color:var(--amber-600); margin-bottom:6px;">กรอกแบบฟอร์มก่อนบันทึก</div>
+          <div style="font-size:11.5px; color:var(--ink-700); margin-bottom:10px;">เปิดฟอร์มด้านล่าง กรอกรายละเอียดเอกสาร แล้วค่อยกลับมากรอกข้อมูลย่อในนี้และกด "เพิ่มเอกสาร" — DC จะเป็นผู้วางลิงก์เอกสารจริงและกดยืนยันในขั้นตอนถัดไป</div>
+          <a class="btn ghost" href="${ARCHIVE_REQUEST_FORM_LINK}" target="_blank" rel="noopener">${ic('link')} เปิดฟอร์ม</a>
+        </div>` : ''}
         <div class="field"><label>ชื่อเอกสาร</label><input id="archiveTitle" value="${(a.title||'').replace(/"/g,'&quot;')}" placeholder="เช่น สรุปประชุมทบทวนฝ่ายบริหาร ม.ค. 2569"></div>
         <div class="field"><label>หมวดหมู่</label>
           <input id="archiveCategory" list="archiveCategoryList" value="${(a.category||'').replace(/"/g,'&quot;')}" placeholder="เลือกหรือพิมพ์หมวดหมู่ใหม่">
@@ -1630,7 +1639,7 @@ function archiveModal(){
           <select id="archiveClause"><option value="">ไม่ระบุ</option>${CLAUSES.map(([c,l])=>`<option value="${c}" ${a.clause===c?'selected':''}>${l}</option>`).join('')}</select>
           <div id="archiveClauseSuggest" class="suggest-hint"></div>
         </div>
-        <div class="field"><label>ลิงก์เอกสาร</label><input id="archiveLink" value="${a.link||''}" placeholder="https://mitrphol.sharepoint.com/..."></div>
+        ${isDC() ? `<div class="field"><label>ลิงก์เอกสาร</label><input id="archiveLink" value="${a.link||''}" placeholder="https://mitrphol.sharepoint.com/..."></div>` : ''}
         <div class="field"><label>ผู้อัปโหลด</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()}</div></div>
         <div class="field"><label>วันที่เอกสาร</label><input type="date" id="archiveDate" value="${new Date(a.uploadedAt || Date.now()).toISOString().slice(0,10)}"></div>
         <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:14px;">แก้วันที่ได้ถ้าวางไฟล์ย้อนหลัง — ระบบจะจัดกลุ่มปี/เดือนตามวันที่นี้</div>
@@ -1684,6 +1693,8 @@ function wireArchiveModalControls(){
       const verifier = currentActorName();
       const a = ARCHIVE_ITEMS.find(x=>x.id===state.archiveModal.id);
       if(!a) return;
+      const linkInput = document.getElementById('archiveVerifyLink');
+      if(linkInput) a.link = linkInput.value.trim();
       a.status = 'ยืนยันแล้ว';
       a.verifiedBy = verifier;
       a.verifiedAt = Date.now();
@@ -1698,7 +1709,7 @@ function wireArchiveModalControls(){
     const category = document.getElementById('archiveCategory').value.trim();
     const clauseSel = document.getElementById('archiveClause');
     const clause = clauseSel ? clauseSel.value : '';
-    const link = document.getElementById('archiveLink').value.trim();
+    const linkInput = document.getElementById('archiveLink');
     const uploadedBy = currentActorName();
     const dateInput = document.getElementById('archiveDate');
     const dateVal = dateInput ? dateInput.value : '';
@@ -1708,6 +1719,9 @@ function wireArchiveModalControls(){
     const cancelledDate = cancelledInput ? (cancelledInput.value ? new Date(cancelledInput.value+'T00:00:00').getTime() : null) : undefined;
 
     if(mode==='new'){
+      // non-DC submitters never see the link field (they fill the external
+      // form instead) — link stays blank until DC verifies and pastes it in
+      const link = linkInput ? linkInput.value.trim() : '';
       ARCHIVE_ITEMS.push({
         id: 'ARC-' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
         title, category, clause, link, uploadedBy, uploadedAt,
@@ -1717,7 +1731,8 @@ function wireArchiveModalControls(){
     } else {
       const a = ARCHIVE_ITEMS.find(x=>x.id===state.archiveModal.id);
       if(a){
-        a.title = title; a.category = category; a.clause = clause; a.link = link; a.uploadedBy = uploadedBy; a.uploadedAt = uploadedAt;
+        a.title = title; a.category = category; a.clause = clause; a.uploadedBy = uploadedBy; a.uploadedAt = uploadedAt;
+        if(linkInput) a.link = linkInput.value.trim(); // only present for DC — non-DC editors leave the existing link untouched
         if(cancelledDate !== undefined) a.cancelledDate = cancelledDate;
       }
     }
