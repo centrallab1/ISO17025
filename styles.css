@@ -708,3 +708,84 @@ table.dtable td.name{color:var(--ink-900); font-weight:650; font-size:13.5px; ma
 .dlegend-row{display:flex; align-items:center; gap:8px; font-size:11.5px; color:var(--ink-700); font-weight:600;}
 .dlegend-dot{width:8px; height:8px; border-radius:50%; flex-shrink:0;}
 .dlegend-val{margin-left:auto; font-weight:800; color:var(--ink-900);}
+
+/* ============================================================
+   MOBILE HARDENING — pass 2.
+   The 980px/640px breakpoints above only collapse layouts built with
+   the shared .grid-2/.grid-3/.grid-4/etc classes. Several views build
+   their own multi-column grid with an *inline* style attribute
+   (ISO clause tree "270px 1fr", audit "1fr 1fr 1fr", calendar
+   "1fr 280px") — inline styles beat plain class selectors, so those
+   three never collapsed and were the main source of cards/tables
+   running off the right edge on phones. Same root cause for a few
+   fixed-px inner elements (progress-bar labels, approval-flow step
+   width, queue id column) that don't shrink with their flex parent.
+   Everything below targets exactly those leftovers; nothing here
+   changes desktop/tablet layout (all rules are inside the existing
+   640px, or a new <=480px, media query).
+   ============================================================ */
+@media (max-width: 640px){
+  /* catches every inline grid-template-columns the render functions set
+     directly on an element (ISO tree, audit 3-col, calendar), plus the
+     class-based grids the JS sometimes combines with .grid — !important
+     is required to win over the inline style attribute. */
+  .grid[style*="grid-template-columns"],
+  .audit-cols[style*="grid-template-columns"]{
+    grid-template-columns:1fr !important;
+  }
+  .activity-grid{grid-template-columns:repeat(2,1fr);}
+  .clause-tree{max-height:none;}
+
+  .prog-row{flex-wrap:wrap; row-gap:4px;}
+  .prog-label{width:auto; flex:1 1 100%; order:1;}
+  .prog-track{order:3; flex:1 1 auto;}
+  .prog-pct{order:4; width:auto;}
+  .prog-badge{order:0;}
+
+  .kv-row .k{width:88px;}
+
+  .approval-flow{padding:18px 0 22px; gap:0 6px;}
+  .af-step{width:84px;}
+  .af-name, .af-role{font-size:10.5px;}
+  .af-line{min-width:14px;}
+
+  .queue-item .qi-id{width:78px; font-size:11px;}
+
+  .doc-thumb{width:72px; height:90px;}
+  .doc-thumb svg{width:26px; height:26px;}
+
+  .stat-num{font-size:18px;}
+  .stat-icon{width:38px; height:38px;}
+  .stat-icon svg{width:18px; height:18px;}
+  .stat-card{padding:12px 14px; gap:10px;}
+
+  .modal-body{padding:16px 14px;}
+  .modal-head{padding:14px 16px;}
+  .modal-actions{padding:12px 14px; flex-wrap:wrap;}
+  .modal-actions .btn{flex:1 1 auto; justify-content:center;}
+  .wizard-steps{padding:12px 8px 0;}
+  .wizard-step span:last-child{font-size:9.5px; white-space:normal; text-align:center;}
+
+  .side-box{padding:12px 14px;}
+  .eitem, .hist-card{padding:12px;}
+  .clause-children{padding-left:20px;}
+
+  .full-cal-grid{gap:4px;}
+  .fc-cell{min-height:44px; padding:4px; font-size:10.5px;}
+  .fc-pill{font-size:8.5px;}
+
+  .folder-grid{grid-template-columns:repeat(auto-fill, minmax(120px,1fr)); gap:10px;}
+}
+
+/* very narrow phones (iPhone SE / small Android, ~360-400px) — the
+   640px tier above still leaves 2-column stat/summary grids a bit
+   tight once real numbers + labels are in there, so drop those to a
+   single column too rather than let the text wrap/clip. */
+@media (max-width: 420px){
+  .stat-row, .grid-4, .audit-stat-grid, .stat-row-5, .activity-grid{
+    grid-template-columns:1fr !important;
+  }
+  .queue-item .qi-name{white-space:normal;}
+  .detail-title{font-size:15.5px;}
+  .panel{padding:12px;}
+}
