@@ -761,6 +761,23 @@ async function loadDocs(){
         d._reviewerNamesSynced = true;
         needsMigration = true;
       }
+      // one-time fix for revision requests opened BEFORE preparedAt existed:
+      // their preparedAt was backfilled above from createdDate/lastUpdated
+      // (a guess), not the actual date the revision was requested. The real
+      // date is already on record as the timestamp of the "ขอปรับปรุงจาก
+      // Rev.X เป็น Rev.Y" comment written by the revise-request flow — reuse
+      // that here instead of the guess. Only touches docs still mid a
+      // revision request (lastRequestType==='revision'); a fresh "new"
+      // document's preparedAt===createdDate is already correct as-is.
+      // Runs once via _preparedAtRevisionSynced so it never re-overrides a
+      // preparedAt that a later, already-fixed revise action set correctly.
+      if(!d._preparedAtRevisionSynced && d.lastRequestType==='revision'){
+        const revisionComments = (d.comments||[]).filter(c=>/ขอปรับปรุงจาก Rev\.(.*?) เป็น Rev\.(.*)/.test(c.text));
+        const latest = revisionComments[revisionComments.length-1];
+        if(latest){ d.preparedAt = latest.time; }
+        d._preparedAtRevisionSynced = true;
+        needsMigration = true;
+      }
     });
     DOCS_LOADED = true;
     DOCS_ERROR = null;
