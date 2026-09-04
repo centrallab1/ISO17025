@@ -727,6 +727,26 @@ async function loadDocs(){
         d.publishedApproverName = alreadyAtRest ? (d.approverName||'') : null;
         needsMigration = true;
       }
+      // one-time cleanup for requests already sitting mid-workflow when the
+      // account-based reviewer/approver logic above was introduced — these
+      // still carry the old fixed names (e.g. "พิสิทธินี") from before.
+      // d.requestedBy has always been set to the real logged-in account at
+      // request time (unaffected by the old naming), so it's a safe source
+      // to recompute from. Only touches steps that haven't actually
+      // happened yet: preparedBy for any in-progress doc, reviewerName only
+      // if nobody has reviewed yet (still ร่าง/รอทบทวน), approverName only
+      // if nobody has approved yet (not yet อนุมัติแล้ว) — a real reviewer/
+      // approver action already on record is never overwritten. Runs once
+      // per document via the _reviewerNamesSynced marker.
+      if(!d._reviewerNamesSynced && d.approvalStatus!=='อนุมัติแล้ว' && d.requestedBy){
+        d.preparedBy = d.requestedBy;
+        if(d.approvalStatus==='ร่าง' || d.approvalStatus==='รอทบทวน'){
+          d.reviewerName = assignedReviewerName(d.requestedBy);
+        }
+        d.approverName = lmAccountName();
+        d._reviewerNamesSynced = true;
+        needsMigration = true;
+      }
     });
     DOCS_LOADED = true;
     DOCS_ERROR = null;
