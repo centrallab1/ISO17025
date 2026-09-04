@@ -47,9 +47,14 @@ const ROLE_LABEL = { DC:'Document Control', QM:'Quality Manager', LM:'Lab Manage
 // for any new/revision request can be worked out immediately instead of
 // waiting for someone to actually click through the workflow:
 //  - approver is always the LM account (only one LM login exists)
-//  - reviewer must be DC or QM (per the workflow rules below) and must not
-//    be the requester themself — so it's whichever of DC/QM the requester
-//    is NOT. If the requester is LM (neither DC nor QM), default to QM.
+//  - reviewer is the TM function, which the DC account holds concurrently
+//    (DC's other duties — posting links, deleting, distributing — are
+//    separate document-control tasks, not the review itself). So the
+//    default reviewer for every document is the DC/TM account. The only
+//    time it's someone else is when DC/TM is the one requesting — a
+//    reviewer can't be the requester — in which case QM reviews instead.
+//    DC still retains the ability to act on any step regardless (see
+//    isDC() elsewhere), this only affects the name shown as "assigned".
 // This only sets the *expected* name so it displays right away in the
 // Approval list/detail; the actual review/approve click still overwrites
 // it with whoever really performed that step (see the approve button
@@ -62,8 +67,7 @@ function assignedReviewerName(requesterName){
   const dc = USERS.find(u=>u.role==='DC');
   const qm = USERS.find(u=>u.role==='QM');
   if(dc && dc.name===requesterName) return qm ? qm.name : '';
-  if(qm && qm.name===requesterName) return dc ? dc.name : '';
-  return qm ? qm.name : (dc ? dc.name : '');
+  return dc ? dc.name : (qm ? qm.name : '');
 }
 let currentUser = null;
 const SESSION_KEY = 'mpir_iso17025_session';
