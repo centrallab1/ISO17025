@@ -690,6 +690,12 @@ async function loadDocs(){
       if(d.preparedBy===undefined){ d.preparedBy=''; needsMigration = true; }
       if(d.rev===undefined){ d.rev=null; needsMigration = true; }
       if(d.createdDate===undefined){ d.createdDate=null; needsMigration = true; }
+      // date of the CURRENT preparer round (i.e. this rev) — distinct from
+      // createdDate, which is fixed to when the document was first ever
+      // created and never moves on a revision request. Backfilled from
+      // createdDate for pre-existing records (best guess: last time we
+      // actually know of).
+      if(d.preparedAt===undefined){ d.preparedAt = d.createdDate || d.lastUpdated || null; needsMigration = true; }
       if(d.effectiveDate===undefined){ d.effectiveDate=null; needsMigration = true; }
       if(d.cancelledDate===undefined){ d.cancelledDate=null; needsMigration = true; }
       if(d.approvedBy===undefined){ d.approvedBy=null; needsMigration = true; }
@@ -723,8 +729,16 @@ async function loadDocs(){
       if(d.publishedPreparedBy===undefined){
         const alreadyAtRest = d.approvalStatus==='อนุมัติแล้ว' || !!d.publishedLink || ['ควบคุม','แจกจ่าย','สนับสนุน','ยกเลิก'].includes(d.note);
         d.publishedPreparedBy = alreadyAtRest ? (d.preparedBy||'') : null;
+        d.publishedPreparedAt = alreadyAtRest ? (d.preparedAt||d.createdDate||null) : null;
         d.publishedReviewerName = alreadyAtRest ? (d.reviewerName||'') : null;
         d.publishedApproverName = alreadyAtRest ? (d.approverName||'') : null;
+        needsMigration = true;
+      }
+      // separate backfill for publishedPreparedAt specifically: docs that
+      // already went through the block above (publishedPreparedBy already
+      // defined) before this field existed would otherwise be skipped.
+      if(d.publishedPreparedAt===undefined){
+        d.publishedPreparedAt = (d.publishedPreparedBy!=null) ? (d.preparedAt||d.createdDate||null) : null;
         needsMigration = true;
       }
       // one-time cleanup for requests already sitting mid-workflow when the
@@ -2033,7 +2047,7 @@ function wireModalControls(){
       DOCUMENTS.push({
         id, name, clause, link:'', note, rev:'0',
         approvalStatus:'ร่าง', reviewerName:assignedReviewerName(actor), approverName:lmAccountName(), preparedBy:actor,
-        comments:[{ by:actor, text:'ขั้นที่ 1: จองเลขเอกสาร', time: now }], lastUpdated: now, createdDate: now, effectiveDate:null, cancelledDate:null,
+        comments:[{ by:actor, text:'ขั้นที่ 1: จองเลขเอกสาร', time: now }], lastUpdated: now, createdDate: now, preparedAt: now, effectiveDate:null, cancelledDate:null,
         approvedBy:null, approvedAt:null, approvedComment:null, lastRequestType:'new', requestedBy: actor,
         publishedLink:null, linkHistory:[],
         formConfirmedAt:null, formConfirmedBy:null, linkSetAt:null, linkSetBy:null, reviewedAt:null,
@@ -2061,7 +2075,11 @@ function wireModalControls(){
       // d.publishedPreparedBy/publishedReviewerName/publishedApproverName
       // (snapshot ที่หน้ารายละเอียดเอกสารใช้แสดง) ไม่ถูกแตะต้องตรงนี้ — จะยังคง
       // ค่าที่เผยแพร่ล่าสุดไว้จนกว่า DC จะกดเผยแพร่รอบใหม่
+      // preparedAt = วันที่ของรอบปรับปรุงปัจจุบัน (rev นี้) — อัปเดตคู่กับ
+      // preparedBy ทุกครั้งที่มีการขอปรับปรุง (createdDate ด้านบนยังคงเดิม
+      // เพราะหมายถึงวันที่จัดทำเอกสารครั้งแรกเท่านั้น)
       d.preparedBy = actor;
+      d.preparedAt = Date.now();
       d.reviewerName = assignedReviewerName(actor); d.approverName = lmAccountName();
       d.formConfirmedAt = null; d.formConfirmedBy = null;
       d.linkSetAt = null; d.linkSetBy = null; d.reviewedAt = null;
@@ -2766,7 +2784,7 @@ function renderFormConfirmBox(d){
       <div class="side-box-title" style="color:var(--green-600);">ขั้นที่ 2: กรอกฟอร์มแล้ว</div>
       <div style="font-size:13px; color:var(--ink-900); font-weight:700;">${d.formConfirmedBy||'—'}</div>
       <div style="font-size:12px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.formConfirmedAt)}</div>
-      <a class="btn ghost" href="${EXTERNAL_REQUEST_FORM_LINK}" target="_blank" rel="noopener" style="margin-top:10px;">${ic('link')} เปิดฟอร์ม</a>
+      ${!d.linkSetAt ? `<a class="btn ghost" href="${EXTERNAL_REQUEST_FORM_LINK}" target="_blank" rel="noopener" style="margin-top:10px;">${ic('link')} เปิดฟอร์ม</a>` : ''}
     </div>`;
   }
   return `
@@ -3016,6 +3034,7 @@ function wireDcPublish(){
     // ดำเนินการ) เพื่อให้หน้า "รายละเอียดเอกสาร" ยังคงแสดงชื่อชุดนี้ค้างไว้ แม้จะ
     // มีการขอปรับปรุงรอบใหม่เกิดขึ้นแล้วแต่ยังไม่ผ่านอนุมัติ+เผยแพร่
     d.publishedPreparedBy = d.preparedBy;
+    d.publishedPreparedAt = d.preparedAt;
     d.publishedReviewerName = d.reviewerName;
     d.publishedApproverName = d.approverName;
     d.lastUpdated = now;
@@ -3077,7 +3096,7 @@ function viewRevisionDetailInline(d, standalone){
       <div class="side-box"><div class="side-box-title">ข้อกำหนด ISO</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.clause ? clauseLabel(d.clause) : 'ไม่ระบุ'}</div></div>
       <div class="side-box"><div class="side-box-title">ประเภท / Rev.</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${docTypeLabel(d)} · Rev.${d.rev||'—'}</div></div>
       <div class="side-box"><div class="side-box-title">ทบทวนครั้งถัดไป</div><div style="font-size:12.5px; font-weight:700; color:${isOverdue?'var(--red-600)':'var(--ink-900)'};">${fmtDate(nrd)} (${isOverdue?`เกินกำหนด ${Math.abs(days)} วัน`:`อีก ${days} วัน`})</div></div>
-      <div class="side-box"><div class="side-box-title">ผู้จัดทำ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.publishedPreparedBy || d.preparedBy || '—'}</div>${d.createdDate ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.createdDate)}</div>` : ''}</div>
+      <div class="side-box"><div class="side-box-title">ผู้จัดทำ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.publishedPreparedBy || d.preparedBy || '—'}</div>${(d.publishedPreparedAt||d.preparedAt||d.createdDate) ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.publishedPreparedAt||d.preparedAt||d.createdDate)}</div>` : ''}</div>
       <div class="side-box"><div class="side-box-title">ผู้ทบทวน</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.publishedReviewerName || d.reviewerName || '—'}</div>${d.reviewedAt ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.reviewedAt)}</div>` : ''}</div>
       <div class="side-box"><div class="side-box-title">ผู้อนุมัติ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.publishedApproverName || d.approverName || d.approvedBy || '—'}</div>${d.approvedAt ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.approvedAt)}</div>` : ''}</div>
     </div>
@@ -3539,7 +3558,7 @@ function viewApprovalDetail(){
     </div>
 
     <div class="grid grid-3" style="margin-bottom:18px;">
-      <div class="side-box"><div class="side-box-title">ผู้จัดทำ / ผู้ร่าง</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.preparedBy || '—'}</div>${d.createdDate ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.createdDate)}</div>` : ''}</div>
+      <div class="side-box"><div class="side-box-title">ผู้จัดทำ / ผู้ร่าง</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.preparedBy || '—'}</div>${(d.preparedAt||d.createdDate) ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.preparedAt||d.createdDate)}</div>` : ''}</div>
       <div class="side-box"><div class="side-box-title">ผู้ทบทวน</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.reviewerName || '—'}</div>${d.reviewedAt ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.reviewedAt)}</div>` : ''}</div>
       <div class="side-box"><div class="side-box-title">ผู้อนุมัติ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.approverName || d.approvedBy || '—'}</div>${d.approvedAt ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.approvedAt)}</div>` : ''}</div>
       <div class="side-box"><div class="side-box-title">วันที่จัดทำ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.createdDate ? fmtDate(d.createdDate) : '—'}</div></div>
