@@ -43,6 +43,28 @@ const USERS = [
   { id:'pimchanok', password:'mpir1234',     name:'Pimchanok Busayapongchai', role:'LM' },
 ];
 const ROLE_LABEL = { DC:'Document Control', QM:'Quality Manager', LM:'Lab Manager' };
+// With exactly one account per role (DC/QM/LM), the reviewer and approver
+// for any new/revision request can be worked out immediately instead of
+// waiting for someone to actually click through the workflow:
+//  - approver is always the LM account (only one LM login exists)
+//  - reviewer must be DC or QM (per the workflow rules below) and must not
+//    be the requester themself — so it's whichever of DC/QM the requester
+//    is NOT. If the requester is LM (neither DC nor QM), default to QM.
+// This only sets the *expected* name so it displays right away in the
+// Approval list/detail; the actual review/approve click still overwrites
+// it with whoever really performed that step (see the approve button
+// handler), which normally just reconfirms the same name.
+function lmAccountName(){
+  const lm = USERS.find(u=>u.role==='LM');
+  return lm ? lm.name : '';
+}
+function assignedReviewerName(requesterName){
+  const dc = USERS.find(u=>u.role==='DC');
+  const qm = USERS.find(u=>u.role==='QM');
+  if(dc && dc.name===requesterName) return qm ? qm.name : '';
+  if(qm && qm.name===requesterName) return dc ? dc.name : '';
+  return qm ? qm.name : (dc ? dc.name : '');
+}
 let currentUser = null;
 const SESSION_KEY = 'mpir_iso17025_session';
 function tryRestoreSession(){
@@ -684,6 +706,23 @@ async function loadDocs(){
       if(d.reviewedAt===undefined){ d.reviewedAt=null; needsMigration = true; }
       if(d.publishedBy===undefined){ d.publishedBy=null; needsMigration = true; }
       if(d.publishedAt===undefined){ d.publishedAt=null; needsMigration = true; }
+      // one-time snapshot for documents that already existed before the
+      // published-name snapshot fields did (imported from master list, or
+      // already approved+published in the app previously). Without this,
+      // a fresh revision request on one of these old documents would
+      // immediately change the "รายละเอียดเอกสาร" page's names — since
+      // there'd be no snapshot yet to fall back to — even though the
+      // revision hasn't been approved/published. Only backfills once: if
+      // the doc is already at rest (approved, or has a live publishedLink,
+      // or came from the master list import), freeze its current
+      // preparedBy/reviewerName/approverName as the published snapshot.
+      if(d.publishedPreparedBy===undefined){
+        const alreadyAtRest = d.approvalStatus==='อนุมัติแล้ว' || !!d.publishedLink || ['ควบคุม','แจกจ่าย','สนับสนุน','ยกเลิก'].includes(d.note);
+        d.publishedPreparedBy = alreadyAtRest ? (d.preparedBy||'') : null;
+        d.publishedReviewerName = alreadyAtRest ? (d.reviewerName||'') : null;
+        d.publishedApproverName = alreadyAtRest ? (d.approverName||'') : null;
+        needsMigration = true;
+      }
     });
     DOCS_LOADED = true;
     DOCS_ERROR = null;
@@ -1969,7 +2008,7 @@ function wireModalControls(){
       const note = state.modal.presetNote || 'ว่าง';
       DOCUMENTS.push({
         id, name, clause, link:'', note, rev:'0',
-        approvalStatus:'ร่าง', reviewerName:'', approverName:'', preparedBy:actor,
+        approvalStatus:'ร่าง', reviewerName:assignedReviewerName(actor), approverName:lmAccountName(), preparedBy:actor,
         comments:[{ by:actor, text:'ขั้นที่ 1: จองเลขเอกสาร', time: now }], lastUpdated: now, createdDate: now, effectiveDate:null, cancelledDate:null,
         approvedBy:null, approvedAt:null, approvedComment:null, lastRequestType:'new', requestedBy: actor,
         publishedLink:null, linkHistory:[],
@@ -1989,6 +2028,17 @@ function wireModalControls(){
       d.approvalStatus = 'ร่าง';
       d.approvedBy = null; d.approvedAt = null; d.approvedComment = null;
       d.lastRequestType = 'revision'; d.lastRequestFrom = oldRev || null; d.requestedBy = actor;
+      // ผู้จัดทำ ของรอบปรับปรุงนี้ = บัญชีที่กดขอปรับปรุงจริง (เดิมช่องนี้ไม่ถูก
+      // อัปเดตตอน revise เลย เลยยังค้างชื่อผู้จัดทำเวอร์ชันก่อนหน้า). ผู้ทบทวน/
+      // ผู้อนุมัติ ตั้งเป็นชื่อที่คาดว่าจะเป็นทันที (DC/QM คนที่ไม่ใช่ผู้ขอ =
+      // ผู้ทบทวน, LM = ผู้อนุมัติเสมอ) ไม่ต้องรอให้กดทบทวน/อนุมัติจริงก่อนถึงจะ
+      // ขึ้นชื่อ — พอมีคนกดทบทวน/อนุมัติจริง ค่านี้จะถูกเขียนทับด้วยชื่อคนที่กด
+      // จริงอีกที (ปกติจะเป็นชื่อเดียวกัน, ดู approve button handler ด้านล่าง).
+      // d.publishedPreparedBy/publishedReviewerName/publishedApproverName
+      // (snapshot ที่หน้ารายละเอียดเอกสารใช้แสดง) ไม่ถูกแตะต้องตรงนี้ — จะยังคง
+      // ค่าที่เผยแพร่ล่าสุดไว้จนกว่า DC จะกดเผยแพร่รอบใหม่
+      d.preparedBy = actor;
+      d.reviewerName = assignedReviewerName(actor); d.approverName = lmAccountName();
       d.formConfirmedAt = null; d.formConfirmedBy = null;
       d.linkSetAt = null; d.linkSetBy = null; d.reviewedAt = null;
       d.comments = d.comments || [];
@@ -2529,9 +2579,9 @@ function viewDocDetail(docId){
         <div class="kv-row"><div class="k">วันที่ประกาศใช้</div><div class="v">${d.effectiveDate ? fmtDate(d.effectiveDate) : '—'}</div></div>
         ${d.cancelledDate ? `<div class="kv-row"><div class="k">วันที่ยกเลิก</div><div class="v">${fmtDate(d.cancelledDate)}</div></div>` : ''}
         <div class="kv-row"><div class="k">อัปเดตล่าสุด</div><div class="v">${fmtDateTime(d.lastUpdated)}</div></div>
-        <div class="kv-row"><div class="k">ผู้จัดทำ</div><div class="v">${d.preparedBy || '—'}</div></div>
-        <div class="kv-row"><div class="k">ผู้ทบทวน</div><div class="v">${d.reviewerName || '—'}</div></div>
-        <div class="kv-row"><div class="k">ผู้อนุมัติ</div><div class="v">${d.approverName || '—'}</div></div>
+        <div class="kv-row"><div class="k">ผู้จัดทำ</div><div class="v">${d.publishedPreparedBy || d.preparedBy || '—'}</div></div>
+        <div class="kv-row"><div class="k">ผู้ทบทวน</div><div class="v">${d.publishedReviewerName || d.reviewerName || '—'}</div></div>
+        <div class="kv-row"><div class="k">ผู้อนุมัติ</div><div class="v">${d.publishedApproverName || d.approverName || '—'}</div></div>
         <div class="detail-actions">
           ${displayLink(d) ? `<a class="btn primary" href="${displayLink(d)}" target="_blank" rel="noopener">${ic('link')} Open in SharePoint</a>` : `<button class="btn ghost" disabled>${ic('link')} ยังไม่มีลิงก์</button>`}
           <button class="btn ghost" data-go-revision-history="1">${ic('history')} History</button>
@@ -2937,6 +2987,13 @@ function wireDcPublish(){
     d.effectiveDate = new Date(dateVal+'T00:00:00').getTime();
     d.publishedBy = actor;
     d.publishedAt = now;
+    // snapshot ชื่อผู้จัดทำ/ผู้ทบทวน/ผู้อนุมัติ ณ ตอนที่เผยแพร่จริง — เก็บแยกจาก
+    // preparedBy/reviewerName/approverName (ค่าที่ใช้ในหน้า Approval ระหว่าง
+    // ดำเนินการ) เพื่อให้หน้า "รายละเอียดเอกสาร" ยังคงแสดงชื่อชุดนี้ค้างไว้ แม้จะ
+    // มีการขอปรับปรุงรอบใหม่เกิดขึ้นแล้วแต่ยังไม่ผ่านอนุมัติ+เผยแพร่
+    d.publishedPreparedBy = d.preparedBy;
+    d.publishedReviewerName = d.reviewerName;
+    d.publishedApproverName = d.approverName;
     d.lastUpdated = now;
     d.comments = d.comments || [];
     d.comments.push({ by:actor, text: isFirstPublish ? `ขั้นที่ 6: DC เผยแพร่เอกสาร (ลิงก์: ${link}, ประกาศใช้: ${fmtDate(d.effectiveDate)}) — เสร็จสิ้น` : `DC แก้ไขลิงก์ที่เผยแพร่ (ลิงก์ใหม่: ${link})`, time: now });
@@ -2996,9 +3053,9 @@ function viewRevisionDetailInline(d, standalone){
       <div class="side-box"><div class="side-box-title">ข้อกำหนด ISO</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.clause ? clauseLabel(d.clause) : 'ไม่ระบุ'}</div></div>
       <div class="side-box"><div class="side-box-title">ประเภท / Rev.</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${docTypeLabel(d)} · Rev.${d.rev||'—'}</div></div>
       <div class="side-box"><div class="side-box-title">ทบทวนครั้งถัดไป</div><div style="font-size:12.5px; font-weight:700; color:${isOverdue?'var(--red-600)':'var(--ink-900)'};">${fmtDate(nrd)} (${isOverdue?`เกินกำหนด ${Math.abs(days)} วัน`:`อีก ${days} วัน`})</div></div>
-      <div class="side-box"><div class="side-box-title">ผู้จัดทำ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.preparedBy || '—'}</div>${d.createdDate ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.createdDate)}</div>` : ''}</div>
-      <div class="side-box"><div class="side-box-title">ผู้ทบทวน</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.reviewerName || '—'}</div>${d.reviewedAt ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.reviewedAt)}</div>` : ''}</div>
-      <div class="side-box"><div class="side-box-title">ผู้อนุมัติ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.approverName || d.approvedBy || '—'}</div>${d.approvedAt ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.approvedAt)}</div>` : ''}</div>
+      <div class="side-box"><div class="side-box-title">ผู้จัดทำ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.publishedPreparedBy || d.preparedBy || '—'}</div>${d.createdDate ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.createdDate)}</div>` : ''}</div>
+      <div class="side-box"><div class="side-box-title">ผู้ทบทวน</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.publishedReviewerName || d.reviewerName || '—'}</div>${d.reviewedAt ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.reviewedAt)}</div>` : ''}</div>
+      <div class="side-box"><div class="side-box-title">ผู้อนุมัติ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.publishedApproverName || d.approverName || d.approvedBy || '—'}</div>${d.approvedAt ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.approvedAt)}</div>` : ''}</div>
     </div>
 
     ${renderFormConfirmBox(d)}
@@ -3873,9 +3930,16 @@ function applyMasterListRow(row, d){
   if(row.note) d.note = row.note;
   d.createdDate = toEpoch(row.created) || d.createdDate || null;
   d.effectiveDate = toEpoch(row.effective) || d.effectiveDate || null;
-  d.preparedBy = roleName(row.prep) || d.preparedBy || '';
-  d.reviewerName = roleName(row.reviewer) || d.reviewerName || '';
-  d.approverName = roleName(row.approver) || d.approverName || '';
+  // NOTE: previously mapped role codes (LM/TM/QM/DC) to fixed person names
+  // here via roleName(). Removed per lab decision — names for preparedBy/
+  // reviewerName/approverName now always come from the actual logged-in
+  // account at the time each workflow step happens (see currentActorName()
+  // usage in the modal save handler and the approve button handler), never
+  // from a static role→name lookup. Existing values already stored on a
+  // document are left untouched.
+  d.preparedBy = d.preparedBy || '';
+  d.reviewerName = d.reviewerName || '';
+  d.approverName = d.approverName || '';
   // auto-classify the ISO 17025 clause from the document name using the
   // same keyword suggester as the "new document" form (suggestClause in
   // data.js). Only fills in a BLANK clause — never overwrites a clause
