@@ -4018,7 +4018,16 @@ function applyMasterListRow(row, d){
   // below). All four are already-settled records coming from the master
   // list, not new/in-progress requests, so none of them need to go
   // through the app's internal approval workflow.
-  if(['ควบคุม','แจกจ่าย','สนับสนุน','ยกเลิก'].includes(d.note)){
+  // Guard: if this document currently has an unresolved in-app "new
+  // document" or "revision" request (lastRequestType is 'new'/'revision'
+  // and it hasn't reached 'อนุมัติแล้ว'/'ไม่อนุมัติ' yet), the master
+  // list's note describes the OLD live document, not the in-progress
+  // request — don't stamp it approved and wipe out someone's pending
+  // review/approval step. Uses the same lastRequestType signal the rest
+  // of the app already relies on (see isFormalRequest, reviewPending).
+  const hasActiveRequest = (d.lastRequestType==='new' || d.lastRequestType==='revision')
+    && ['ร่าง','รอทบทวน','รออนุมัติ'].includes(d.approvalStatus);
+  if(['ควบคุม','แจกจ่าย','สนับสนุน','ยกเลิก'].includes(d.note) && !hasActiveRequest){
     d.approvalStatus = 'อนุมัติแล้ว';
     if(!d.approvedBy){
       d.approvedBy = d.approverName || '';
