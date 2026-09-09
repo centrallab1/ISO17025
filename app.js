@@ -4254,6 +4254,36 @@ function viewAdmin(){
 // (see the MASTER LIST IMPORT section below for the merge logic).
 // DC-only, matching the other admin-only tools on this page.
 // ============================================================
+function findCorruptedRevDocs(){
+  // Data-repair helper for the d.rev-overwrite bug in applyMasterListRow
+  // (fixed above, but already-saved documents can still carry the bad
+  // value): a document with an in-progress revision request whose rev
+  // was clobbered back down to match d.lastRequestFrom shows up as e.g.
+  // "Rev.1 → 1" in the Approval queue instead of "Rev.1 → 2". Detect it
+  // the same way it displays: lastRequestType is 'revision', the request
+  // is still pending, and d.rev equals d.lastRequestFrom (or is missing).
+  return DOCUMENTS.filter(d=>
+    d.lastRequestType==='revision'
+    && ['ร่าง','รอทบทวน','รออนุมัติ'].includes(d.approvalStatus)
+    && d.lastRequestFrom
+    && (d.rev===d.lastRequestFrom || !d.rev)
+  );
+}
+async function repairCorruptedRevNumbers(){
+  const targets = findCorruptedRevDocs();
+  if(!targets.length) return { ok:true, fixed:0 };
+  const actor = currentActorName();
+  const now = Date.now();
+  targets.forEach(d=>{
+    const wrongRev = d.rev;
+    d.rev = nextRevNumber(d.lastRequestFrom);
+    d.comments = d.comments || [];
+    d.comments.push({ by:actor, text:`ซ่อมแซมเลข Rev. อัตโนมัติ — แก้จาก Rev.${wrongRev||'-'} (ผิดพลาดจากการนำเข้ารายการเอกสารหลักทับคำขอปรับปรุงที่ค้างอยู่) เป็น Rev.${d.rev}`, time: now });
+    d.lastUpdated = now;
+  });
+  await persistDocs();
+  return { ok:true, fixed: targets.length, ids: targets.map(d=>d.id) };
+}
 function viewImportMasterListPanel(){
   if(!isDC()) return '';
   const hasList = typeof MASTER_LIST !== 'undefined';
@@ -4263,6 +4293,7 @@ function viewImportMasterListPanel(){
   const existingIds = new Set(DOCUMENTS.map(d=>d.id));
   const newCount = activeRows.filter(r=>!existingIds.has(r.id)).length;
   const updateCount = activeRows.length - newCount;
+  const corrupted = findCorruptedRevDocs();
   return `
   <div class="panel" style="margin-top:20px;">
     <div class="panel-head"><div class="panel-title">นำเข้ารายการเอกสารหลัก (Import Master List)</div></div>
@@ -4276,6 +4307,13 @@ function viewImportMasterListPanel(){
       <span id="importMlStatus" style="font-size:12px; color:var(--ink-500);"></span>
     </div>` : `
     <div style="font-size:12.5px; color:var(--ink-700);">ไม่พบไฟล์ <code>masterlist.js</code> — ตรวจสอบว่าไฟล์นี้ถูกโหลดในหน้าเว็บแล้ว</div>`}
+    ${corrupted.length ? `
+    <div class="dp-divider" style="margin:16px 0;"></div>
+    <div style="font-size:12.5px; color:var(--red-700,#b42318); margin-bottom:10px;">
+      พบเอกสาร <b>${corrupted.length} รายการ</b> ที่เลข Rev. ผิดพลาดจากการนำเข้ารายการเอกสารหลักทับคำขอปรับปรุงที่ค้างอยู่ (เช่น "Rev.1 → 1" แทนที่จะเป็น "Rev.1 → 2"): ${corrupted.map(d=>d.id).join(', ')}
+    </div>
+    <button class="btn danger" id="btnRepairRevNumbers">${ic('history')} ซ่อมแซมเลข Rev. ที่ผิดพลาด (${corrupted.length} รายการ)</button>
+    <span id="repairRevStatus" style="font-size:12px; color:var(--ink-500); margin-left:10px;"></span>` : ''}
   </div>`;
 }
 
@@ -4550,6 +4588,21 @@ function attachWatermarkHandlers(){
         return;
       }
       if(statusEl) statusEl.textContent = `นำเข้าเสร็จแล้ว — อัปเดต ${result.updated} รายการ, เพิ่มใหม่ ${result.created} รายการ, ย้ายไปคลังเอกสาร (ยกเลิก) ${result.archived} รายการ`;
+      render();
+    });
+  }
+  const repairBtn = document.getElementById('btnRepairRevNumbers');
+  if(repairBtn){
+    repairBtn.addEventListener('click', async ()=>{
+      if(!isDC()) return; // defense in depth
+      const targets = findCorruptedRevDocs();
+      if(!confirm(`ซ่อมแซมเลข Rev. ที่ผิดพลาด ${targets.length} รายการ (${targets.map(d=>d.id).join(', ')})?\n\nระบบจะแก้เลข Rev. ของแต่ละเอกสารให้เป็น Rev. ถัดจาก Rev. เดิมก่อนขอปรับปรุง (ตามที่ควรจะเป็นตั้งแต่แรก) และบันทึกไว้ในประวัติเอกสาร การซ่อมแซมนี้ไม่สามารถย้อนกลับได้`)) return;
+      const statusEl = document.getElementById('repairRevStatus');
+      repairBtn.disabled = true;
+      if(statusEl) statusEl.textContent = 'กำลังซ่อมแซม...';
+      const result = await repairCorruptedRevNumbers();
+      repairBtn.disabled = false;
+      if(statusEl) statusEl.textContent = `ซ่อมแซมเสร็จแล้ว — แก้ไข ${result.fixed} รายการ`;
       render();
     });
   }
