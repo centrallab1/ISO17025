@@ -3857,15 +3857,38 @@ function attachApprovalHandlers(){
         d.lastReviewedAt = now;
         d.lastReviewedBy = actor;
       }
-      // per lab decision: an approved revision is the trigger point to
-      // migrate an old RDI- id to the new MPIR-xx-###-rr format
-      if(d.lastRequestType==='revision' && !/^MPIR-/i.test(d.id)){
-        const typeCode = docTypeCode(d);
+      // Document ID suffix tracks the current Rev. — regenerated every
+      // time a revision request is approved, whether this is the
+      // one-time RDI-→MPIR format migration or just a normal rev bump on
+      // a document already in MPIR-xx-###-rr format (per lab decision:
+      // suffix should always reflect the currently-approved Rev., e.g.
+      // -00 → -02).
+      // IMPORTANT: can't just call toMpirId() again for the already-MPIR
+      // case. Its regex /(\d+)(?!.*\d)/ (see data.js) grabs the LAST
+      // digit-group in the id — correct for a legacy RDI- id (only one
+      // number in it), but on an id that already ends in "-rr" that last
+      // group IS the old rev suffix, not the running document number. Re-
+      // running toMpirId('MPIR-LF-026-00', 'LF', 2) would misread "00" as
+      // the document number and produce 'MPIR-LF-000-02' — silently
+      // corrupting 026 into 000. So for ids already in MPIR-xx-###-rr
+      // shape, keep the "MPIR-xx-###" part exactly as-is and swap only
+      // the trailing "-rr" segment ourselves; only fall back to
+      // toMpirId() for the one-time legacy-format migration, where its
+      // last-digit-group logic is actually correct.
+      if(d.lastRequestType==='revision'){
         const oldId = d.id;
-        const newId = toMpirId(oldId, typeCode, d.rev);
-        d.id = newId;
-        d.comments.push({ by:actor, text:`เปลี่ยนรหัสเอกสารจาก ${oldId} เป็น ${newId} ตามรูปแบบใหม่`, time: now });
-        state.selectedDoc = newId;
+        const mpirShape = oldId.match(/^(MPIR-[A-Za-z]+-\d+)-\d+$/i);
+        const revInt = parseInt(d.rev,10);
+        const revStr = isNaN(revInt) ? '00' : String(revInt).padStart(2,'0');
+        const newId = mpirShape ? `${mpirShape[1]}-${revStr}` : toMpirId(oldId, docTypeCode(d), d.rev);
+        if(newId && newId !== oldId){
+          const migratingFormat = !mpirShape;
+          d.id = newId;
+          d.comments.push({ by:actor, text: migratingFormat
+            ? `เปลี่ยนรหัสเอกสารจาก ${oldId} เป็น ${newId} ตามรูปแบบใหม่`
+            : `อัปเดตรหัสเอกสารจาก ${oldId} เป็น ${newId} ให้ตรงกับ Rev.${d.rev} ที่อนุมัติ`, time: now });
+          state.selectedDoc = newId;
+        }
       }
     }
     if(['อนุมัติแล้ว','ไม่อนุมัติ'].includes(d.approvalStatus)){
