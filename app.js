@@ -3719,9 +3719,45 @@ function attachApprovalHandlers(){
       if(!isDC()) return; // defense in depth — button only renders for DC anyway
       const d = DOCUMENTS.find(x=>x.id===btn.dataset.delRequest);
       if(!d) return;
-      if(!confirm(`ลบคำขอ "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
-      DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
-      if(state.selectedDoc===d.id) state.selectedDoc = null;
+      // 'new' requests have no prior published version — the record IS the
+      // request, so deleting it outright is correct and safe.
+      // 'revision'/'review' requests, however, MUTATE the same document
+      // record in place (see the 'revise' modal handler and
+      // btnConfirmReview above — both write d.rev/d.approvalStatus
+      // directly onto the existing doc instead of creating a separate
+      // "request" object). Deleting the record for those would therefore
+      // wipe out the document's already-published history too, and it
+      // would vanish from the Documents list along with it. So for those,
+      // "delete" instead cancels the in-progress request and restores the
+      // document to its last-published state.
+      const isNewDocRequest = d.lastRequestType === 'new';
+      const confirmMsg = isNewDocRequest
+        ? `ลบคำขอ "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`
+        : `ยกเลิกคำขอปรับปรุงของ "${d.id} ${cleanName(d)}" ใช่หรือไม่? เอกสารจะกลับไปเป็น Rev.${d.lastRequestFrom || d.rev || '0'} (สถานะเผยแพร่ล่าสุด) การยกเลิกไม่สามารถย้อนกลับได้`;
+      if(!confirm(confirmMsg)) return;
+      if(isNewDocRequest){
+        DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
+        if(state.selectedDoc===d.id) state.selectedDoc = null;
+      } else {
+        const actor = currentActorName();
+        const now = Date.now();
+        d.comments = d.comments || [];
+        d.comments.push({ by:actor, text:`ยกเลิกคำขอปรับปรุง — คืนสถานะเอกสารเป็น Rev.${d.lastRequestFrom || d.rev || '0'} (เผยแพร่แล้ว)`, time: now });
+        if(d.lastRequestType==='revision') d.rev = d.lastRequestFrom || d.rev;
+        d.approvalStatus = 'อนุมัติแล้ว';
+        // restore the roles to whoever the last actually-published round
+        // recorded (falls back to whatever is already on the doc if this
+        // document predates that snapshot)
+        d.preparedBy = d.publishedPreparedBy || d.preparedBy;
+        d.reviewerName = d.publishedReviewerName || d.reviewerName;
+        d.approverName = d.publishedApproverName || d.approverName;
+        d.approvedBy = d.approverName || d.approvedBy;
+        d.lastRequestType = null;
+        d.lastRequestFrom = null;
+        d.requestedBy = null;
+        d.lastUpdated = now;
+        if(state.selectedDoc===d.id) state.approvalDetailOpen = false;
+      }
       await persistDocs();
       render();
     });
@@ -4068,12 +4104,29 @@ function toEpoch(isoDateStr){
   return isNaN(t) ? null : t;
 }
 function applyMasterListRow(row, d){
+  // Guard: if this document currently has an unresolved in-app "new
+  // document" or "revision" request (lastRequestType is 'new'/'revision'
+  // and it hasn't reached 'อนุมัติแล้ว'/'ไม่อนุมัติ' yet), the master list
+  // row describes the OLD, still-published state of the document — NOT
+  // the in-progress request. This must be computed and applied BEFORE
+  // touching d.rev (and d.link/d.note/dates below), not just before the
+  // approvalStatus line further down: previously d.rev was overwritten
+  // unconditionally here, so re-running the import while a revision was
+  // pending would silently reset the just-bumped d.rev back down to the
+  // master list's old number — landing on the same value as
+  // d.lastRequestFrom and showing a broken "Rev.X → X" badge in the
+  // Approval queue, even though the in-app request had already moved the
+  // document to a genuinely new revision.
+  const hasActiveRequest = (d.lastRequestType==='new' || d.lastRequestType==='revision')
+    && ['ร่าง','รอทบทวน','รออนุมัติ'].includes(d.approvalStatus);
   d.name = row.name || d.name;
-  d.rev = row.rev || d.rev || null;
-  if(row.link) d.link = row.link;
-  if(row.note) d.note = row.note;
-  d.createdDate = toEpoch(row.created) || d.createdDate || null;
-  d.effectiveDate = toEpoch(row.effective) || d.effectiveDate || null;
+  if(!hasActiveRequest){
+    d.rev = row.rev || d.rev || null;
+    if(row.link) d.link = row.link;
+    if(row.note) d.note = row.note;
+    d.createdDate = toEpoch(row.created) || d.createdDate || null;
+    d.effectiveDate = toEpoch(row.effective) || d.effectiveDate || null;
+  }
   // NOTE: previously mapped role codes (LM/TM/QM/DC) to fixed person names
   // here via roleName(). Removed per lab decision — names for preparedBy/
   // reviewerName/approverName now always come from the actual logged-in
@@ -4102,15 +4155,9 @@ function applyMasterListRow(row, d){
   // below). All four are already-settled records coming from the master
   // list, not new/in-progress requests, so none of them need to go
   // through the app's internal approval workflow.
-  // Guard: if this document currently has an unresolved in-app "new
-  // document" or "revision" request (lastRequestType is 'new'/'revision'
-  // and it hasn't reached 'อนุมัติแล้ว'/'ไม่อนุมัติ' yet), the master
-  // list's note describes the OLD live document, not the in-progress
-  // request — don't stamp it approved and wipe out someone's pending
-  // review/approval step. Uses the same lastRequestType signal the rest
-  // of the app already relies on (see isFormalRequest, reviewPending).
-  const hasActiveRequest = (d.lastRequestType==='new' || d.lastRequestType==='revision')
-    && ['ร่าง','รอทบทวน','รออนุมัติ'].includes(d.approvalStatus);
+  // (hasActiveRequest computed above, before d.rev/d.note were touched)
+  // — don't stamp an in-progress request approved and wipe out someone's
+  // pending review/approval step.
   if(['ควบคุม','แจกจ่าย','สนับสนุน','ยกเลิก'].includes(d.note) && !hasActiveRequest){
     d.approvalStatus = 'อนุมัติแล้ว';
     if(!d.approvedBy){
