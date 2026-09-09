@@ -1917,6 +1917,7 @@ function docModal(){
           <div id="noteSuggest" class="suggest-hint"></div>
         </div>
         <div class="field"><label>Rev.</label><input id="mfRev" value="${d.rev||'0'}" placeholder="0"></div>
+        ${d.lastRequestType==='revision' ? `<div class="field"><label>Rev. ก่อนขอปรับปรุง (ตัวเลขที่ 1 ใน badge "ปรับปรุง Rev.X → Y")</label><input id="mfLastRequestFrom" value="${d.lastRequestFrom||''}" placeholder="0"><div style="font-size:11px; color:var(--ink-500); margin-top:4px;">แก้ตรงนี้ถ้า badge คำขอปรับปรุงในหน้า Approval แสดงเลข Rev. เริ่มต้นผิด (เช่นแสดง "Rev.1 → 2" ทั้งที่ควรเป็น "Rev.0 → 1")</div></div>` : ''}
         <div class="field"><label>วันที่จัดทำ</label><input id="mfCreated" type="date" value="${d.createdDate ? new Date(d.createdDate).toISOString().slice(0,10) : ''}"></div>
         <div class="field"><label>วันที่ประกาศใช้</label><input id="mfEffective" type="date" value="${d.effectiveDate ? new Date(d.effectiveDate).toISOString().slice(0,10) : ''}"></div>
         <div class="field"><label>วันที่ยกเลิก</label><input id="mfCancelled" type="date" value="${d.cancelledDate ? new Date(d.cancelledDate).toISOString().slice(0,10) : ''}"></div>
@@ -2141,6 +2142,8 @@ function wireModalControls(){
     if(!id || !name){ errEl.textContent = 'กรอกรหัสเอกสารและชื่อเอกสารให้ครบ'; errEl.style.display='block'; return; }
     const d = DOCUMENTS.find(x=>x.id===state.modal.id);
     d.name = name; d.clause = clause; d.link = link; d.note = note; d.rev = rev || d.rev;
+    const lastReqFrom = document.getElementById('mfLastRequestFrom');
+    if(lastReqFrom) d.lastRequestFrom = lastReqFrom.value.trim() || null;
     const created = document.getElementById('mfCreated');
     const effective = document.getElementById('mfEffective');
     if(created) d.createdDate = created.value ? new Date(created.value+'T00:00:00').getTime() : null;
