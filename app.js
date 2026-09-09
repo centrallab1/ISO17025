@@ -480,7 +480,13 @@ const I18N_DICT = {
 "โดย":"by",
 "ส่ง":"Submit",
 "ลบ":"Delete",
-"ดู":"View"
+"ดู":"View",
+"ไม่อนุมัติ — ส่งกลับไปแก้ไข":"Not Approved — Sent Back for Revision",
+"ขั้นตอนร่าง: แก้ไขเอกสารตามความเห็นข้างต้น":"Draft step: revise the document per the comment above",
+"เข้าไปที่ลิงก์เอกสารเดิม (ที่ DC วางไว้) เพื่อแก้ไข แล้วกดยืนยันเมื่อแก้ไขเสร็จ · ข้อกำหนด: ":"Open the existing document link (added by DC) to make edits, then confirm once done · Clause: ",
+"เปิดลิงก์ไฟล์":"Open File Link",
+"ยืนยันว่าแก้ไขแล้ว":"Confirm Edits Done",
+"ผู้จัดทำกดยืนยันว่าแก้ไขแล้ว — ส่งกลับเข้าสู่การทบทวนอีกครั้ง":"Preparer confirmed the edits — sent back into review"
 };
 const I18N_KEYS_SORTED = Object.keys(I18N_DICT).sort((a,b)=> b.length - a.length);
 const THAI_RE = /[\u0E00-\u0E7F]/;
@@ -2793,6 +2799,7 @@ function eitem(opts){
 // ============================================================
 function renderFormConfirmBox(d){
   if(d.lastRequestType !== 'new' && d.lastRequestType !== 'revision') return '';
+  if(d.approvalStatus==='ร่าง' && d.rejectedRevision) return renderRejectedDraftBox(d);
   if(!d.formConfirmedAt && d.approvalStatus !== 'ร่าง') return ''; // shouldn't normally happen
   const isRequester = currentUser && (d.requestedBy === currentUser.name || isDC());
   if(d.formConfirmedAt){
@@ -2816,8 +2823,7 @@ function renderFormConfirmBox(d){
 }
 function wireFormConfirm(){
   const btn = document.getElementById('btnConfirmForm');
-  if(!btn) return;
-  btn.addEventListener('click', async ()=>{
+  if(btn) btn.addEventListener('click', async ()=>{
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
     if(!d) return;
     const actor = currentActorName();
@@ -2831,6 +2837,50 @@ function wireFormConfirm(){
     render();
     await persistDocs();
   });
+  const rejEditBtn = document.getElementById('btnConfirmRejectedEdit');
+  if(rejEditBtn) rejEditBtn.addEventListener('click', async ()=>{
+    const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
+    if(!d) return;
+    const actor = currentActorName();
+    const now = Date.now();
+    d.approvalStatus = 'รอทบทวน';
+    d.lastUpdated = now;
+    d.comments = d.comments || [];
+    d.comments.push({ by:actor, text:'ผู้จัดทำกดยืนยันว่าแก้ไขแล้ว — ส่งกลับเข้าสู่การทบทวนอีกครั้ง', time: now });
+    render();
+    await persistDocs();
+  });
+}
+// ============================================================
+// DRAFT AFTER REJECT: replaces renderFormConfirmBox's normal content for
+// a formal new/revision request once it has been rejected at least once
+// (d.rejectedRevision). Unlike the very first draft step, DC has already
+// registered a real document link (d.link/d.clause) — the preparer just
+// needs to go fix that same file and confirm, not fill out a brand-new
+// SharePoint request form. Confirming here sends it straight to รอทบทวน,
+// skipping step 2/3 since both are already on record.
+// ============================================================
+function renderRejectedDraftBox(d){
+  const lastComment = (d.comments||[])[(d.comments||[]).length-1];
+  const rejectedBy = lastComment ? lastComment.by : '';
+  const rejectedAt = lastComment ? lastComment.time : d.lastUpdated;
+  const rejectedComment = lastComment ? lastComment.text : '';
+  const isRequester = currentUser && (d.requestedBy === currentUser.name || isDC());
+  return `
+  <div class="side-box" style="border-color:var(--red-600); background:var(--red-50); margin-bottom:18px;">
+    <div class="side-box-title" style="color:var(--red-600);">ไม่อนุมัติ — ส่งกลับไปแก้ไข</div>
+    <div style="font-size:13px; color:var(--ink-900); font-weight:700;">${rejectedBy || 'ไม่ระบุผู้พิจารณา'}</div>
+    <div style="font-size:12px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(rejectedAt)}</div>
+    ${rejectedComment ? `<div style="font-size:12.5px; color:var(--ink-700); margin-top:8px; padding-top:8px; border-top:1px solid var(--line);">${rejectedComment}</div>` : ''}
+  </div>
+  <div class="side-box" style="border-color:var(--amber-600); background:var(--amber-50); margin-bottom:18px;">
+    <div style="font-size:12.5px; font-weight:800; color:var(--amber-600); margin-bottom:8px;">ขั้นตอนร่าง: แก้ไขเอกสารตามความเห็นข้างต้น</div>
+    <div style="font-size:11.5px; color:var(--ink-700); margin-bottom:10px; word-break:break-all;">เข้าไปที่ลิงก์เอกสารเดิม (ที่ DC วางไว้) เพื่อแก้ไข แล้วกดยืนยันเมื่อแก้ไขเสร็จ · ข้อกำหนด: ${d.clause?clauseLabel(d.clause):'ไม่ระบุ'}</div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      ${d.link ? `<a class="btn ghost" href="${d.link}" target="_blank" rel="noopener">${ic('link')} เปิดลิงก์ไฟล์</a>` : ''}
+      ${isRequester ? `<button class="btn success" id="btnConfirmRejectedEdit">${ic('check')} ยืนยันว่าแก้ไขแล้ว</button>` : `<span style="font-size:12px; color:var(--ink-500);">รอ ${d.requestedBy||'ผู้ขอ'} ยืนยัน</span>`}
+    </div>
+  </div>`;
 }
 
 // ============================================================
@@ -2841,6 +2891,7 @@ function wireFormConfirm(){
 // ============================================================
 function renderDcRegisterBox(d){
   if(d.lastRequestType !== 'new' && d.lastRequestType !== 'revision') return '';
+  if(d.approvalStatus==='ร่าง' && d.rejectedRevision) return ''; // link already shown in renderRejectedDraftBox above
   if(!d.linkSetAt && d.approvalStatus !== 'รอทบทวน') return ''; // shouldn't normally happen
   if(d.linkSetAt){
     return `
@@ -2959,10 +3010,13 @@ function renderApprovedBox(d){
     ${approvedComment ? `<div style="font-size:12.5px; color:var(--ink-700); margin-top:8px; padding-top:8px; border-top:1px solid var(--line);">${approvedComment}</div>` : ''}
   </div>`;
 }
-// once a request is rejected it's a dead end — no more Approve/Reject
-// buttons should be reachable, otherwise a stray click could push the
-// status through STATUS_FLOW from index -1 (rejected isn't part of the
-// flow array) and silently reset it back to 'ร่าง'
+// 'ไม่อนุมัติ' is now only reached by non-formal requests (e.g. annual
+// review) — formal new/revision requests go back to 'ร่าง' instead on
+// reject (see the rejectBtn handler and renderRejectedDraftBox above), so
+// this stays a dead end only for the types that have no file link to fix.
+// No more Approve/Reject buttons should be reachable from here, otherwise
+// a stray click could push the status through STATUS_FLOW from index -1
+// (rejected isn't part of the flow array) and silently reset it to 'ร่าง'.
 function renderRejectedBox(d){
   if(d.approvalStatus !== 'ไม่อนุมัติ') return '';
   const lastComment = (d.comments||[])[(d.comments||[]).length-1];
@@ -3777,11 +3831,25 @@ function attachApprovalHandlers(){
       return;
     }
     if(!comment){ errEl.textContent='กรอกความเห็นก่อนกด "ไม่อนุมัติ"'; errEl.style.display='block'; return; }
-    d.approvalStatus = 'ไม่อนุมัติ';
-    d.lastUpdated = Date.now();
+    const now = Date.now();
     d.comments = d.comments || [];
-    d.comments.push({ by:actor, text:comment, time: Date.now() });
+    d.comments.push({ by:actor, text:comment, time: now });
     d.approvedBy = null; d.approvedAt = null; d.approvedComment = null;
+    d.lastUpdated = now;
+    // formal new/revision requests already have a DC-registered document
+    // link (d.link/d.clause/linkSetAt) by the time Reject is reachable —
+    // send them back to ร่าง so the preparer fixes the SAME file via that
+    // link and resubmits, instead of the old dead-end 'ไม่อนุมัติ'. Other
+    // request types (e.g. annual review, no file to edit) keep the old
+    // dead-end behavior. rejectedRevision stays true forever once set, so
+    // renderFormConfirmBox always shows the "edit existing link" box for
+    // this doc from now on, never the original "fill new SharePoint form" box.
+    if(d.lastRequestType==='new' || d.lastRequestType==='revision'){
+      d.approvalStatus = 'ร่าง';
+      d.rejectedRevision = true;
+    } else {
+      d.approvalStatus = 'ไม่อนุมัติ';
+    }
     state.approvalTab = 'history';
     state.approvalPage = 1;
     render();
