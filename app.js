@@ -486,7 +486,8 @@ const I18N_DICT = {
 "เข้าไปที่ลิงก์เอกสารเดิม (ที่ DC วางไว้) เพื่อแก้ไข แล้วกดยืนยันเมื่อแก้ไขเสร็จ · ข้อกำหนด: ":"Open the existing document link (added by DC) to make edits, then confirm once done · Clause: ",
 "เปิดลิงก์ไฟล์":"Open File Link",
 "ยืนยันว่าแก้ไขแล้ว":"Confirm Edits Done",
-"ผู้จัดทำกดยืนยันว่าแก้ไขแล้ว — ส่งกลับเข้าสู่การทบทวนอีกครั้ง":"Preparer confirmed the edits — sent back into review"
+"ผู้จัดทำกดยืนยันว่าแก้ไขแล้ว — ส่งกลับเข้าสู่การทบทวนอีกครั้ง":"Preparer confirmed the edits — sent back into review",
+"ถูกปฏิเสธ — รอแก้ไข":"Rejected — Awaiting Revision"
 };
 const I18N_KEYS_SORTED = Object.keys(I18N_DICT).sort((a,b)=> b.length - a.length);
 const THAI_RE = /[\u0E00-\u0E7F]/;
@@ -932,6 +933,20 @@ const ICONS = {
 };
 function ic(name, cls=''){ return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||''}</svg>`; }
 
+// Small red tag meant to sit right under/next to the 'ร่าง' status badge
+// wherever that badge is shown, for a formal request that's back in draft
+// specifically because it was rejected (d.rejectedRevision) — see the
+// rejectBtn handler and renderRejectedDraftBox. approvalBadge() itself
+// lives in a different file we don't have here, so this is rendered
+// alongside it rather than inside it. block:true wraps it onto its own
+// line (for table cells); block:false keeps it inline (for flex-wrap
+// title rows, where it wraps naturally once the row runs out of space).
+function rejectedRevisionTag(d, block){
+  if(!d || !d.rejectedRevision || d.approvalStatus !== 'ร่าง') return '';
+  const pill = `<span style="display:inline-block; font-size:10.5px; font-weight:700; color:var(--red-600); background:var(--red-50); border-radius:6px; padding:2px 6px; white-space:nowrap;">ถูกปฏิเสธ — รอแก้ไข</span>`;
+  return block ? `<div style="margin-top:3px;">${pill}</div>` : pill;
+}
+
 function emptyState(title, sub){
   return `<div class="empty-state">${ic('empty')}<h3>${title}</h3><p>${sub}</p></div>`;
 }
@@ -1142,6 +1157,7 @@ function renderNotifPanel(){
         <div class="notif-text">
           <div class="notif-title">${d.id} — ${cleanName(d)}</div>
           <div class="notif-sub">${label} · ${approvalBadge(d.approvalStatus)}</div>
+          ${rejectedRevisionTag(d, true)}
         </div>
       </div>`;
     }).join('') : `<div class="notif-empty">ไม่มีคำขอค้างอยู่</div>`}
@@ -1671,7 +1687,7 @@ function docTable(docs){
     <thead><tr><th>Document ID</th><th>Document Name</th><th>Type</th><th>Status</th><th>Approval</th><th>Last Updated</th></tr></thead>
     <tbody>${docs.map(d=>`<tr data-open-doc="${d.id}">
       <td class="mono">${d.id}</td><td class="name" title="${cleanName(d).replace(/"/g,'&quot;')}">${cleanName(d)}</td><td>${docTypeLabel(d)}</td>
-      <td>${statusBadge(d.note)}</td><td>${approvalBadge(d.approvalStatus)}</td><td>${fmtDate(d.lastUpdated)}</td>
+      <td>${statusBadge(d.note)}</td><td>${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, true)}</td><td>${fmtDate(d.lastUpdated)}</td>
     </tr>`).join('')}</tbody>
   </table></div>`;
 }
@@ -1791,7 +1807,7 @@ function renderDocumentsInto(){
         ${pageItems.length ? pageItems.map(d=>`
         <tr data-open-doc="${d.id}">
           <td class="mono">${d.id}</td><td class="name" title="${cleanName(d).replace(/"/g,'&quot;')}">${cleanName(d)}</td><td>${d.clause || '<span style="color:var(--ink-400);">—</span>'}</td>
-          <td>${docTypeLabel(d)}</td><td>${statusBadge(d.note)}</td><td>${approvalBadge(d.approvalStatus)}</td><td>${fmtDate(d.lastUpdated)}</td>
+          <td>${docTypeLabel(d)}</td><td>${statusBadge(d.note)}</td><td>${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, true)}</td><td>${fmtDate(d.lastUpdated)}</td>
           <td><div class="row-actions" onclick="event.stopPropagation()">
             ${isDC() ? `<button data-edit="${d.id}" title="Edit">${ic('edit')}</button>
             <button data-del="${d.id}" class="del" title="Delete">${ic('trash')}</button>` : ''}
@@ -2637,7 +2653,7 @@ function viewDocDetail(docId){
     <div class="detail-head">
       <div class="doc-thumb">${ic('pdf')}<span>${docTypeCode(d)}</span></div>
       <div style="flex:1;">
-        <div class="detail-title-row"><div class="detail-title">${d.id}</div>${statusBadge(d.note)}${approvalBadge(d.approvalStatus)}${d.lastRequestType==='new'||d.lastRequestType==='revision' ? (d.publishedLink ? `<span class="badge active">เผยแพร่แล้ว</span>` : `<span class="badge review">รอ DC เผยแพร่</span>`) : ''}</div>
+        <div class="detail-title-row"><div class="detail-title">${d.id}</div>${statusBadge(d.note)}${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, false)}${d.lastRequestType==='new'||d.lastRequestType==='revision' ? (d.publishedLink ? `<span class="badge active">เผยแพร่แล้ว</span>` : `<span class="badge review">รอ DC เผยแพร่</span>`) : ''}</div>
         <div class="detail-sub">${cleanName(d)}${d.rev ? ` <span style="color:var(--ink-500); font-weight:600;">· Rev.${d.rev}</span>` : ''}</div>
         <div class="kv-row"><div class="k">ประเภท</div><div class="v">${docTypeLabel(d)}</div></div>
         <div class="kv-row"><div class="k">วันที่จัดทำ</div><div class="v">${d.createdDate ? fmtDate(d.createdDate) : '—'}</div></div>
@@ -3147,7 +3163,7 @@ function viewRevisionDetailInline(d, standalone){
   <div class="panel">
     <div class="panel-head">
       <div>
-        <div class="panel-title" style="display:flex; align-items:center; gap:9px; flex-wrap:wrap;">${d.id} ${cleanName(d)} ${statusBadge(d.note)} ${approvalBadge(d.approvalStatus)}</div>
+        <div class="panel-title" style="display:flex; align-items:center; gap:9px; flex-wrap:wrap;">${d.id} ${cleanName(d)} ${statusBadge(d.note)} ${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, false)}</div>
         <div style="font-size:11.5px; color:var(--ink-500); margin-top:3px;">ประวัติการแก้ไข/ขอปรับปรุงเอกสาร พร้อมลิงก์ ณ ขณะนั้น เพื่อความโปร่งใสและตรวจสอบข้อมูลย้อนหลังได้</div>
       </div>
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; position:relative;">
@@ -3335,7 +3351,7 @@ function viewRevisionDashboard(){
           <td class="mono">${d.id}<div class="name" title="${cleanName(d).replace(/"/g,'&quot;')}" style="max-width:220px;">${cleanName(d)}</div></td>
           <td>${d.clause || '<span style="color:var(--ink-400);">—</span>'}</td>
           <td>${d.rev || '—'}</td>
-          <td>${approvalBadge(d.approvalStatus)}</td>
+          <td>${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, true)}</td>
           <td>${fmtDateTime(d.lastUpdated)}</td>
           <td><div class="next-review" style="color:${isOverdue?'var(--red-600)':'var(--ink-700)'}">${fmtDate(nrd)}<div class="rel" style="color:${isOverdue?'var(--red-600)':'var(--ink-500)'}">${isOverdue ? `เกินกำหนด ${Math.abs(days)} วัน` : `อีก ${days} วัน`}</div></div></td>
           <td><button class="chev-btn" data-open-rev-btn="${d.id}">${ic('chevronRight')}</button></td>
@@ -3579,7 +3595,7 @@ function viewApproval(){
           <td class="mono">${d.id}</td>
           <td class="name" title="${cleanName(d).replace(/"/g,'&quot;')}">${cleanName(d)}</td>
           <td>${requestTypeBadge(d)}</td>
-          <td>${approvalBadge(d.approvalStatus)}</td>
+          <td>${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, true)}</td>
           <td>${stepIndicator(d.approvalStatus||'ร่าง')}</td>
           <td><div class="actor-cell"><div class="row-avatar">${initials(actor.name)}</div><div><div class="actor-name">${actor.name||'—'}</div><div class="actor-role">${actor.role}</div></div></div></td>
           <td>${fmtDateTime(d.lastUpdated)}</td>
@@ -3622,7 +3638,7 @@ function viewApprovalDetail(){
   <div class="panel">
     <div class="panel-head">
       <div>
-        <div class="panel-title" style="display:flex; align-items:center; gap:9px; flex-wrap:wrap;">${d.id} ${cleanName(d)} ${approvalBadge(status)}</div>
+        <div class="panel-title" style="display:flex; align-items:center; gap:9px; flex-wrap:wrap;">${d.id} ${cleanName(d)} ${approvalBadge(status)}${rejectedRevisionTag(d, false)}</div>
         <div style="font-size:12px; color:var(--ink-500); margin-top:3px; font-weight:600;">ข้อกำหนด: ${d.clause ? clauseLabel(d.clause) : 'ไม่ระบุ'}${requestLabel ? ` · คำขอ: ${requestLabel}` : ''}</div>
       </div>
       <button class="btn ghost" data-go="docdetail">${ic('doc')} ดูรายละเอียดเอกสาร</button>
