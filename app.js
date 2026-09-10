@@ -902,6 +902,7 @@ const state = {
   revPage: 1,
   revisionDetailOpen: false,
   revisionTimelineExpanded: false,
+  cancelRequestModal: null, // { docId }
 };
 
 const ICONS = {
@@ -1210,6 +1211,9 @@ function renderModalLayer(){
   } else if(state.wmManualModal){
     layer.innerHTML = wmManualModal();
     wireWmManualModal();
+  } else if(state.cancelRequestModal){
+    layer.innerHTML = cancelRequestModal();
+    wireCancelRequestModal();
   } else {
     layer.innerHTML = '';
   }
@@ -2450,7 +2454,7 @@ function archiveModal(){
           <div style="font-size:13px; font-weight:700; color:var(--ink-900); margin-bottom:4px;">${a.title}</div>
           <div style="font-size:11.5px; color:var(--ink-500); margin-bottom:16px;">${a.category||'ไม่ระบุหมวดหมู่'}${a.clause?` · ข้อกำหนด ${clauseLabel(a.clause)}`:''} · อัปโหลดโดย ${a.uploadedBy||'ไม่ระบุ'}</div>
           <div id="archiveDropZone" class="archive-dropzone" style="border:1.5px dashed var(--ink-300,#c7cdd6); border-radius:9px; padding:14px; text-align:center; margin-bottom:10px; transition:background .12s,border-color .12s;">
-            ${ic('file','')} <span style="font-size:12px; color:var(--ink-700); font-weight:600;">ลากไฟล์มาวางตรงนี้</span>
+            <div class="file-ic" style="display:inline-flex; width:16px; height:16px; vertical-align:middle; margin-right:4px;">${ic('file')}</div><span style="font-size:12px; color:var(--ink-700); font-weight:600; vertical-align:middle;">ลากไฟล์มาวางตรงนี้</span>
             <div style="font-size:10.5px; color:var(--ink-500); margin-top:2px;">จะเปิดฟอร์มให้อัตโนมัติ พร้อมบอกชื่อไฟล์ที่ต้องแนบ</div>
           </div>
           <div id="archiveDropStatus" style="font-size:11.5px; color:var(--green-600); font-weight:700; margin-bottom:8px; display:none;"></div>
@@ -2477,7 +2481,7 @@ function archiveModal(){
           <div style="font-size:12.5px; font-weight:800; color:var(--amber-600); margin-bottom:6px;">กรอกแบบฟอร์มก่อนบันทึก</div>
           <div style="font-size:11.5px; color:var(--ink-700); margin-bottom:10px;">${isDC() ? 'เปิดฟอร์มด้านล่างเพื่อกรอก/อ้างอิงรายละเอียดเอกสาร แล้ววางลิงก์เอกสารจริงในช่องด้านล่างนี้ได้เลย' : 'เปิดฟอร์มด้านล่าง กรอกรายละเอียดเอกสาร แล้วค่อยกลับมากรอกข้อมูลย่อในนี้และกด "เพิ่มเอกสาร" — DC จะเป็นผู้วางลิงก์เอกสารจริงและกดยืนยันในขั้นตอนถัดไป'}</div>
           <div id="archiveDropZone" class="archive-dropzone" style="border:1.5px dashed var(--ink-300,#c7cdd6); border-radius:9px; padding:14px; text-align:center; margin-bottom:10px; transition:background .12s,border-color .12s;">
-            ${ic('file','')} <span style="font-size:12px; color:var(--ink-700); font-weight:600;">ลากไฟล์มาวางตรงนี้</span>
+            <div class="file-ic" style="display:inline-flex; width:16px; height:16px; vertical-align:middle; margin-right:4px;">${ic('file')}</div><span style="font-size:12px; color:var(--ink-700); font-weight:600; vertical-align:middle;">ลากไฟล์มาวางตรงนี้</span>
             <div style="font-size:10.5px; color:var(--ink-500); margin-top:2px;">เติมชื่อเอกสารให้ + เปิดฟอร์มให้อัตโนมัติ</div>
           </div>
           <div id="archiveDropStatus" style="font-size:11.5px; color:var(--green-600); font-weight:700; margin-bottom:8px; display:none;"></div>
@@ -2674,6 +2678,7 @@ function viewDocDetail(docId){
         <div class="detail-actions">
           ${isDC() ? `<button class="btn ghost" id="btnDetailEdit">${ic('edit')} แก้ไข</button>` : ''}
           <button class="btn ghost" id="btnDetailRevise">${ic('history')} ปรับปรุง Rev.</button>
+          <button class="btn danger" id="btnDetailCancelDoc">${ic('alert')} ขอยกเลิกเอกสาร</button>
           ${isDC() ? `<button class="btn danger" id="btnDetailDelete">${ic('trash')} ลบ</button>` : ''}
         </div>
       </div>
@@ -2708,6 +2713,77 @@ function attachDetailActionHandlers(){
     DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
     await persistDocs();
     goBack();
+  });
+  const cancelDocBtn = document.getElementById('btnDetailCancelDoc');
+  if(cancelDocBtn) cancelDocBtn.addEventListener('click', ()=>{
+    state.cancelRequestModal = { docId: state.selectedDoc };
+    renderModalLayer();
+  });
+}
+
+// ============================================================
+// CANCEL REQUEST — "ขอยกเลิกเอกสาร". A formal request, not an instant
+// action: it goes through the same review → approve workflow as a new-
+// document/revision request (see wireApprovalControls' btnApprove
+// handler), just without the SharePoint-form/DC-link steps those need,
+// since there's no file to prepare — closer to the "annual review"
+// request type. Only once it reaches 'อนุมัติแล้ว' does the document
+// actually get moved into the archive's "เอกสารยกเลิก" folder (see
+// cancelDocumentToArchive, called from the approve handler). Rejecting it
+// leaves the document exactly as it was, marked 'ไม่อนุมัติ'.
+function cancelRequestModal(){
+  const d = DOCUMENTS.find(x=>x.id===state.cancelRequestModal.docId);
+  if(!d) return `<div class="modal-backdrop" id="cancelReqBackdrop"><div class="modal"><div class="modal-body">${emptyState('ไม่พบเอกสาร','')}</div><div class="modal-actions"><button class="btn ghost" id="cancelReqCloseBtn">ปิด</button></div></div></div>`;
+  return `
+  <div class="modal-backdrop" id="cancelReqBackdrop">
+    <div class="modal">
+      <div class="modal-head"><div class="modal-title">ขอยกเลิกเอกสาร</div><button class="modal-close" id="cancelReqCloseBtn">✕</button></div>
+      <div class="modal-body">
+        <div style="font-size:13px; font-weight:700; color:var(--ink-900); margin-bottom:4px;">${d.id} ${cleanName(d)}</div>
+        <div style="font-size:11.5px; color:var(--ink-500); margin-bottom:16px;">คำขอนี้ต้องผ่านการทบทวนและอนุมัติเหมือนคำขออื่นๆ ก่อนเอกสารจะถูกย้ายไปคลังเอกสาร → โฟลเดอร์ "${CANCELLED_ARCHIVE_CATEGORY}" จริง</div>
+        <div class="field"><label>หมายเหตุคำขอ (เหตุผลที่ขอยกเลิก)</label>
+          <textarea id="cancelReqNote" rows="3" placeholder="เช่น เอกสารเลิกใช้งานแล้ว ถูกแทนที่ด้วย..."></textarea>
+        </div>
+        <div class="field-error" id="cancelReqError" style="display:none;"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="cancelReqCancelBtn">ปิด</button>
+        <button class="btn danger" id="cancelReqSubmitBtn">${ic('alert')} ส่งคำขอยกเลิก</button>
+      </div>
+    </div>
+  </div>`;
+}
+function wireCancelRequestModal(){
+  const backdrop = document.getElementById('cancelReqBackdrop');
+  if(!backdrop) return;
+  const close = ()=>{ state.cancelRequestModal = null; renderModalLayer(); };
+  const closeBtn = document.getElementById('cancelReqCloseBtn');
+  if(closeBtn) closeBtn.addEventListener('click', close);
+  const cancelBtn = document.getElementById('cancelReqCancelBtn');
+  if(cancelBtn) cancelBtn.addEventListener('click', close);
+  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) close(); });
+  const submitBtn = document.getElementById('cancelReqSubmitBtn');
+  if(!submitBtn) return;
+  submitBtn.addEventListener('click', async ()=>{
+    const errEl = document.getElementById('cancelReqError');
+    const note = document.getElementById('cancelReqNote').value.trim();
+    if(!note){ errEl.textContent = 'กรอกหมายเหตุคำขอก่อนส่ง'; errEl.style.display = 'block'; return; }
+    const d = DOCUMENTS.find(x=>x.id===state.cancelRequestModal.docId);
+    if(!d) return;
+    const actor = currentActorName();
+    const now = Date.now();
+    d.approvalStatus = 'รอทบทวน';
+    d.lastRequestType = 'cancel';
+    d.lastRequestFrom = d.rev || null;
+    d.requestedBy = actor;
+    d.cancelRequestNote = note;
+    d.approvedBy = null; d.approvedAt = null; d.approvedComment = null;
+    d.comments = d.comments || [];
+    d.comments.push({ by:actor, text:`ขอยกเลิกเอกสาร — ${note}`, time: now });
+    d.lastUpdated = now;
+    state.cancelRequestModal = null;
+    await persistDocs();
+    goTo('approval', { selectedDoc: d.id, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false });
   });
 }
 
@@ -2771,6 +2847,9 @@ function classifyEvent(text){
   }
   if(/ขอทบทวนประจำปี/.test(text)){
     return { icon:'send', bg:'--amber-600', title:'ขอทบทวนประจำปี' };
+  }
+  if(/^ขอยกเลิกเอกสาร/.test(text)){
+    return { icon:'alert', bg:'--red-600', title:'ขอยกเลิกเอกสาร' };
   }
   if(/^ไม่อนุมัติ|ไม่อนุมัติ$/.test(text) || (/ไม่อนุมัติ/.test(text) && !/→\s*อนุมัติแล้ว/.test(text))){
     return { icon:'alert', bg:'--red-600', title:'ปฏิเสธเอกสาร' };
@@ -3511,12 +3590,13 @@ function requestTypeLabel(d){
   return d.lastRequestType==='new' ? 'เอกสารใหม่'
     : d.lastRequestType==='revision' ? `ปรับปรุง (Rev.${d.lastRequestFrom||'-'} → ${d.rev||'-'})`
     : d.lastRequestType==='review' ? 'ทบทวนประจำปี (ไม่มีการแก้ไข)'
+    : d.lastRequestType==='cancel' ? 'ขอยกเลิกเอกสาร'
     : null;
 }
 function requestTypeBadge(d){
   const label = requestTypeLabel(d);
   if(!label) return '<span style="color:var(--ink-400);">—</span>';
-  const cls = d.lastRequestType==='revision' ? 'review' : d.lastRequestType==='review' ? 'pending' : 'active';
+  const cls = d.lastRequestType==='revision' ? 'review' : d.lastRequestType==='review' ? 'pending' : d.lastRequestType==='cancel' ? 'review' : 'active';
   return `<span class="badge ${cls}">${label}</span>`;
 }
 function viewApproval(){
@@ -3734,9 +3814,10 @@ function attachApprovalHandlers(){
       // "delete" instead cancels the in-progress request and restores the
       // document to its last-published state.
       const isNewDocRequest = d.lastRequestType === 'new';
+      const withdrawLabel = d.lastRequestType==='cancel' ? 'คำขอยกเลิกเอกสาร' : d.lastRequestType==='review' ? 'คำขอทบทวนประจำปี' : 'คำขอปรับปรุง';
       const confirmMsg = isNewDocRequest
         ? `ลบคำขอ "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`
-        : `ยกเลิกคำขอปรับปรุงของ "${d.id} ${cleanName(d)}" ใช่หรือไม่? เอกสารจะกลับไปเป็น Rev.${d.lastRequestFrom || d.rev || '0'} (สถานะเผยแพร่ล่าสุด) การยกเลิกไม่สามารถย้อนกลับได้`;
+        : `ยกเลิก${withdrawLabel}ของ "${d.id} ${cleanName(d)}" ใช่หรือไม่? เอกสารจะกลับไปเป็นสถานะเผยแพร่ล่าสุดตามเดิม การยกเลิกไม่สามารถย้อนกลับได้`;
       if(!confirm(confirmMsg)) return;
       if(isNewDocRequest){
         DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
@@ -3745,7 +3826,7 @@ function attachApprovalHandlers(){
         const actor = currentActorName();
         const now = Date.now();
         d.comments = d.comments || [];
-        d.comments.push({ by:actor, text:`ยกเลิกคำขอปรับปรุง — คืนสถานะเอกสารเป็น Rev.${d.lastRequestFrom || d.rev || '0'} (เผยแพร่แล้ว)`, time: now });
+        d.comments.push({ by:actor, text:`ยกเลิก${withdrawLabel} — คืนสถานะเอกสารเป็นเผยแพร่แล้วตามเดิม`, time: now });
         if(d.lastRequestType==='revision') d.rev = d.lastRequestFrom || d.rev;
         d.approvalStatus = 'อนุมัติแล้ว';
         // restore the roles to whoever the last actually-published round
@@ -3758,6 +3839,7 @@ function attachApprovalHandlers(){
         d.lastRequestType = null;
         d.lastRequestFrom = null;
         d.requestedBy = null;
+        d.cancelRequestNote = null;
         d.lastUpdated = now;
         if(state.selectedDoc===d.id) state.approvalDetailOpen = false;
       }
@@ -3821,8 +3903,22 @@ function attachApprovalHandlers(){
       errEl.style.display = 'block';
       return;
     }
+    // rule 5: a cancellation request's final approval moves the document
+    // into the archive — make sure the archive is actually loaded first
+    // (same guard runMasterListImport uses), checked BEFORE any mutation
+    // below so a failed load leaves the document untouched rather than
+    // half-updated.
+    if(d.lastRequestType==='cancel' && nextStatus==='อนุมัติแล้ว' && !ARCHIVE_LOADED){
+      await loadArchive();
+      if(!ARCHIVE_LOADED){
+        errEl.textContent = 'โหลดคลังเอกสารไม่สำเร็จ ลองใหม่อีกครั้ง: ' + (ARCHIVE_ERROR||'');
+        errEl.style.display = 'block';
+        return;
+      }
+    }
 
     const now = Date.now();
+    let docCancelledToArchive = false;
     d.approvalStatus = nextStatus;
     d.lastUpdated = now;
     d.comments = d.comments || [];
@@ -3856,6 +3952,22 @@ function attachApprovalHandlers(){
       if(d.lastRequestType==='review'){
         d.lastReviewedAt = now;
         d.lastReviewedBy = actor;
+      }
+      // A fully-approved cancellation request is the one case where
+      // approval doesn't just update the document in place — it retires
+      // it. Move it into the archive's "เอกสารยกเลิก" folder (same helper
+      // the old immediate-cancel button used) and drop it from the live
+      // register, same as archiveCancelledRow() does during a master-list
+      // import. docCancelledToArchive is set so the code below knows to
+      // persist ARCHIVE_ITEMS too, and to skip the id-suffix/rev logic
+      // further down (which only applies to revisions of a document that
+      // still exists).
+      if(d.lastRequestType==='cancel'){
+        cancelDocumentToArchive(d, actor);
+        DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
+        docCancelledToArchive = true;
+        state.selectedDoc = null;
+        state.approvalDetailOpen = false;
       }
       // Document ID suffix tracks the current Rev. — regenerated every
       // time a revision request is approved, whether this is the
@@ -3897,6 +4009,7 @@ function attachApprovalHandlers(){
     }
     render();
     await persistDocs();
+    if(docCancelledToArchive) await persistArchive();
   });
   const rejectBtn = document.getElementById('btnReject');
   if(rejectBtn) rejectBtn.addEventListener('click', async ()=>{
@@ -4223,6 +4336,31 @@ function archiveCancelledRow(row, existingDoc){
       sourceDocId: row.id, title: row.name || row.id, category: CANCELLED_ARCHIVE_CATEGORY,
       clause: suggestedClause, link: row.link || '', uploadedBy: approver || 'Master List Import',
       uploadedAt: groupDate, cancelledDate, status:'ยืนยันแล้ว', verifiedBy: approver || null, verifiedAt: groupDate,
+    });
+  }
+}
+// Manual, in-app equivalent of what archiveCancelledRow() does during a
+// master list import, but triggered by a DC button on the document detail
+// page instead of an import row. Moves a live document straight into the
+// archive's "เอกสารยกเลิก" (cancelled) folder — matched on sourceDocId so if
+// this ever runs twice for the same doc (shouldn't happen, since the doc is
+// removed from DOCUMENTS right after) it updates rather than duplicates.
+function cancelDocumentToArchive(d, actor){
+  const now = Date.now();
+  let a = ARCHIVE_ITEMS.find(x=> x.sourceDocId===d.id);
+  if(a){
+    a.title = d.name || a.title;
+    a.category = CANCELLED_ARCHIVE_CATEGORY;
+    a.link = d.link || a.link;
+    a.clause = a.clause || d.clause || '';
+    a.uploadedAt = now;
+    a.cancelledDate = now;
+  } else {
+    ARCHIVE_ITEMS.push({
+      id: 'ARC-' + now.toString(36) + Math.random().toString(36).slice(2,6),
+      sourceDocId: d.id, title: d.name || d.id, category: CANCELLED_ARCHIVE_CATEGORY,
+      clause: d.clause || '', link: d.link || '', uploadedBy: actor || 'ไม่ระบุ',
+      uploadedAt: now, cancelledDate: now, status:'ยืนยันแล้ว', verifiedBy: actor || null, verifiedAt: now,
     });
   }
 }
