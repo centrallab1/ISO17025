@@ -3669,7 +3669,7 @@ function requestTypeBadge(d){
   // give it its own red/alert styling instead, matching the red used for
   // this same event type in the activity timeline (classifyEvent above).
   if(d.lastRequestType==='cancel'){
-    return `<span class="badge" style="background:rgba(224,72,63,0.12); color:var(--red-600);">${label}</span>`;
+    return `<span class="badge badge-cancel">${label}</span>`;
   }
   const cls = d.lastRequestType==='revision' ? 'review' : d.lastRequestType==='review' ? 'pending' : 'active';
   return `<span class="badge ${cls}">${label}</span>`;
@@ -3713,6 +3713,15 @@ function viewApproval(){
   const typeOpts = [['All','ทุกประเภท'], ...Object.entries(DOC_TYPE_MAP)];
 
   return `
+  <style>
+    /* "cancel" request-type badges used to reuse the same orange .badge.review
+       class as "revision" badges, so the two looked identical in this list.
+       The dot itself is painted via ::before tied to the class name, which
+       inline style="" on the span can't override — so this needs a real
+       class + scoped rule, not an inline color. */
+    .badge.badge-cancel{ background:rgba(224,72,63,0.12) !important; color:var(--red-600) !important; }
+    .badge.badge-cancel::before{ background:var(--red-600) !important; }
+  </style>
   <div class="stat-row-5">
     <div class="stat-card"><div class="stat-icon blue">${ic('doc')}</div>
       <div><div class="stat-num">${total}</div><div class="stat-label">รายการทั้งหมด</div></div></div>
@@ -3811,6 +3820,13 @@ function viewApprovalDetail(){
       <div class="side-box"><div class="side-box-title">วันที่ประกาศใช้</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.effectiveDate ? fmtDate(d.effectiveDate) : '—'}</div></div>
       ${d.cancelledDate ? `<div class="side-box"><div class="side-box-title">วันที่ยกเลิก</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${fmtDate(d.cancelledDate)}</div></div>` : ''}
       <div class="side-box"><div class="side-box-title">อัปเดตล่าสุด</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${fmtDateTime(d.lastUpdated)}</div></div>
+    </div>
+
+    <div class="side-box" style="margin-bottom:18px;">
+      <div class="side-box-title">ลิงก์เอกสาร</div>
+      ${(d.publishedLink || d.link)
+        ? `<a class="btn ghost" style="margin-top:6px;" href="${d.publishedLink || d.link}" target="_blank" rel="noopener">${ic('link')} เปิดลิงก์เอกสาร</a>`
+        : `<div style="font-size:12.5px; color:var(--ink-500); margin-top:4px;">ยังไม่มีลิงก์เอกสาร</div>`}
     </div>
 
     <div class="approval-flow">
