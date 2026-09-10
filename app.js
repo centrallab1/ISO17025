@@ -2842,6 +2842,7 @@ function wireCancelRequestModal(){
     d.lastRequestType = 'cancel';
     d.lastRequestFrom = d.rev || null;
     d.requestedBy = actor;
+    d.reviewerName = assignedReviewerName(actor);
     d.cancelRequestNote = note;
     d.approvedBy = null; d.approvedAt = null; d.approvedComment = null;
     d.comments = d.comments || [];
@@ -3613,6 +3614,7 @@ function attachRevisionDashboardHandlers(){
     d.lastRequestType = 'review';
     d.lastRequestFrom = d.rev || null;
     d.requestedBy = actor;
+    d.reviewerName = assignedReviewerName(actor);
     d.approvedBy = null; d.approvedAt = null; d.approvedComment = null;
     d.comments = d.comments || [];
     d.comments.push({ by:actor, text:'ขอทบทวนประจำปี — ไม่มีการแก้ไขเอกสาร', time: now });
@@ -3662,7 +3664,14 @@ function requestTypeLabel(d){
 function requestTypeBadge(d){
   const label = requestTypeLabel(d);
   if(!label) return '<span style="color:var(--ink-400);">—</span>';
-  const cls = d.lastRequestType==='revision' ? 'review' : d.lastRequestType==='review' ? 'pending' : d.lastRequestType==='cancel' ? 'review' : 'active';
+  // "cancel" used to share the same orange 'review' class as "revision",
+  // making the two indistinguishable at a glance in the request list —
+  // give it its own red/alert styling instead, matching the red used for
+  // this same event type in the activity timeline (classifyEvent above).
+  if(d.lastRequestType==='cancel'){
+    return `<span class="badge" style="background:rgba(224,72,63,0.12); color:var(--red-600);">${label}</span>`;
+  }
+  const cls = d.lastRequestType==='revision' ? 'review' : d.lastRequestType==='review' ? 'pending' : 'active';
   return `<span class="badge ${cls}">${label}</span>`;
 }
 function viewApproval(){
