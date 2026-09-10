@@ -1962,11 +1962,17 @@ function docModal(){
           <div style="font-size:11px; color:var(--ink-500); margin-top:5px;">เลือกประเภทด้านบนเพื่อออกเลขอัตโนมัติ — ระบบจะเติมเลขที่ยังว่างอยู่ก่อนเสมอ</div>
         </div>
         <input type="hidden" id="mfPresetClause" value="">
+        <div class="field"><label>หมายเหตุ</label>
+          <textarea id="mfRequestNote" rows="2" placeholder="เช่น เหตุผลที่ขอขึ้นทะเบียนเอกสารนี้"></textarea>
+        </div>
         <div class="field-error" id="mfError" style="display:none;"></div>`;
   } else {
     // revising: target document already chosen — just confirm
     bodyFields = `
         <div style="font-size:12.5px; color:var(--ink-700); margin-bottom:14px;">กำลังขอปรับปรุง <b>${d.id} ${cleanName(d)}</b> (Rev.${d.rev||'0'} ปัจจุบัน) — ขั้นตอนถัดไป (กรอกฟอร์ม, วางลิงก์, ทบทวน, อนุมัติ, เผยแพร่) จะดำเนินการที่หน้ารายละเอียดคำขอ</div>
+        <div class="field"><label>หมายเหตุ</label>
+          <textarea id="mfRequestNote" rows="2" placeholder="เช่น เหตุผลที่ขอปรับปรุงเอกสารนี้"></textarea>
+        </div>
         <div class="field-error" id="mfError" style="display:none;"></div>`;
   }
 
@@ -2081,7 +2087,10 @@ function wireModalControls(){
     if(mode==='new'){
       const id = document.getElementById('mfId').value.trim();
       const name = document.getElementById('mfName').value.trim();
+      const noteInput = document.getElementById('mfRequestNote');
+      const requestNote = noteInput ? noteInput.value.trim() : '';
       if(!id || !name){ errEl.textContent = 'กรอกรหัสเอกสารและชื่อเอกสารให้ครบ'; errEl.style.display='block'; return; }
+      if(!requestNote){ errEl.textContent = 'กรอกหมายเหตุก่อนบันทึก'; errEl.style.display='block'; return; }
       if(DOCUMENTS.some(x=>x.id===id)){ errEl.textContent = 'รหัสเอกสารนี้มีอยู่แล้ว'; errEl.style.display='block'; return; }
       const actor = currentActorName();
       const now = Date.now();
@@ -2091,8 +2100,8 @@ function wireModalControls(){
       DOCUMENTS.push({
         id, name, clause, link:'', note, rev:'0',
         approvalStatus:'ร่าง', reviewerName:assignedReviewerName(actor), approverName:lmAccountName(), preparedBy:actor,
-        comments:[{ by:actor, text:'ขั้นที่ 1: จองเลขเอกสาร', time: now }], lastUpdated: now, createdDate: now, preparedAt: now, effectiveDate:null, cancelledDate:null,
-        approvedBy:null, approvedAt:null, approvedComment:null, lastRequestType:'new', requestedBy: actor,
+        comments:[{ by:actor, text:`ขั้นที่ 1: จองเลขเอกสาร — ${requestNote}`, time: now }], lastUpdated: now, createdDate: now, preparedAt: now, effectiveDate:null, cancelledDate:null,
+        approvedBy:null, approvedAt:null, approvedComment:null, lastRequestType:'new', requestedBy: actor, requestNote,
         publishedLink:null, linkHistory:[],
         formConfirmedAt:null, formConfirmedBy:null, linkSetAt:null, linkSetBy:null, reviewedAt:null,
       });
@@ -2103,13 +2112,16 @@ function wireModalControls(){
     }
 
     if(mode==='revise'){
+      const noteInput = document.getElementById('mfRequestNote');
+      const requestNote = noteInput ? noteInput.value.trim() : '';
+      if(!requestNote){ errEl.textContent = 'กรอกหมายเหตุก่อนส่งคำขอ'; errEl.style.display='block'; return; }
       const actor = currentActorName();
       const d = DOCUMENTS.find(x=>x.id===state.modal.id);
       const oldRev = d.rev;
       d.rev = nextRevNumber(oldRev);
       d.approvalStatus = 'ร่าง';
       d.approvedBy = null; d.approvedAt = null; d.approvedComment = null;
-      d.lastRequestType = 'revision'; d.lastRequestFrom = oldRev || null; d.requestedBy = actor;
+      d.lastRequestType = 'revision'; d.lastRequestFrom = oldRev || null; d.requestedBy = actor; d.requestNote = requestNote;
       // ผู้จัดทำ ของรอบปรับปรุงนี้ = บัญชีที่กดขอปรับปรุงจริง (เดิมช่องนี้ไม่ถูก
       // อัปเดตตอน revise เลย เลยยังค้างชื่อผู้จัดทำเวอร์ชันก่อนหน้า). ผู้ทบทวน/
       // ผู้อนุมัติ ตั้งเป็นชื่อที่คาดว่าจะเป็นทันที (DC/QM คนที่ไม่ใช่ผู้ขอ =
@@ -2128,7 +2140,7 @@ function wireModalControls(){
       d.formConfirmedAt = null; d.formConfirmedBy = null;
       d.linkSetAt = null; d.linkSetBy = null; d.reviewedAt = null;
       d.comments = d.comments || [];
-      d.comments.push({ by:actor, text:`ขั้นที่ 1: ขอปรับปรุงจาก Rev.${oldRev||'-'} เป็น Rev.${d.rev}`, time: Date.now() });
+      d.comments.push({ by:actor, text:`ขั้นที่ 1: ขอปรับปรุงจาก Rev.${oldRev||'-'} เป็น Rev.${d.rev} — ${requestNote}`, time: Date.now() });
       d.lastUpdated = Date.now();
       closeModal();
       await persistDocs();
@@ -2800,7 +2812,7 @@ function groupHistoryByRequest(d){
   const groups = [];
   let current = null;
   comments.forEach(c=>{
-    const m = c.text.match(/ขอปรับปรุงจาก Rev\.(.*?) เป็น Rev\.(.*)/);
+    const m = c.text.match(/ขอปรับปรุงจาก Rev\.(.*?) เป็น Rev\.([^\s—]+)/);
     if(m){
       current = { type:'revision', fromRev:m[1], toRev:m[2], requestedBy:c.by, requestedAt:c.time, events:[] };
       groups.push(current);
