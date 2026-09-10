@@ -2744,6 +2744,29 @@ function attachDetailActionHandlers(){
 // cancelDocumentToArchive, called from the approve handler). Rejecting it
 // leaves the document exactly as it was, marked 'ไม่อนุมัติ'.
 function cancelRequestModal(){
+  if(!state.cancelRequestModal.docId){
+    // picker step — only reached from the Approval page's "ขอยกเลิก"
+    // button, which doesn't already know which document to target (the
+    // document-detail page's own cancel button skips this by setting
+    // docId directly). Mirrors the 'revise' step-1 document picker.
+    return `
+    <div class="modal-backdrop" id="cancelReqBackdrop">
+      <div class="modal">
+        <div class="modal-head"><div class="modal-title">ขอยกเลิกเอกสาร</div><button class="modal-close" id="cancelReqCloseBtn">✕</button></div>
+        <div class="modal-body">
+          <div class="field"><label>เลือกเอกสารที่ต้องการขอยกเลิก</label>
+            <select id="cancelReqDocPicker">
+              <option value="">— เลือกเอกสาร —</option>
+              ${DOCUMENTS.slice().sort((a,b)=>a.id.localeCompare(b.id)).map(x=>`<option value="${x.id}">${x.id} — ${cleanName(x)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn ghost" id="cancelReqCancelBtn">ยกเลิก</button>
+        </div>
+      </div>
+    </div>`;
+  }
   const d = DOCUMENTS.find(x=>x.id===state.cancelRequestModal.docId);
   if(!d) return `<div class="modal-backdrop" id="cancelReqBackdrop"><div class="modal"><div class="modal-body">${emptyState('ไม่พบเอกสาร','')}</div><div class="modal-actions"><button class="btn ghost" id="cancelReqCloseBtn">ปิด</button></div></div></div>`;
   return `
@@ -2774,6 +2797,11 @@ function wireCancelRequestModal(){
   const cancelBtn = document.getElementById('cancelReqCancelBtn');
   if(cancelBtn) cancelBtn.addEventListener('click', close);
   backdrop.addEventListener('click', e=>{ if(e.target===backdrop) close(); });
+  const docPicker = document.getElementById('cancelReqDocPicker');
+  if(docPicker) docPicker.addEventListener('change', e=>{
+    state.cancelRequestModal.docId = e.target.value || null;
+    renderModalLayer();
+  });
   const submitBtn = document.getElementById('cancelReqSubmitBtn');
   if(!submitBtn) return;
   submitBtn.addEventListener('click', async ()=>{
@@ -3671,6 +3699,7 @@ function viewApproval(){
       </div>
       <div style="display:flex; gap:8px;">
         <select class="select" id="apTypeFilter">${typeOpts.map(([v,l])=>`<option value="${v}" ${v===state.approvalTypeFilter?'selected':''}>${l}</option>`).join('')}</select>
+        <button class="btn ghost" id="btnApCancelDoc">${ic('alert')} ขอยกเลิก</button>
         <button class="btn ghost" id="btnApReviseDoc">${ic('history')} ขอปรับปรุง (Revision)</button>
         <button class="btn primary" id="btnApNewDoc">${ic('plus')} นำรายการใหม่</button>
       </div>
@@ -3803,6 +3832,11 @@ function attachApprovalHandlers(){
   if(newBtn) newBtn.addEventListener('click', ()=> openModal({ mode:'new' }));
   const reviseBtn = document.getElementById('btnApReviseDoc');
   if(reviseBtn) reviseBtn.addEventListener('click', ()=> openModal({ mode:'revise', id:null }));
+  const cancelDocBtn = document.getElementById('btnApCancelDoc');
+  if(cancelDocBtn) cancelDocBtn.addEventListener('click', ()=>{
+    state.cancelRequestModal = { docId: null };
+    renderModalLayer();
+  });
   document.querySelectorAll('[data-appg]').forEach(b=>b.addEventListener('click', ()=>{ state.approvalPage=parseInt(b.dataset.appg,10); render(); }));
   const pgPrev = document.getElementById('apPgPrev'); if(pgPrev) pgPrev.addEventListener('click', ()=>{ state.approvalPage=Math.max(1,state.approvalPage-1); render(); });
   const pgNext = document.getElementById('apPgNext'); if(pgNext) pgNext.addEventListener('click', ()=>{ state.approvalPage=state.approvalPage+1; render(); });
