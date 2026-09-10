@@ -119,12 +119,16 @@ const I18N_DICT = {
 "ระบบนี้ยังไม่มีการรีเซ็ตรหัสผ่านอัตโนมัติ — กรุณาติดต่อ Document Control (DC) เพื่อขอรหัสผ่านใหม่":"This system doesn't have automatic password reset yet — please contact Document Control (DC) for a new password",
 "ประวัติการแก้ไข/ขอปรับปรุงเอกสาร พร้อมลิงก์ ณ ขณะนั้น เพื่อความโปร่งใสและตรวจสอบข้อมูลย้อนหลังได้":"History of edits/revision requests, with the link at that time, for transparency and traceability",
 "เพิ่มรายการแรกได้จากปุ่ม \"เพิ่มรายการสนับสนุน\" ด้านบน หรือระบุข้อกำหนด ISO ให้เอกสารในคลังเอกสาร":"Add your first item using the \"Add Supporting Item\" button above, or assign an ISO clause to a document in the archive",
+"เอกสารสนับสนุน/หลักฐานจากคลังเอกสารที่ระบุข้อกำหนด ISO 17025 ไว้ (ไม่รวมเอกสารที่ยกเลิกแล้ว) จัดกลุ่มตามข้อกำหนด แล้วแยกเป็นโฟลเดอร์ปีในแต่ละข้อกำหนด — กดเข้าโฟลเดอร์เพื่อดูรายการเป็นการ์ดป๊อปอัพ":"Supporting/evidence documents from the archive that have an ISO 17025 clause assigned (excluding cancelled ones), grouped by clause and then split into year folders within each clause — click a folder to view its items in a popup card",
 "กรอกเมื่อเปลี่ยนสถานะเอกสารเป็น \"ยกเลิก\" — ระบบจะเติมวันนี้ให้อัตโนมัติถ้ายังไม่ได้กรอก แก้ไขได้":"Fill in when changing the document status to \"Cancelled\" — the system auto-fills today's date if left blank; editable",
 "เปิดฟอร์มด้านล่างเพื่อกรอก/อ้างอิงรายละเอียดเอกสาร แล้ววางลิงก์เอกสารจริงในช่องด้านล่างนี้ได้เลย":"Open the form below to fill in / reference the document details, then paste the actual document link in the field below",
 "เอกสารนี้อนุมัติแล้ว แต่จะยังไม่แสดงในรายการเอกสารจนกว่า DC จะวางลิงก์เอกสารที่ขึ้นระบบแล้ว":"This document is approved, but won't appear in the document list until DC adds the live document link",
 "เก็บแค่ทะเบียนสำเนาที่แจกจ่ายไป (ใคร วันที่ ให้ใคร) เพื่อให้เรียกคืนได้ในอนาคตหากจำเป็น":"Only keeps a log of distributed copies (who, when, to whom) so they can be recalled later if needed",
 "เอกสารที่มีสถานะ \"ควบคุม\" \"แจกจ่าย\" \"สนับสนุน\" หรือ \"ยกเลิก\" ในรายการหลักจะถูกตั้งเป็น":"Documents with status \"Controlled\", \"Distributed\", \"Supporting\" or \"Cancelled\" in the master list will be set to",
 "วันที่เอกสารต้นทางถูกยกเลิกจริง (แยกจาก \"วันที่เอกสาร\" ด้านบนซึ่งใช้จัดกลุ่มเท่านั้น)":"The date the original document was actually cancelled (separate from \"Document Date\" above, which is only used for grouping)",
+"Rev. ก่อนยกเลิก":"Rev. Before Cancellation",
+"Rev. ล่าสุดของเอกสารต้นทาง ณ วันที่ถูกยกเลิก เพื่อการตรวจสอบย้อนหลัง":"The original document's latest revision at the time it was cancelled, for traceability",
+"ก่อนยกเลิก":"before cancellation",
 "เปิดฟอร์มด้านล่างแล้วกรอกให้ครบก่อน จากนั้นกดยืนยันเพื่อส่งคำขอเข้าสู่การทบทวน":"Open the form below and complete it, then click confirm to submit the request for review",
 "เลือกหมวดเพื่อเติมชื่อเอกสารและข้อกำหนด ISO ให้อัตโนมัติ — แก้ไขได้หลังจากนั้น":"Select a category to auto-fill the document name and ISO clause — you can edit it afterward",
 "เลือกประเภทด้านบนเพื่อออกเลขอัตโนมัติ — ระบบจะเติมเลขที่ยังว่างอยู่ก่อนเสมอ":"Select a type above to auto-generate a number — the system always fills the lowest available number first",
@@ -903,6 +907,7 @@ const state = {
   revisionDetailOpen: false,
   revisionTimelineExpanded: false,
   cancelRequestModal: null, // { docId }
+  evidenceYearModal: null, // { clause, year } for the popup card, or null
 };
 
 const ICONS = {
@@ -1214,6 +1219,9 @@ function renderModalLayer(){
   } else if(state.cancelRequestModal){
     layer.innerHTML = cancelRequestModal();
     wireCancelRequestModal();
+  } else if(state.evidenceYearModal){
+    layer.innerHTML = evidenceYearModal();
+    wireEvidenceYearModal();
   } else {
     layer.innerHTML = '';
   }
@@ -1245,7 +1253,7 @@ async function startApp(){
     renderBootError(DOCS_ERROR);
     return;
   }
-  loadArchive().then(()=>{ if(state.view==='archive' || state.view==='records') render(); }); // best-effort, non-blocking — Archive is a separate store; 'records' also needs it now that Evidence/Support shows clause-tagged archive items too
+  loadArchive().then(()=>{ if(state.view==='archive' || state.view==='records') render(); }); // best-effort, non-blocking — Archive is a separate store; 'records' also needs it now that Evidence/Support is entirely archive-sourced
   loadWatermarkLog().then(()=>{ if(state.view==='admin') render(); }); // best-effort, non-blocking
   removeBootScreen();
   wireNav();
@@ -2180,95 +2188,107 @@ function wireModalControls(){
 }
 
 // ============================================================
-// EVIDENCE / SUPPORT VIEW — all documents with note==='สนับสนุน',
-// grouped by ISO clause, shown as clickable document-name links to
-// the pasted SharePoint URL (replaces the old "Records" page).
+// EVIDENCE / SUPPORT VIEW — shows only documents already sitting in
+// the archive (คลังเอกสาร) that have an ISO/IEC 17025 clause assigned,
+// excluding anything in the "เอกสารยกเลิก" (cancelled) folder. Grouped
+// by clause (as before), and within each clause, by year folder.
+// Clicking a year folder doesn't navigate away — it opens a popup
+// card (modal) listing that clause+year's items.
 // ============================================================
-function evidenceDocRow(d){
-  const link = displayLink(d);
+// items eligible for this page: non-cancelled archive items that have
+// an ISO clause assigned — items without a clause still live in the
+// main Archive tab, just not surfaced here.
+function evidenceArchiveItems(){
+  return ARCHIVE_ITEMS.filter(a=> a.clause && a.category!==CANCELLED_ARCHIVE_CATEGORY);
+}
+// same Buddhist-year convention as buildArchiveTree() in the main
+// Archive tab, kept separate so this page's "clause required" and
+// "no category level" rules don't leak into the Archive tab's tree.
+function archiveYearOf(a){
+  return new Date(a.uploadedAt || Date.now()).getFullYear() + 543;
+}
+// clause -> year -> items
+function evidenceClauseYearGroups(){
+  const byClause = {};
+  evidenceArchiveItems().forEach(a=>{
+    const c = a.clause;
+    const y = archiveYearOf(a);
+    byClause[c] = byClause[c] || {};
+    (byClause[c][y] = byClause[c][y]||[]).push(a);
+  });
+  return byClause;
+}
+function openEvidenceYearModal(clause, year){ state.evidenceYearModal = { clause, year }; renderModalLayer(); }
+function closeEvidenceYearModal(){ state.evidenceYearModal = null; renderModalLayer(); }
+function evidenceYearModal(){
+  const { clause, year } = state.evidenceYearModal;
+  const groups = evidenceClauseYearGroups();
+  const items = ((groups[clause] && groups[clause][year]) || []).slice().sort((a,b)=>(b.uploadedAt||0)-(a.uploadedAt||0));
   return `
-  <div class="evidence-item">
-    <div class="file-ic">${ic('file')}</div>
-    <div class="evi-main">
-      ${link
-        ? `<a class="evi-name" href="${link}" target="_blank" rel="noopener">${cleanName(d)}</a>`
-        : `<span class="evi-name evi-nolink">${cleanName(d)}</span>`}
-      <div class="evi-sub">${d.id}${!link ? ' · ยังไม่มีลิงก์' : ''}</div>
-    </div>
-    <div class="row-actions">
-      ${isDC() ? `<button data-edit="${d.id}" title="แก้ไข">${ic('edit')}</button>
-      <button data-del="${d.id}" class="del" title="ลบ">${ic('trash')}</button>` : ''}
+  <div class="modal-backdrop" id="evidenceYearModalBackdrop">
+    <div class="modal">
+      <div class="modal-head"><div class="modal-title">${clauseLabel(clause)} · ปี ${year} <span style="color:var(--ink-500); font-weight:600; font-size:12px;">(${items.length} รายการ)</span></div><button class="modal-close" id="evidenceYearModalCloseBtn">✕</button></div>
+      <div class="modal-body">
+        <div style="display:flex; flex-direction:column;">${items.map(archiveItemRow).join('') || emptyState('ไม่มีเอกสารในปีนี้','')}</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="evidenceYearModalCloseBtn2">ปิด</button>
+      </div>
     </div>
   </div>`;
 }
-function evidenceArchiveRow(a){
-  return `
-  <div class="evidence-item">
-    <div class="file-ic">${ic('folder','sm-icon')}</div>
-    <div class="evi-main">
-      ${a.link
-        ? `<a class="evi-name" href="${a.link}" target="_blank" rel="noopener">${a.title}</a>`
-        : `<span class="evi-name evi-nolink">${a.title}</span>`}
-      <div class="evi-sub"><span style="color:var(--blue-600); font-weight:700;">คลังเอกสาร</span> · ${a.category||'ไม่ระบุหมวดหมู่'} · ${archiveStatusBadge(a.status)}</div>
-    </div>
-    <div class="row-actions">
-      ${(a.status!=='ยืนยันแล้ว' && isDC()) ? `<button data-verify="${a.id}" title="ยืนยัน (DC)">${ic('check')}</button>` : ''}
-      ${isDC() ? `<button data-archive-edit="${a.id}" title="แก้ไข">${ic('edit')}</button>
-      <button data-archive-del="${a.id}" class="del" title="ลบ">${ic('trash')}</button>` : ''}
-    </div>
-  </div>`;
+function wireEvidenceYearModal(){
+  const backdrop = document.getElementById('evidenceYearModalBackdrop');
+  if(!backdrop) return;
+  const close = ()=>{ closeEvidenceYearModal(); };
+  document.getElementById('evidenceYearModalCloseBtn').addEventListener('click', close);
+  const closeBtn2 = document.getElementById('evidenceYearModalCloseBtn2');
+  if(closeBtn2) closeBtn2.addEventListener('click', close);
+  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) close(); });
+  // lets verify/edit/delete work directly from inside the popup, same as
+  // the main Archive tab — editing opens archiveModal on top (see
+  // renderModalLayer's priority order), and closing it falls back to
+  // this popup, now re-rendered with the updated item
+  wireArchiveItemActions();
 }
 function viewEvidence(){
-  const docItems = visibleDocuments().filter(d=> d.note==='สนับสนุน').map(d=>({ clause: d.clause, html: evidenceDocRow(d) }));
-  // exclude cancelled/retired documents from the archive — they're kept
-  // in "เอกสารยกเลิก" for record-keeping, not as usable supporting
-  // evidence, even if they happen to have an ISO clause guess attached.
-  const archiveItems = ARCHIVE_ITEMS.filter(a=> a.clause && a.category!==CANCELLED_ARCHIVE_CATEGORY).map(a=>({ clause: a.clause, html: evidenceArchiveRow(a) }));
-  const allItems = [...docItems, ...archiveItems];
-  const byClause = {};
-  allItems.forEach(item=>{
-    const key = item.clause || '';
-    (byClause[key] = byClause[key]||[]).push(item);
-  });
-  const orderedKeys = [...CLAUSES.map(c=>c[0]), ''];
-  const sections = orderedKeys.filter(k=> byClause[k] && byClause[k].length);
+  const byClause = evidenceClauseYearGroups();
+  const orderedKeys = CLAUSES.map(c=>c[0]).filter(k=> byClause[k]);
 
   return `
   <div class="panel">
     <div class="panel-head">
       <div>
         <div class="panel-title">Evidence / Support</div>
-        <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">เอกสารสนับสนุน/หลักฐาน (ใบรับรอง มาตรฐานอ้างอิง ฯลฯ) จัดกลุ่มตามข้อกำหนด ISO 17025 — รวมทั้งเอกสารสนับสนุนที่ขึ้นทะเบียนโดยตรง และเอกสารจากคลังเอกสารที่ระบุข้อกำหนดไว้ — วางลิงก์ SharePoint แล้วกดชื่อเพื่อเปิดได้เลย</div>
+        <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">เอกสารสนับสนุน/หลักฐานจากคลังเอกสารที่ระบุข้อกำหนด ISO 17025 ไว้ (ไม่รวมเอกสารที่ยกเลิกแล้ว) จัดกลุ่มตามข้อกำหนด แล้วแยกเป็นโฟลเดอร์ปีในแต่ละข้อกำหนด — กดเข้าโฟลเดอร์เพื่อดูรายการเป็นการ์ดป๊อปอัพ</div>
       </div>
       <button class="btn primary" id="btnNewEvidence">${ic('plus')} เพิ่มรายการสนับสนุน</button>
     </div>
   </div>
-  ${sections.length ? sections.map(key=>{
-    const wrapped = byClause[key];
-    const label = key ? clauseLabel(key) : 'ไม่ระบุข้อกำหนด';
+  ${orderedKeys.length ? orderedKeys.map(key=>{
+    const years = Object.keys(byClause[key]).map(Number).sort((a,b)=>b-a);
+    const total = years.reduce((s,y)=> s+byClause[key][y].length, 0);
     return `
     <div class="panel">
-      <div class="panel-title" style="margin-bottom:12px;">${label} <span style="color:var(--ink-500); font-weight:600; font-size:12px;">(${wrapped.length})</span></div>
-      <div style="display:flex; flex-direction:column; gap:2px;">
-        ${wrapped.map(item=>item.html).join('')}
-      </div>
+      <div class="panel-title" style="margin-bottom:12px;">${clauseLabel(key)} <span style="color:var(--ink-500); font-weight:600; font-size:12px;">(${total})</span></div>
+      <div class="folder-grid">${years.map(y=>`
+        <div class="folder-card" data-open-evidence-year="${key}::${y}">${ic('folder')}<div class="folder-label">ปี ${y}</div><div class="folder-count">${byClause[key][y].length} รายการ</div></div>`).join('')}</div>
     </div>`;
   }).join('') : `<div class="panel">${emptyState('ยังไม่มีเอกสารสนับสนุน','เพิ่มรายการแรกได้จากปุ่ม "เพิ่มรายการสนับสนุน" ด้านบน หรือระบุข้อกำหนด ISO ให้เอกสารในคลังเอกสาร')}</div>`}
   `;
 }
 function attachEvidenceHandlers(){
   const btn = document.getElementById('btnNewEvidence');
-  if(btn) btn.addEventListener('click', ()=> openModal({ mode:'new', presetNote:'สนับสนุน' }));
-  document.querySelectorAll('[data-edit]').forEach(b=> b.addEventListener('click', ()=> openModal({ mode:'edit', id:b.dataset.edit })));
-  document.querySelectorAll('[data-del]').forEach(b=> b.addEventListener('click', async ()=>{
-    const d = DOCUMENTS.find(x=>x.id===b.dataset.del);
-    if(!d) return;
-    if(!confirm(`ลบรายการ "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
-    DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
-    await persistDocs();
-    render();
-  }));
-  wireArchiveItemActions();
+  // items shown on this page now come only from the archive, so "add"
+  // opens the archive's own add form (which already has an ISO-clause
+  // field) instead of the regular controlled-document form
+  if(btn) btn.addEventListener('click', ()=> openArchiveModal({ mode:'new' }));
+  document.querySelectorAll('[data-open-evidence-year]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const [clause, year] = el.dataset.openEvidenceYear.split('::');
+      openEvidenceYearModal(clause, Number(year));
+    });
+  });
 }
 
 // ============================================================
@@ -2288,7 +2308,7 @@ function archiveItemRow(a){
     <div class="file-ic">${ic('file')}</div>
     <div class="evi-main">
       ${a.link ? `<a class="evi-name" href="${a.link}" target="_blank" rel="noopener">${a.title}</a>` : `<span class="evi-name evi-nolink">${a.title}</span>`}
-      <div class="evi-sub">${a.sourceDocId ? `<span class="mono">${a.sourceDocId}</span> · ` : ''}${a.clause ? `ข้อกำหนด ${clauseLabel(a.clause)} · ` : ''}อัปโหลดโดย ${a.uploadedBy||'—'} · ยืนยันโดย ${a.verifiedBy ? `<b style="color:var(--green-600);">${a.verifiedBy}</b>` : 'ยังไม่ยืนยัน'} · ${fmtDate(a.uploadedAt)}${a.cancelledDate ? ` · ยกเลิกเมื่อ ${fmtDate(a.cancelledDate)}` : ''}</div>
+      <div class="evi-sub">${a.sourceDocId ? `<span class="mono">${a.sourceDocId}</span> · ` : ''}${a.clause ? `ข้อกำหนด ${clauseLabel(a.clause)} · ` : ''}อัปโหลดโดย ${a.uploadedBy||'—'} · ยืนยันโดย ${a.verifiedBy ? `<b style="color:var(--green-600);">${a.verifiedBy}</b>` : 'ยังไม่ยืนยัน'} · ${fmtDate(a.uploadedAt)}${a.cancelledRev ? ` · Rev.${a.cancelledRev} ก่อนยกเลิก` : ''}${a.cancelledDate ? ` · ยกเลิกเมื่อ ${fmtDate(a.cancelledDate)}` : ''}</div>
     </div>
     ${archiveStatusBadge(a.status)}
     <div class="row-actions" style="margin-left:10px;">
@@ -2514,7 +2534,9 @@ function archiveModal(){
         <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:14px;">แก้วันที่ได้ถ้าวางไฟล์ย้อนหลัง — ระบบจะจัดกลุ่มปี/เดือนตามวันที่นี้</div>
         ${a.category===CANCELLED_ARCHIVE_CATEGORY ? `
         <div class="field"><label>วันที่ยกเลิก</label><input type="date" id="archiveCancelledDate" value="${a.cancelledDate ? new Date(a.cancelledDate).toISOString().slice(0,10) : ''}"></div>
-        <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:14px;">วันที่เอกสารต้นทางถูกยกเลิกจริง (แยกจาก "วันที่เอกสาร" ด้านบนซึ่งใช้จัดกลุ่มเท่านั้น)</div>` : ''}
+        <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:14px;">วันที่เอกสารต้นทางถูกยกเลิกจริง (แยกจาก "วันที่เอกสาร" ด้านบนซึ่งใช้จัดกลุ่มเท่านั้น)</div>
+        <div class="field"><label>Rev. ก่อนยกเลิก</label><input id="archiveCancelledRev" value="${a.cancelledRev || ''}" placeholder="เช่น 2"></div>
+        <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:14px;">Rev. ล่าสุดของเอกสารต้นทาง ณ วันที่ถูกยกเลิก เพื่อการตรวจสอบย้อนหลัง</div>` : ''}
         <div class="field-error" id="archiveModalError" style="display:none;"></div>
       </div>
       <div class="modal-actions">
@@ -2634,6 +2656,8 @@ function wireArchiveModalControls(){
     if(!title){ errEl.textContent='กรอกชื่อเอกสารให้ครบ'; errEl.style.display='block'; return; }
     const cancelledInput = document.getElementById('archiveCancelledDate');
     const cancelledDate = cancelledInput ? (cancelledInput.value ? new Date(cancelledInput.value+'T00:00:00').getTime() : null) : undefined;
+    const cancelledRevInput = document.getElementById('archiveCancelledRev');
+    const cancelledRev = cancelledRevInput ? (cancelledRevInput.value.trim() || null) : undefined;
 
     if(mode==='new'){
       // non-DC submitters never see the link field (they fill the external
@@ -2643,6 +2667,7 @@ function wireArchiveModalControls(){
         id: 'ARC-' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
         title, category, clause, link, uploadedBy, uploadedAt,
         cancelledDate: cancelledDate ?? null,
+        cancelledRev: cancelledRev ?? null,
         status:'รอตรวจสอบ', verifiedBy:null, verifiedAt:null,
       });
     } else {
@@ -2651,6 +2676,7 @@ function wireArchiveModalControls(){
         a.title = title; a.category = category; a.clause = clause; a.uploadedBy = uploadedBy; a.uploadedAt = uploadedAt;
         if(linkInput) a.link = linkInput.value.trim(); // only present for DC — non-DC editors leave the existing link untouched
         if(cancelledDate !== undefined) a.cancelledDate = cancelledDate;
+        if(cancelledRev !== undefined) a.cancelledRev = cancelledRev;
       }
     }
     closeArchiveModal();
@@ -4370,18 +4396,23 @@ function archiveCancelledRow(row, existingDoc){
   const groupDate = cancelledDate || toEpoch(row.created) || (existingDoc && existingDoc.lastUpdated) || (a && a.uploadedAt) || Date.now();
   const approver = roleName(row.approver) || '';
   const suggestedClause = suggestClause(row.name) || '';
+  // Rev. ล่าสุดของเอกสารก่อนถูกยกเลิก — ใช้ค่าจากรายการหลัก (row.rev) ก่อน
+  // แล้วค่อยตกไปที่ Rev. ที่เคยมีอยู่ในระบบ (existingDoc.rev) หรือค่าที่เคย
+  // บันทึกไว้แล้วในคลังเอกสาร (a.cancelledRev) เผื่อรายการหลักไม่มีคอลัมน์นี้
+  const cancelledRev = row.rev || (existingDoc && existingDoc.rev) || (a && a.cancelledRev) || null;
   if(a){
     a.title = row.name || a.title;
     a.link = row.link || a.link;
     a.uploadedAt = groupDate;
     if(cancelledDate) a.cancelledDate = cancelledDate;
+    if(cancelledRev) a.cancelledRev = cancelledRev;
     if(!a.clause && suggestedClause) a.clause = suggestedClause;
   } else {
     ARCHIVE_ITEMS.push({
       id: 'ARC-' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
       sourceDocId: row.id, title: row.name || row.id, category: CANCELLED_ARCHIVE_CATEGORY,
       clause: suggestedClause, link: row.link || '', uploadedBy: approver || 'Master List Import',
-      uploadedAt: groupDate, cancelledDate, status:'ยืนยันแล้ว', verifiedBy: approver || null, verifiedAt: groupDate,
+      uploadedAt: groupDate, cancelledDate, cancelledRev, status:'ยืนยันแล้ว', verifiedBy: approver || null, verifiedAt: groupDate,
     });
   }
 }
@@ -4393,6 +4424,10 @@ function archiveCancelledRow(row, existingDoc){
 // removed from DOCUMENTS right after) it updates rather than duplicates.
 function cancelDocumentToArchive(d, actor){
   const now = Date.now();
+  // Rev. ของเอกสารต้นทาง ณ วินาทีที่ถูกยกเลิก — เก็บไว้ตรงนี้ก่อนที่ d จะถูกลบ
+  // ออกจาก DOCUMENTS โดยผู้เรียกฟังก์ชันนี้ เพื่อให้ตรวจสอบย้อนหลังได้ว่าตอน
+  // ยกเลิกเอกสารอยู่ที่ Rev. อะไร โดยไม่ต้องพึ่งประวัติ comments
+  const cancelledRev = d.rev || null;
   let a = ARCHIVE_ITEMS.find(x=> x.sourceDocId===d.id);
   if(a){
     a.title = d.name || a.title;
@@ -4401,12 +4436,13 @@ function cancelDocumentToArchive(d, actor){
     a.clause = a.clause || d.clause || '';
     a.uploadedAt = now;
     a.cancelledDate = now;
+    a.cancelledRev = cancelledRev;
   } else {
     ARCHIVE_ITEMS.push({
       id: 'ARC-' + now.toString(36) + Math.random().toString(36).slice(2,6),
       sourceDocId: d.id, title: d.name || d.id, category: CANCELLED_ARCHIVE_CATEGORY,
       clause: d.clause || '', link: d.link || '', uploadedBy: actor || 'ไม่ระบุ',
-      uploadedAt: now, cancelledDate: now, status:'ยืนยันแล้ว', verifiedBy: actor || null, verifiedAt: now,
+      uploadedAt: now, cancelledDate: now, cancelledRev, status:'ยืนยันแล้ว', verifiedBy: actor || null, verifiedAt: now,
     });
   }
 }
