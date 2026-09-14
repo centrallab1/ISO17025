@@ -894,6 +894,7 @@ const state = {
   approvalDetailOpen: false,
   approvalCommentsExpanded: false,
   dcPublishEditing: false,
+  dcLinkEditing: false,
   archiveFilter: { category:'All', status:'All', q:'' },
   archiveModal: null, // { mode:'new'|'edit'|'verify', id }
   wmManualModal: false,
@@ -3292,6 +3293,42 @@ function wireDcPublish(){
   });
 }
 
+// Lets DC fix a mis-pasted d.link from the top "ลิงก์เอกสาร" box on the
+// Approval page — usable at any stage of the workflow (draft, pending
+// review/approval, rejected). Only touches d.link, never d.publishedLink,
+// so it can never accidentally change what's live on the Document page.
+function wireDcLinkEdit(){
+  const editBtn = document.getElementById('btnDcLinkEdit');
+  if(editBtn) editBtn.addEventListener('click', ()=>{ state.dcLinkEditing = true; render(); });
+  const cancelBtn = document.getElementById('btnDcLinkCancel');
+  if(cancelBtn) cancelBtn.addEventListener('click', ()=>{ state.dcLinkEditing = false; render(); });
+  const saveBtn = document.getElementById('btnDcLinkSave');
+  if(!saveBtn) return;
+  saveBtn.addEventListener('click', async ()=>{
+    if(!isDC()) return; // defense in depth — button only renders for DC anyway
+    const errEl = document.getElementById('dcLinkEditError');
+    const linkInput = document.getElementById('dcLinkEditInput');
+    const link = linkInput ? linkInput.value.trim() : '';
+    if(errEl) errEl.style.display = 'none';
+    if(!link){ if(errEl){ errEl.textContent = 'กรอกลิงก์เอกสารก่อน'; errEl.style.display = 'block'; } return; }
+    const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
+    if(!d) return;
+    const actor = currentActorName();
+    const now = Date.now();
+    if(d.link && d.link !== link){
+      d.comments = d.comments || [];
+      d.comments.push({ by:actor, text:`แก้ไขลิงก์เอกสาร (จาก: ${d.link} เป็น: ${link})`, time: now });
+    }
+    d.link = link;
+    d.linkSetAt = now;
+    d.linkSetBy = actor;
+    d.lastUpdated = now;
+    state.dcLinkEditing = false;
+    render();
+    await persistDocs();
+  });
+}
+
 function viewRevisionDetailInline(d, standalone){
   const linkBtn = displayLink(d)
     ? `<a class="btn ghost" href="${displayLink(d)}" target="_blank" rel="noopener">${ic('link')} เปิดใน SharePoint</a>`
@@ -3599,7 +3636,7 @@ function attachRevisionDashboardHandlers(){
   if(approvalBtn) approvalBtn.addEventListener('click', ()=>{
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
     const tab = d && ['อนุมัติแล้ว','ไม่อนุมัติ'].includes(d.approvalStatus) ? 'history' : 'active';
-    goTo('approval', { selectedDoc: state.selectedDoc, approvalTab: tab, approvalPage: 1, approvalDetailOpen: true, approvalCommentsExpanded: false, dcPublishEditing: false });
+    goTo('approval', { selectedDoc: state.selectedDoc, approvalTab: tab, approvalPage: 1, approvalDetailOpen: true, approvalCommentsExpanded: false, dcPublishEditing: false, dcLinkEditing: false });
   });
   const delBtn = document.getElementById('revDetailDelete');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
@@ -3834,9 +3871,19 @@ function viewApprovalDetail(){
 
     <div class="side-box" style="margin-bottom:18px;">
       <div class="side-box-title">ลิงก์เอกสาร</div>
-      ${d.link
-        ? `<a class="btn ghost" style="margin-top:6px;" href="${d.link}" target="_blank" rel="noopener">${ic('link')} เปิดลิงก์เอกสาร</a>`
-        : `<div style="font-size:12.5px; color:var(--ink-500); margin-top:4px;">ยังไม่มีลิงก์เอกสาร</div>`}
+      ${state.dcLinkEditing ? `
+      <div style="margin-top:6px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <input id="dcLinkEditInput" value="${d.link||''}" placeholder="https://mitrphol.sharepoint.com/..." style="flex:1; min-width:220px; border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px;">
+        <button class="btn success" id="btnDcLinkSave">${ic('check')} บันทึก</button>
+        <button class="btn ghost" id="btnDcLinkCancel">ยกเลิก</button>
+      </div>
+      <div id="dcLinkEditError" class="field-error" style="display:none; margin-top:6px;"></div>` : `
+      <div style="margin-top:6px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        ${d.link
+          ? `<a class="btn ghost" href="${d.link}" target="_blank" rel="noopener">${ic('link')} เปิดลิงก์เอกสาร</a>`
+          : `<div style="font-size:12.5px; color:var(--ink-500);">ยังไม่มีลิงก์เอกสาร</div>`}
+        ${isDC() ? `<button class="btn ghost" id="btnDcLinkEdit">${ic('edit')} แก้ไขลิงก์</button>` : ''}
+      </div>`}
     </div>
 
     <div class="approval-flow">
@@ -3902,7 +3949,7 @@ function attachApprovalHandlers(){
   const pgPrev = document.getElementById('apPgPrev'); if(pgPrev) pgPrev.addEventListener('click', ()=>{ state.approvalPage=Math.max(1,state.approvalPage-1); render(); });
   const pgNext = document.getElementById('apPgNext'); if(pgNext) pgNext.addEventListener('click', ()=>{ state.approvalPage=state.approvalPage+1; render(); });
   document.querySelectorAll('[data-select-approval]').forEach(row=>{
-    row.addEventListener('click', ()=>{ goTo('approval', { selectedDoc: row.dataset.selectApproval, approvalDetailOpen: true, approvalCommentsExpanded: false, dcPublishEditing: false }); });
+    row.addEventListener('click', ()=>{ goTo('approval', { selectedDoc: row.dataset.selectApproval, approvalDetailOpen: true, approvalCommentsExpanded: false, dcPublishEditing: false, dcLinkEditing: false }); });
   });
   document.querySelectorAll('[data-del-request]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
@@ -3965,6 +4012,7 @@ function attachApprovalHandlers(){
   wireFormConfirm();
   wireDcRegister();
   wireDcPublish();
+  wireDcLinkEdit();
 
   const approveBtn = document.getElementById('btnApprove');
   if(approveBtn) approveBtn.addEventListener('click', async ()=>{
