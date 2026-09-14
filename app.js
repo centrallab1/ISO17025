@@ -1229,6 +1229,16 @@ function renderModalLayer(){
 function openArchiveModal(opts){ state.archiveModal = opts; renderModalLayer(); }
 function closeArchiveModal(){ state.archiveModal = null; renderModalLayer(); }
 
+// The Document page (and Revision tracking page) must show only the
+// OFFICIALLY PUBLISHED link — never the working link DC is placing on
+// the Approval page while a new/revision request is still in progress.
+// d.publishedLink and d.link are intentionally separate fields so that
+// a mid-review link swap on the Approval page never leaks into the
+// live Document page until DC actually publishes (Step 6).
+function displayLink(d){
+  return d && d.publishedLink ? d.publishedLink : '';
+}
+
 // display-only: many document names already have the doc ID typed into
 // them (e.g. name="RDI-LM-01 คู่มือคุณภาพ"), which duplicates the ID
 // column/label everywhere id+name are shown together. Strip it for display.
@@ -3227,7 +3237,7 @@ function renderPublishBox(d){
     <div style="font-size:12.5px; font-weight:800; color:var(--amber-600); margin-bottom:8px;">ขั้นที่ 6: DC วางลิงก์ใหม่ + กำหนดวันประกาศใช้</div>
     <div style="font-size:11.5px; color:var(--ink-700); margin-bottom:10px;">${d.publishedLink ? 'ลิงก์เดิมจะถูกเก็บไว้ในประวัติลิงก์อัตโนมัติ' : 'เอกสารนี้อนุมัติแล้ว แต่จะยังไม่แสดงในรายการเอกสารจนกว่า DC จะวางลิงก์เอกสารที่ขึ้นระบบแล้ว'}</div>
     <div class="field"><label>ลิงก์เอกสารที่ขึ้นระบบแล้ว</label>
-      <input id="dcPublishLink" placeholder="https://mitrphol.sharepoint.com/..." value="${d.publishedLink||''}" style="border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px; width:100%; box-sizing:border-box;"></div>
+      <input id="dcPublishLink" placeholder="https://mitrphol.sharepoint.com/..." value="${(state.dcPublishEditing ? d.publishedLink : (d.link || d.publishedLink)) || ''}" style="border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px; width:100%; box-sizing:border-box;"></div>
     <div class="field"><label>วันที่ประกาศใช้</label>
       <input id="dcEffectiveDate" type="date" value="${d.effectiveDate ? new Date(d.effectiveDate).toISOString().slice(0,10) : ''}" style="border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px;"></div>
     <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
@@ -3824,8 +3834,8 @@ function viewApprovalDetail(){
 
     <div class="side-box" style="margin-bottom:18px;">
       <div class="side-box-title">ลิงก์เอกสาร</div>
-      ${(d.publishedLink || d.link)
-        ? `<a class="btn ghost" style="margin-top:6px;" href="${d.publishedLink || d.link}" target="_blank" rel="noopener">${ic('link')} เปิดลิงก์เอกสาร</a>`
+      ${d.link
+        ? `<a class="btn ghost" style="margin-top:6px;" href="${d.link}" target="_blank" rel="noopener">${ic('link')} เปิดลิงก์เอกสาร</a>`
         : `<div style="font-size:12.5px; color:var(--ink-500); margin-top:4px;">ยังไม่มีลิงก์เอกสาร</div>`}
     </div>
 
