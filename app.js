@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.4';
+const APP_VERSION = '1.5';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -3681,17 +3681,44 @@ function wireHistoryModal(){
 }
 
 // Detail popup for a single revision request, opened from the Activity Log
-// row — shows just that request cycle's own step-by-step events, reusing
-// eitem() (already styled globally) rather than inventing new CSS.
+// row — shows just that request cycle's own step-by-step events, mirroring
+// eitem()'s markup/classes (already styled globally) but built inline so
+// we can (a) force long pasted links to wrap instead of overflowing the
+// popup, and (b) attach a real "open link" button on the step-3 event —
+// the step where DC actually pasted the working link — instead of leaving
+// it as unclickable text like the other steps.
 function openHistoryRequestDetail(group){ state.historyModalRequestDetail = group; renderModalLayer(); }
 function closeHistoryRequestDetail(){ state.historyModalRequestDetail = null; renderModalLayer(); }
+function historyReqEventItem(c, d){
+  const cls = classifyEvent(c.text);
+  // same "strip the echoed title from the detail line" trim eitem() does
+  let detail = c.text || '';
+  if(detail && cls.title && detail.startsWith(cls.title)){
+    const rest = detail.slice(cls.title.length);
+    if(rest==='' || /^[\s—\-:]/.test(rest)) detail = rest.replace(/^[\s—-]+/, '');
+  }
+  // step 3 ("DC วางลิงก์+เลือกข้อกำหนด") is the moment d.link/d.linkSetAt
+  // were written (see attachDcRegisterHandlers) — match on the exact
+  // timestamp so an older request cycle's step 3 doesn't wrongly show the
+  // CURRENT (possibly since-replaced) link.
+  const showLinkBtn = /^ขั้นที่ 3/.test(cls.title) && d.linkSetAt && c.time===d.linkSetAt && d.link;
+  return `
+  <div class="eitem">
+    <div class="eitem-icon" style="background:var(${cls.bg})">${ic(cls.icon)}</div>
+    <div class="eitem-body">
+      <div class="eitem-head"><div class="eitem-title">${cls.title}</div><div class="eitem-time">${fmtDateTime(c.time)}</div></div>
+      ${detail ? `<div class="eitem-detail" style="overflow-wrap:anywhere; word-break:break-word;">${detail}</div>` : ''}
+      ${showLinkBtn ? `<div style="margin-top:6px;"><a class="btn ghost" href="${d.link}" target="_blank" rel="noopener" style="display:inline-flex; padding:4px 10px; font-size:11.5px;">${ic('link')} เปิดลิงก์ที่วางไว้</a></div>` : ''}
+      <div class="eitem-actor">โดย <span class="actor-pill">${c.by || 'ไม่ระบุ'}</span></div>
+    </div>
+  </div>`;
+}
 function historyRequestDetailModal(){
   const g = state.historyModalRequestDetail;
-  const items = (g.events||[]).slice().reverse().map(c=>{
-    const cls = classifyEvent(c.text);
-    return eitem({ icon:cls.icon, bg:cls.bg, title:cls.title, time:c.time, detail:c.text, actor:c.by });
-  });
+  const d = DOCUMENTS.find(x=>x.id===(state.historyModal && state.historyModal.docId));
+  const items = (g.events||[]).slice().reverse().map(c=> historyReqEventItem(c, d||{}));
   return `
+  <style>#historyReqBackdrop .eitem-detail{ overflow-wrap:anywhere; word-break:break-word; }</style>
   <div class="modal-backdrop" id="historyReqBackdrop">
     <div class="modal">
       <div class="modal-head"><div class="modal-title">คำขอปรับปรุง Rev.${g.fromRev} → Rev.${g.toRev}</div><button class="modal-close" id="historyReqCloseBtn">✕</button></div>
