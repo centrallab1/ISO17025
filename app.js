@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.7';
+const APP_VERSION = '1.8';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -933,6 +933,8 @@ const state = {
   wmManualModal: false,
   wmExpandedDoc: null,
   docDetailMenuOpen: false,
+  docManageMenuOpen: false,
+  docRequestMenuOpen: false,
   archiveFolder: { year:null, category:null },
   approvalPage: 1,
   approvalTypeFilter: 'All',
@@ -2824,11 +2826,24 @@ function viewDocDetail(docId){
           <button class="btn ghost" data-go-revision-history="1">${ic('history')} History</button>
         </div>
         <div class="detail-actions-label">จัดการเอกสาร</div>
-        <div class="detail-actions">
-          ${isDC() ? `<button class="btn ghost" id="btnDetailEdit">${ic('edit')} แก้ไข</button>` : ''}
-          <button class="btn ghost" id="btnDetailRevise" ${hasPendingRequest(d)?'disabled title="เอกสารนี้มีคำขออื่นกำลังดำเนินการอยู่"':''}>${ic('history')} ปรับปรุง Rev.</button>
-          <button class="btn danger" id="btnDetailCancelDoc" ${hasPendingRequest(d)?'disabled title="เอกสารนี้มีคำขออื่นกำลังดำเนินการอยู่"':''}>${ic('alert')} ขอยกเลิกเอกสาร</button>
-          ${isDC() ? `<button class="btn danger" id="btnDetailDelete">${ic('trash')} ลบ</button>` : ''}
+        <div class="detail-actions" style="align-items:flex-start;">
+          <div style="position:relative; display:inline-block;">
+            <button class="btn ghost" id="btnDocManageMenuBtn">${ic('more')} จัดการเอกสาร</button>
+            ${state.docManageMenuOpen ? `
+            <div class="action-menu" id="docManageActionMenu">
+              ${isDC() ? `<button class="dp-btn" id="btnDetailEdit">${ic('edit')} แก้ไข</button>` : ''}
+              <button class="dp-btn danger" id="btnDetailCancelDoc" ${hasPendingRequest(d)?'disabled title="เอกสารนี้มีคำขออื่นกำลังดำเนินการอยู่"':''}>${ic('alert')} ขอยกเลิกเอกสาร</button>
+              ${isDC() ? `<div class="dp-divider"></div><button class="dp-btn danger" id="btnDetailDelete">${ic('trash')} ลบ</button>` : ''}
+            </div>` : ''}
+          </div>
+          <div style="position:relative; display:inline-block;">
+            <button class="btn ghost" id="btnDocRequestMenuBtn">${ic('history')} คำขอปรับปรุง/ทบทวน</button>
+            ${state.docRequestMenuOpen ? `
+            <div class="action-menu" id="docRequestActionMenu">
+              <button class="dp-btn" id="btnDetailRevise" ${hasPendingRequest(d)?'disabled title="เอกสารนี้มีคำขออื่นกำลังดำเนินการอยู่"':''}>${ic('history')} ปรับปรุง Rev.</button>
+              <button class="dp-btn" id="btnDetailGoAnnualReview">${ic('send')} ทบทวนประจำปี</button>
+            </div>` : ''}
+          </div>
         </div>
       </div>
       <div class="side-box" style="width:230px;">
@@ -2848,10 +2863,43 @@ function viewDocDetail(docId){
   </div>`;
 }
 function attachDetailActionHandlers(){
+  const openMenu = (stateKey, menuId, btnId)=>{
+    const btn = document.getElementById(btnId);
+    if(!btn) return;
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      // close the other menu first so only one dropdown is open at a time
+      state.docManageMenuOpen = (stateKey==='docManageMenuOpen') ? !state[stateKey] : false;
+      state.docRequestMenuOpen = (stateKey==='docRequestMenuOpen') ? !state[stateKey] : false;
+      render();
+      if(state[stateKey]){
+        const closeOnOutsideClick = (evt)=>{
+          const menu = document.getElementById(menuId);
+          const trigger = document.getElementById(btnId);
+          if(menu && !menu.contains(evt.target) && evt.target!==trigger){
+            state[stateKey] = false;
+            render();
+          }
+          document.removeEventListener('click', closeOnOutsideClick);
+        };
+        setTimeout(()=> document.addEventListener('click', closeOnOutsideClick), 0);
+      }
+    });
+  };
+  openMenu('docManageMenuOpen', 'docManageActionMenu', 'btnDocManageMenuBtn');
+  openMenu('docRequestMenuOpen', 'docRequestActionMenu', 'btnDocRequestMenuBtn');
   const editBtn = document.getElementById('btnDetailEdit');
   if(editBtn) editBtn.addEventListener('click', ()=> openModal({ mode:'edit', id: state.selectedDoc }));
   const reviseBtn = document.getElementById('btnDetailRevise');
   if(reviseBtn) reviseBtn.addEventListener('click', ()=> openModal({ mode:'revise', id: state.selectedDoc }));
+  // shortcut only — the actual "ขอทบทวนประจำปี" action lives on the
+  // document's Revision page (viewRevisionDetailInline), same as before;
+  // this just jumps the user there instead of duplicating that flow here.
+  const goAnnualReviewBtn = document.getElementById('btnDetailGoAnnualReview');
+  if(goAnnualReviewBtn) goAnnualReviewBtn.addEventListener('click', ()=>{
+    state.docRequestMenuOpen = false;
+    goTo('revision', { selectedDoc: state.selectedDoc, revisionDetailOpen: true, revisionTimelineExpanded: false, dcPublishEditing: false });
+  });
   const historyBtn = document.querySelector('[data-go-revision-history]');
   if(historyBtn) historyBtn.addEventListener('click', ()=> openHistoryModal(state.selectedDoc));
   const delBtn = document.getElementById('btnDetailDelete');
