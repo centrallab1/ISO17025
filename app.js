@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.6';
+const APP_VERSION = '1.7';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -764,6 +764,20 @@ async function loadDocs(){
         d.publishedApproverName = alreadyAtRest ? (d.approverName||'') : null;
         needsMigration = true;
       }
+      // Same one-time snapshot, for the document's NAME and ISO CLAUSE —
+      // see displayName()/displayClause() above for why these need a
+      // published snapshot just like the link and people fields do. Uses
+      // the same "already at rest" test as the block above so a document
+      // already sitting on a settled, published state freezes its current
+      // name/clause as that snapshot; a document still mid-workflow (never
+      // yet published) gets null and simply shows its live value until its
+      // first real publish.
+      if(d.publishedClause===undefined){
+        const alreadyAtRest = d.approvalStatus==='อนุมัติแล้ว' || !!d.publishedLink || ['ควบคุม','แจกจ่าย','สนับสนุน','ยกเลิก'].includes(d.note);
+        d.publishedClause = alreadyAtRest ? (d.clause||'') : null;
+        d.publishedName = alreadyAtRest ? (d.name||'') : null;
+        needsMigration = true;
+      }
       // separate backfill for publishedPreparedAt specifically: docs that
       // already went through the block above (publishedPreparedBy already
       // defined) before this field existed would otherwise be skipped.
@@ -1280,17 +1294,48 @@ function displayLink(d){
   return d && d.publishedLink ? d.publishedLink : '';
 }
 
+// Same "show only the officially published version" rule as displayLink,
+// applied to the document's name and ISO clause. A revision request lets
+// the requester/DC register a NEW name/clause on d.name/d.clause well
+// before that revision is reviewed or approved (see renderDcRegisterBox
+// and the edit modal) — without this guard, every browsable list (Master
+// Document List, ISO clause breakdown, dashboards, etc.) would flash the
+// unapproved value the moment DC registers it. Instead, while a revision
+// is mid-flight (not yet 'อนุมัติแล้ว'), these fall back to the snapshot
+// frozen at the last successful publish (publishedName/publishedClause —
+// same snapshot pattern as publishedPreparedBy etc.), and only start
+// showing the new value once that revision is actually approved AND
+// published. Brand-new documents (no prior publish, so no snapshot yet)
+// have nothing to fall back to and are governed instead by
+// isHiddenFromLists, which keeps them out of these lists entirely until
+// their first publish.
+function displayClause(d){
+  if(!d) return '';
+  const pending = d.approvalStatus!=='อนุมัติแล้ว' && (d.publishedClause!==undefined && d.publishedClause!==null);
+  return pending ? d.publishedClause : (d.clause||'');
+}
+function displayName(d){
+  if(!d) return '';
+  const pending = d.approvalStatus!=='อนุมัติแล้ว' && !!d.publishedName;
+  return pending ? d.publishedName : (d.name||'');
+}
+
 // display-only: many document names already have the doc ID typed into
 // them (e.g. name="RDI-LM-01 คู่มือคุณภาพ"), which duplicates the ID
 // column/label everywhere id+name are shown together. Strip it for display.
+// Resolves through displayName() first so every caller automatically
+// shows the published name (not an unapproved in-flight edit) — see
+// displayName's comment above.
 function cleanName(d){
-  if(!d || !d.name) return '';
+  if(!d) return '';
+  const raw = displayName(d);
+  if(!raw) return '';
   const id = (d.id||'').trim();
-  let n = d.name.trim();
+  let n = raw.trim();
   if(id && n.startsWith(id)){
     n = n.slice(id.length).replace(/^[\s\-:–—]+/, '').trim();
   }
-  return n || d.name;
+  return n || raw;
 }
 
 // ============================================================
@@ -1718,7 +1763,7 @@ function viewISO(){
 }
 function isoDetailContent(){
   const clause = state.selectedClause;
-  const docs = visibleDocuments().filter(d=> (d.clause||'')===clause);
+  const docs = visibleDocuments().filter(d=> (displayClause(d)||'')===clause);
   const evidence = docs.filter(d=> d.note==='สนับสนุน');
   const related = clause ? CLAUSE_TREE.flatMap(g=>g.children).filter(c=> c.id!==clause && groupOf(c.id)===groupOf(clause)) : [];
 
@@ -1796,18 +1841,18 @@ const DOC_PRESETS = {
   rejected: d=> d.approvalStatus==='ไม่อนุมัติ',
   waitingreview: d=> d.approvalStatus==='รอทบทวน',
   waitingapproval: d=> d.approvalStatus==='รออนุมัติ',
-  unclassified: d=> !d.clause,
+  unclassified: d=> !displayClause(d),
 };
 function filteredDocs(){
   const presetFn = DOC_PRESETS[state.docFilter.preset] || DOC_PRESETS.all;
   return visibleDocuments().filter(d=>{
     if(!presetFn(d)) return false;
-    if(state.docFilter.clause!=='All' && (d.clause||'')!==state.docFilter.clause) return false;
+    if(state.docFilter.clause!=='All' && (displayClause(d)||'')!==state.docFilter.clause) return false;
     if(state.docFilter.type!=='All' && docTypeCode(d)!==state.docFilter.type) return false;
     if(state.docFilter.status!=='All' && d.note!==state.docFilter.status) return false;
     if(state.docFilter.q){
       const q = state.docFilter.q.toLowerCase();
-      if(!d.id.toLowerCase().includes(q) && !d.name.toLowerCase().includes(q)) return false;
+      if(!d.id.toLowerCase().includes(q) && !displayName(d).toLowerCase().includes(q)) return false;
     }
     return true;
   });
@@ -1869,7 +1914,7 @@ function renderDocumentsInto(){
       <tbody>
         ${pageItems.length ? pageItems.map(d=>`
         <tr data-open-doc="${d.id}">
-          <td class="mono">${d.id}</td><td class="name" title="${cleanName(d).replace(/"/g,'&quot;')}">${cleanName(d)}</td><td>${d.clause || '<span style="color:var(--ink-400);">—</span>'}</td>
+          <td class="mono">${d.id}</td><td class="name" title="${cleanName(d).replace(/"/g,'&quot;')}">${cleanName(d)}</td><td>${displayClause(d) || '<span style="color:var(--ink-400);">—</span>'}</td>
           <td>${docTypeLabel(d)}</td><td>${statusBadge(d.note)}</td><td>${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, true)}</td><td>${fmtDate(d.lastUpdated)}</td>
           <td><div class="row-actions" onclick="event.stopPropagation()">
             ${isDC() ? `<button data-edit="${d.id}" title="Edit">${ic('edit')}</button>
@@ -2788,7 +2833,7 @@ function viewDocDetail(docId){
       </div>
       <div class="side-box" style="width:230px;">
         <div class="side-box-title">ISO/IEC 17025</div>
-        <div class="clause-chip">${d.clause ? ic('check') : ''}${d.clause ? clauseLabel(d.clause) : 'ยังไม่ได้ระบุข้อกำหนด'}</div>
+        <div class="clause-chip">${displayClause(d) ? ic('check') : ''}${displayClause(d) ? clauseLabel(displayClause(d)) : 'ยังไม่ได้ระบุข้อกำหนด'}</div>
       </div>
     </div>
     <div class="desc-block" style="margin-top:18px;">
@@ -3346,6 +3391,12 @@ function wireDcPublish(){
     d.publishedPreparedAt = d.preparedAt;
     d.publishedReviewerName = d.reviewerName;
     d.publishedApproverName = d.approverName;
+    // freeze the name/clause this revision actually shipped with — see
+    // displayName()/displayClause(); every master/browsable list should
+    // keep showing this snapshot, not whatever the NEXT in-flight
+    // revision registers, until that next one is published in turn.
+    d.publishedClause = d.clause;
+    d.publishedName = d.name;
     d.lastUpdated = now;
     d.comments = d.comments || [];
     d.comments.push({ by:actor, text: isFirstPublish ? `ขั้นที่ 6: DC เผยแพร่เอกสาร (ลิงก์: ${link}, ประกาศใช้: ${fmtDate(d.effectiveDate)}) — เสร็จสิ้น` : `DC แก้ไขลิงก์ที่เผยแพร่ (ลิงก์ใหม่: ${link})`, time: now });
@@ -3442,7 +3493,7 @@ function viewRevisionDetailInline(d, standalone){
     </div>
 
     <div class="grid grid-3" style="margin-bottom:18px;">
-      <div class="side-box"><div class="side-box-title">ข้อกำหนด ISO</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.clause ? clauseLabel(d.clause) : 'ไม่ระบุ'}</div></div>
+      <div class="side-box"><div class="side-box-title">ข้อกำหนด ISO</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${displayClause(d) ? clauseLabel(displayClause(d)) : 'ไม่ระบุ'}</div></div>
       <div class="side-box"><div class="side-box-title">ประเภท / Rev.</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${docTypeLabel(d)} · Rev.${d.rev||'—'}</div></div>
       <div class="side-box"><div class="side-box-title">ทบทวนครั้งถัดไป</div><div style="font-size:12.5px; font-weight:700; color:${isOverdue?'var(--red-600)':'var(--ink-900)'};">${fmtDate(nrd)} (${isOverdue?`เกินกำหนด ${Math.abs(days)} วัน`:`อีก ${days} วัน`})</div></div>
       <div class="side-box"><div class="side-box-title">ผู้จัดทำ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.publishedPreparedBy || d.preparedBy || '—'}</div>${(d.publishedPreparedAt||d.preparedAt||d.createdDate) ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.publishedPreparedAt||d.preparedAt||d.createdDate)}</div>` : ''}</div>
@@ -3654,7 +3705,7 @@ function historyModalView(){
             <div class="kv-row"><div class="k">ชื่อเอกสาร</div><div class="v">${cleanName(d)}</div></div>
             <div class="kv-row"><div class="k">ประเภทเอกสาร</div><div class="v">${docTypeLabel(d)}</div></div>
             <div class="kv-row"><div class="k">Revision</div><div class="v">${d.rev || '—'}</div></div>
-            <div class="kv-row"><div class="k">ข้อกำหนด ISO</div><div class="v">${d.clause ? clauseLabel(d.clause) : 'ไม่ระบุ'}</div></div>
+            <div class="kv-row"><div class="k">ข้อกำหนด ISO</div><div class="v">${displayClause(d) ? clauseLabel(displayClause(d)) : 'ไม่ระบุ'}</div></div>
             <div class="kv-row"><div class="k">สถานะ</div><div class="v">${d.note}</div></div>
             <div class="kv-row"><div class="k">สร้างเมื่อ</div><div class="v">${d.createdDate ? fmtDateTime(d.createdDate) : '—'}</div></div>
             <div class="kv-row"><div class="k">อัปเดตล่าสุด</div><div class="v">${fmtDateTime(d.lastUpdated)}</div></div>
@@ -3794,12 +3845,12 @@ function viewRevisionDashboard(){
   const overdue = DOCUMENTS.filter(d=> nextReviewDate(d) < Date.now()).length;
 
   let list = DOCUMENTS.slice();
-  if(state.revFilter.clause!=='All') list = list.filter(d=>(d.clause||'')===state.revFilter.clause);
+  if(state.revFilter.clause!=='All') list = list.filter(d=>(displayClause(d)||'')===state.revFilter.clause);
   if(state.revFilter.type!=='All') list = list.filter(d=>docTypeCode(d)===state.revFilter.type);
   if(state.revFilter.status!=='All') list = list.filter(d=>d.approvalStatus===state.revFilter.status);
   if(state.revFilter.q){
     const q = state.revFilter.q.toLowerCase();
-    list = list.filter(d=> d.id.toLowerCase().includes(q) || d.name.toLowerCase().includes(q));
+    list = list.filter(d=> d.id.toLowerCase().includes(q) || displayName(d).toLowerCase().includes(q));
   }
   list = list.slice().sort((a,b)=>(b.lastUpdated||0)-(a.lastUpdated||0));
   const pageSize = 10;
@@ -3910,7 +3961,7 @@ function viewRevisionDashboard(){
           return `
         <tr class="${d.id===state.selectedDoc?'current-row':''}" data-open-rev="${d.id}">
           <td class="mono">${d.id}<div class="name" title="${cleanName(d).replace(/"/g,'&quot;')}" style="max-width:220px;">${cleanName(d)}</div></td>
-          <td>${d.clause || '<span style="color:var(--ink-400);">—</span>'}</td>
+          <td>${displayClause(d) || '<span style="color:var(--ink-400);">—</span>'}</td>
           <td>${d.rev || '—'}</td>
           <td>${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, true)}</td>
           <td>${fmtDateTime(d.lastUpdated)}</td>
@@ -4605,7 +4656,7 @@ function attachApprovalHandlers(){
 // ============================================================
 function viewAudit(){
   const clause = state.selectedClause;
-  const docs = visibleDocuments().filter(d=> (d.clause||'')===clause);
+  const docs = visibleDocuments().filter(d=> (displayClause(d)||'')===clause);
   const evidence = docs.filter(d=> d.note==='สนับสนุน');
   const related = clause ? CLAUSE_TREE.flatMap(g=>g.children).filter(c=> c.id!==clause && groupOf(c.id)===groupOf(clause)) : [];
   const approvedCount = docs.filter(d=>d.approvalStatus==='อนุมัติแล้ว').length;
