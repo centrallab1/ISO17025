@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.0';
+const APP_VERSION = '1.1';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -966,6 +966,16 @@ function emptyState(title, sub){
 function pendingQueue(){
   return DOCUMENTS.filter(d=> d.approvalStatus==='ร่าง' || d.approvalStatus==='รอทบทวน' || d.approvalStatus==='รออนุมัติ')
     .sort((a,b)=> (a.lastUpdated||0)-(b.lastUpdated||0));
+}
+// whether this document already has an unresolved in-app request (of ANY
+// kind — new/revision/review/cancel) in flight. All request state lives
+// directly on the document record rather than as a separate queue entry,
+// so starting a second request on top of an unfinished one would silently
+// overwrite/reset the first one's progress instead of queuing behind it.
+// Used to block "ปรับปรุง Rev." / "ขอยกเลิกเอกสาร" / "ขอทบทวนประจำปี" from
+// being started again while one is already active.
+function hasPendingRequest(d){
+  return ['ร่าง','รอทบทวน','รออนุมัติ'].includes(d.approvalStatus || 'ร่าง');
 }
 // whether it's specifically the logged-in user's turn to act on this
 // request right now — mirrors the approve-button gating rules exactly, so
@@ -1897,7 +1907,11 @@ function docModal(){
   const mode = state.modal.mode;
 
   if(mode==='revise' && !state.modal.id){
-    // step 1 of the revision flow: pick which existing document to revise
+    // step 1 of the revision flow: pick which existing document to revise.
+    // Docs that already have a request in flight (ร่าง/รอทบทวน/รออนุมัติ,
+    // of ANY type) are left out — starting a revision on top of one would
+    // silently overwrite that request's progress (see hasPendingRequest).
+    const eligible = DOCUMENTS.filter(x=>!hasPendingRequest(x)).slice().sort((a,b)=>a.id.localeCompare(b.id));
     return `
     <div class="modal-backdrop" id="docModalBackdrop">
       <div class="modal">
@@ -1906,8 +1920,9 @@ function docModal(){
           <div class="field"><label>เลือกเอกสารที่ต้องการปรับปรุง</label>
             <select id="mfReviseDocPicker">
               <option value="">— เลือกเอกสาร —</option>
-              ${DOCUMENTS.slice().sort((a,b)=>a.id.localeCompare(b.id)).map(x=>`<option value="${x.id}">${x.id} — ${cleanName(x)}</option>`).join('')}
+              ${eligible.map(x=>`<option value="${x.id}">${x.id} — ${cleanName(x)}</option>`).join('')}
             </select>
+            ${eligible.length < DOCUMENTS.length ? `<div style="font-size:11.5px; color:var(--ink-500); margin-top:6px;">ซ่อนเอกสาร ${DOCUMENTS.length-eligible.length} รายการที่มีคำขออื่นค้างอยู่แล้ว (ต้องรอให้เสร็จก่อน)</div>` : ''}
           </div>
         </div>
         <div class="modal-actions">
@@ -2142,6 +2157,10 @@ function wireModalControls(){
       if(!requestNote){ errEl.textContent = 'กรอกหมายเหตุก่อนส่งคำขอ'; errEl.style.display='block'; return; }
       const actor = currentActorName();
       const d = DOCUMENTS.find(x=>x.id===state.modal.id);
+      // defense in depth — the step-1 picker already filters these out, but
+      // this modal can also be opened directly (id pre-set) from a document's
+      // own detail page, which has no such filter of its own.
+      if(hasPendingRequest(d)){ errEl.textContent = `เอกสารนี้มีคำขอ (${requestTypeLabel(d)||'อื่น'}) กำลังดำเนินการอยู่แล้ว (สถานะ: ${d.approvalStatus}) — ต้องรอให้เสร็จก่อนจึงจะขอปรับปรุงซ้อนได้`; errEl.style.display='block'; return; }
       const oldRev = d.rev;
       d.rev = nextRevNumber(oldRev);
       d.approvalStatus = 'ร่าง';
@@ -2732,8 +2751,8 @@ function viewDocDetail(docId){
         <div class="detail-actions-label">จัดการเอกสาร</div>
         <div class="detail-actions">
           ${isDC() ? `<button class="btn ghost" id="btnDetailEdit">${ic('edit')} แก้ไข</button>` : ''}
-          <button class="btn ghost" id="btnDetailRevise">${ic('history')} ปรับปรุง Rev.</button>
-          <button class="btn danger" id="btnDetailCancelDoc">${ic('alert')} ขอยกเลิกเอกสาร</button>
+          <button class="btn ghost" id="btnDetailRevise" ${hasPendingRequest(d)?'disabled title="เอกสารนี้มีคำขออื่นกำลังดำเนินการอยู่"':''}>${ic('history')} ปรับปรุง Rev.</button>
+          <button class="btn danger" id="btnDetailCancelDoc" ${hasPendingRequest(d)?'disabled title="เอกสารนี้มีคำขออื่นกำลังดำเนินการอยู่"':''}>${ic('alert')} ขอยกเลิกเอกสาร</button>
           ${isDC() ? `<button class="btn danger" id="btnDetailDelete">${ic('trash')} ลบ</button>` : ''}
         </div>
       </div>
@@ -2791,7 +2810,9 @@ function cancelRequestModal(){
     // picker step — only reached from the Approval page's "ขอยกเลิก"
     // button, which doesn't already know which document to target (the
     // document-detail page's own cancel button skips this by setting
-    // docId directly). Mirrors the 'revise' step-1 document picker.
+    // docId directly). Mirrors the 'revise' step-1 document picker,
+    // including hiding docs that already have a request in flight.
+    const eligible = DOCUMENTS.filter(x=>!hasPendingRequest(x)).slice().sort((a,b)=>a.id.localeCompare(b.id));
     return `
     <div class="modal-backdrop" id="cancelReqBackdrop">
       <div class="modal">
@@ -2800,8 +2821,9 @@ function cancelRequestModal(){
           <div class="field"><label>เลือกเอกสารที่ต้องการขอยกเลิก</label>
             <select id="cancelReqDocPicker">
               <option value="">— เลือกเอกสาร —</option>
-              ${DOCUMENTS.slice().sort((a,b)=>a.id.localeCompare(b.id)).map(x=>`<option value="${x.id}">${x.id} — ${cleanName(x)}</option>`).join('')}
+              ${eligible.map(x=>`<option value="${x.id}">${x.id} — ${cleanName(x)}</option>`).join('')}
             </select>
+            ${eligible.length < DOCUMENTS.length ? `<div style="font-size:11.5px; color:var(--ink-500); margin-top:6px;">ซ่อนเอกสาร ${DOCUMENTS.length-eligible.length} รายการที่มีคำขออื่นค้างอยู่แล้ว (ต้องรอให้เสร็จก่อน)</div>` : ''}
           </div>
         </div>
         <div class="modal-actions">
@@ -2853,6 +2875,10 @@ function wireCancelRequestModal(){
     if(!note){ errEl.textContent = 'กรอกหมายเหตุคำขอก่อนส่ง'; errEl.style.display = 'block'; return; }
     const d = DOCUMENTS.find(x=>x.id===state.cancelRequestModal.docId);
     if(!d) return;
+    // defense in depth — the picker step already filters these out, but
+    // this modal can also be opened directly (docId pre-set) from a
+    // document's own detail page, which has no such filter of its own.
+    if(hasPendingRequest(d)){ errEl.textContent = `เอกสารนี้มีคำขอ (${requestTypeLabel(d)||'อื่น'}) กำลังดำเนินการอยู่แล้ว (สถานะ: ${d.approvalStatus}) — ต้องรอให้เสร็จก่อนจึงจะขอยกเลิกซ้อนได้`; errEl.style.display = 'block'; return; }
     const actor = currentActorName();
     const now = Date.now();
     d.approvalStatus = 'รอทบทวน';
@@ -3343,6 +3369,10 @@ function viewRevisionDetailInline(d, standalone){
   const days = daysUntil(nrd);
   const isOverdue = days < 0;
   const reviewPending = d.lastRequestType==='review' && ['ร่าง','รอทบทวน','รออนุมัติ'].includes(d.approvalStatus);
+  // any OTHER request type (new/revision/cancel) currently in flight on
+  // this same document — "ขอทบทวนประจำปี" must not be startable on top of
+  // it either, same reasoning as hasPendingRequest() generally.
+  const otherRequestPending = !reviewPending && hasPendingRequest(d);
 
   const items = [
     // this synthetic "current status" entry is a near-duplicate of the
@@ -3374,7 +3404,7 @@ function viewRevisionDetailInline(d, standalone){
         ${state.docDetailMenuOpen ? `
         <div class="action-menu" id="revDetailActionMenu">
           ${isDC() ? `<button class="dp-btn" id="revDetailEdit">${ic('edit')} แก้ไข</button>` : ''}
-          <button class="dp-btn" id="revDetailRevise">${ic('history')} ปรับปรุง Rev.</button>
+          <button class="dp-btn" id="revDetailRevise" ${hasPendingRequest(d)?'disabled title="เอกสารนี้มีคำขออื่นกำลังดำเนินการอยู่"':''}>${ic('history')} ปรับปรุง Rev.</button>
           <button class="dp-btn" id="revDetailApproval">${ic('check')} Approval</button>
           ${isDC() ? `<div class="dp-divider"></div><button class="dp-btn danger" id="revDetailDelete">${ic('trash')} ลบ</button>` : ''}
         </div>` : ''}
@@ -3403,12 +3433,16 @@ function viewRevisionDetailInline(d, standalone){
           <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">
             ${reviewPending
               ? `มีคำขอทบทวนประจำปีกำลังดำเนินการอยู่ (สถานะ: ${d.approvalStatus})`
+              : otherRequestPending
+              ? `เอกสารนี้มีคำขอ (${requestTypeLabel(d)||'อื่น'}) กำลังดำเนินการอยู่ (สถานะ: ${d.approvalStatus}) — ต้องรอให้เสร็จก่อนจึงจะขอทบทวนประจำปีได้`
               : d.lastReviewedAt ? `ทบทวนล่าสุดโดย ${d.lastReviewedBy||'ไม่ระบุ'} เมื่อ ${fmtDate(d.lastReviewedAt)}` : 'ยังไม่เคยทบทวนประจำปีสำหรับเอกสารนี้'}
           </div>
         </div>
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
           ${reviewPending
             ? `<button class="btn ghost" id="btnGoReviewApproval">${ic('check')} ไปที่ Approval</button>`
+            : otherRequestPending
+            ? `<button class="btn ghost" disabled title="เอกสารนี้มีคำขออื่นกำลังดำเนินการอยู่">${ic('clock')} มีคำขอค้างอยู่</button>`
             : `<button class="btn success" id="btnConfirmReview">${ic('send')} ขอทบทวนประจำปี (โดย ${currentActorName()})</button>`}
         </div>
       </div>
@@ -3660,6 +3694,7 @@ function attachRevisionDashboardHandlers(){
     const actor = currentActorName();
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
     if(!d) return;
+    if(hasPendingRequest(d)) return; // defense in depth — button only renders when no request is pending anyway
     const now = Date.now();
     // send it through the same approval workflow as a revision request —
     // the review isn't official until it's approved through all steps
@@ -4183,7 +4218,14 @@ function attachApprovalHandlers(){
         }
       }
     }
-    if(['อนุมัติแล้ว','ไม่อนุมัติ'].includes(d.approvalStatus)){
+    // Land on whichever tab will actually still show this document. An
+    // approved formal (new/revision) request that's still waiting on DC to
+    // publish belongs in "รอ DC เผยแพร่", not "ประวัติ" (isPendingPublishDoc
+    // excludes it from the history filter — see viewApproval()).
+    if(d.approvalStatus==='อนุมัติแล้ว'){
+      state.approvalTab = isPendingPublishDoc(d) ? 'pendingpublish' : 'history';
+      state.approvalPage = 1;
+    } else if(d.approvalStatus==='ไม่อนุมัติ'){
       state.approvalTab = 'history';
       state.approvalPage = 1;
     }
@@ -4221,7 +4263,12 @@ function attachApprovalHandlers(){
     } else {
       d.approvalStatus = 'ไม่อนุมัติ';
     }
-    state.approvalTab = 'history';
+    // A formal reject sends the doc back to 'ร่าง' (draft) — that lives in
+    // "คำขอที่กำลังดำเนินการ", not "ประวัติ". Only a real dead-end reject
+    // (non-formal request types) actually belongs in history. Previously
+    // this always jumped to 'history', where a just-rejected-to-draft
+    // formal request wouldn't show up — looking like it had vanished.
+    state.approvalTab = d.approvalStatus==='ไม่อนุมัติ' ? 'history' : 'active';
     state.approvalPage = 1;
     render();
     await persistDocs();
