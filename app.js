@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.3';
+const APP_VERSION = '1.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -916,6 +916,7 @@ const state = {
   evidenceYearModal: null, // { clause, year } for the popup card, or null
   historyModal: null, // { docId } for the document History popup, or null
   historyModalLinksOpen: false,
+  historyModalRequestDetail: null, // { fromRev, toRev, requestedBy, requestedAt, events } — popup on top of the History modal
 };
 
 const ICONS = {
@@ -1242,6 +1243,9 @@ function renderModalLayer(){
   } else if(state.evidenceYearModal){
     layer.innerHTML = evidenceYearModal();
     wireEvidenceYearModal();
+  } else if(state.historyModalRequestDetail){
+    layer.innerHTML = historyRequestDetailModal();
+    wireHistoryRequestDetailModal();
   } else if(state.historyModal){
     layer.innerHTML = historyModalView();
     wireHistoryModal();
@@ -3483,6 +3487,31 @@ function historyTimelineEvents(d){
   ];
   return events.sort((a,b)=>(a.time||0)-(b.time||0));
 }
+// Condensed Activity Log rows for the History popup — only the 4 kinds of
+// milestone dates requested: creation, each revision request (grouped via
+// groupHistoryByRequest so its sub-steps stay tucked behind a "details"
+// popup instead of cluttering the log), annual review requests, and
+// cancellation requests. Everything else (ขั้นที่1-6 step-by-step chatter)
+// stays out of this table — it's still visible in the full timeline above.
+function historyLogRows(d){
+  const rows = [];
+  if(d.createdDate){
+    rows.push({ kind:'created', time:d.createdDate, by:d.preparedBy||'', label:'สร้างเอกสาร', detail:'สร้างเอกสารเวอร์ชันแรก' });
+  }
+  groupHistoryByRequest(d).forEach(g=>{
+    if(g.type==='revision'){
+      rows.push({ kind:'revision', time:g.requestedAt, by:g.requestedBy||'', label:`ขอปรับปรุง Rev.${g.fromRev} → Rev.${g.toRev}`, group:g });
+    }
+  });
+  (d.comments||[]).forEach(c=>{
+    if(/ขอทบทวนประจำปี/.test(c.text)){
+      rows.push({ kind:'review', time:c.time, by:c.by||'', label:'ขอทบทวนประจำปี', detail:c.text });
+    } else if(/^ขอยกเลิกเอกสาร/.test(c.text)){
+      rows.push({ kind:'cancel', time:c.time, by:c.by||'', label:'ขอยกเลิกเอกสาร', detail:c.text });
+    }
+  });
+  return rows.sort((a,b)=>(b.time||0)-(a.time||0)); // newest first
+}
 function historyPersonCell(label, name, time){
   return `
     <div class="hist-person">
@@ -3500,6 +3529,7 @@ function historyModalView(){
   if(!d) return `<div class="modal-backdrop" id="historyModalBackdrop"><div class="modal"><div class="modal-body">${emptyState('ไม่พบเอกสาร','')}</div><div class="modal-actions"><button class="btn ghost" id="historyModalCloseBtn2">ปิด</button></div></div></div>`;
 
   const events = historyTimelineEvents(d);
+  const logRows = historyLogRows(d);
   const nrd = nextReviewDate(d);
   const days = daysUntil(nrd);
   const isOverdue = days < 0;
@@ -3531,6 +3561,7 @@ function historyModalView(){
     .hist-summary-actions{ display:flex; flex-direction:column; gap:8px; margin-top:12px; }
     .hist-summary-actions .btn{ justify-content:flex-start; width:100%; }
     .hist-status-banner{ display:flex; align-items:center; gap:10px; background:var(--green-50); border:1px solid var(--green-600); border-radius:10px; padding:10px 12px; margin-top:14px; }
+    .hist-status-banner svg{ width:20px; height:20px; flex-shrink:0; color:var(--green-600); }
     .hist-links-panel{ margin-top:16px; padding-top:16px; border-top:1px solid var(--line); }
     .hist-link-item{ padding:10px 0; border-bottom:1px solid var(--line); font-size:12px; }
     .hist-link-item:last-child{ border-bottom:none; }
@@ -3601,12 +3632,12 @@ function historyModalView(){
           <div class="table-wrap"><table class="dtable">
             <thead><tr><th>วันที่ / เวลา</th><th>กิจกรรม</th><th>รายละเอียด</th><th>โดย</th></tr></thead>
             <tbody>
-              ${events.length ? events.slice().reverse().map(e=>`
-              <tr>
-                <td class="mono">${fmtDateTime(e.time)}</td>
-                <td>${e.title}</td>
-                <td>${e.detail || '—'}</td>
-                <td>${e.actor || '—'}</td>
+              ${logRows.length ? logRows.map(r=>`
+              <tr class="${r.kind==='revision' ? 'hist-log-clickable' : ''}" ${r.kind==='revision' ? `data-hist-req-at="${r.group.requestedAt}"` : ''} style="${r.kind==='revision' ? 'cursor:pointer;' : ''}">
+                <td class="mono">${fmtDateTime(r.time)}</td>
+                <td>${r.label}</td>
+                <td>${r.kind==='revision' ? `<span class="panel-link">ดูรายละเอียด →</span>` : (r.detail || '—')}</td>
+                <td>${r.by || '—'}</td>
               </tr>`).join('') : `<tr><td colspan="4" style="text-align:center; padding:20px 0; color:var(--ink-500);">ยังไม่มีกิจกรรม</td></tr>`}
             </tbody>
           </table></div>
@@ -3636,6 +3667,52 @@ function wireHistoryModal(){
   backdrop.addEventListener('click', e=>{ if(e.target===backdrop) close(); });
   const toggleLinksBtn = document.getElementById('historyModalToggleLinks');
   if(toggleLinksBtn) toggleLinksBtn.addEventListener('click', ()=>{ state.historyModalLinksOpen = !state.historyModalLinksOpen; renderModalLayer(); });
+  // clicking a revision-request row in the Activity Log opens that
+  // request's own detail popup on top of this one
+  document.querySelectorAll('[data-hist-req-at]').forEach(row=>{
+    row.addEventListener('click', ()=>{
+      const d = DOCUMENTS.find(x=>x.id===state.historyModal.docId);
+      if(!d) return;
+      const at = row.dataset.histReqAt;
+      const group = groupHistoryByRequest(d).find(g=> g.type==='revision' && String(g.requestedAt)===at);
+      if(group) openHistoryRequestDetail(group);
+    });
+  });
+}
+
+// Detail popup for a single revision request, opened from the Activity Log
+// row — shows just that request cycle's own step-by-step events, reusing
+// eitem() (already styled globally) rather than inventing new CSS.
+function openHistoryRequestDetail(group){ state.historyModalRequestDetail = group; renderModalLayer(); }
+function closeHistoryRequestDetail(){ state.historyModalRequestDetail = null; renderModalLayer(); }
+function historyRequestDetailModal(){
+  const g = state.historyModalRequestDetail;
+  const items = (g.events||[]).slice().reverse().map(c=>{
+    const cls = classifyEvent(c.text);
+    return eitem({ icon:cls.icon, bg:cls.bg, title:cls.title, time:c.time, detail:c.text, actor:c.by });
+  });
+  return `
+  <div class="modal-backdrop" id="historyReqBackdrop">
+    <div class="modal">
+      <div class="modal-head"><div class="modal-title">คำขอปรับปรุง Rev.${g.fromRev} → Rev.${g.toRev}</div><button class="modal-close" id="historyReqCloseBtn">✕</button></div>
+      <div class="modal-body">
+        <div style="font-size:11.5px; color:var(--ink-500); margin-bottom:12px;">ขอเมื่อ ${fmtDateTime(g.requestedAt)} โดย ${g.requestedBy || '—'}</div>
+        ${items.length ? items.join('') : `<div style="color:var(--ink-500); font-size:12px;">ไม่มีรายละเอียดเพิ่มเติม</div>`}
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="historyReqCloseBtn2">ปิด</button>
+      </div>
+    </div>
+  </div>`;
+}
+function wireHistoryRequestDetailModal(){
+  const backdrop = document.getElementById('historyReqBackdrop');
+  if(!backdrop) return;
+  const close = ()=> closeHistoryRequestDetail();
+  document.getElementById('historyReqCloseBtn').addEventListener('click', close);
+  const closeBtn2 = document.getElementById('historyReqCloseBtn2');
+  if(closeBtn2) closeBtn2.addEventListener('click', close);
+  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) close(); });
 }
 
 // ============================================================
