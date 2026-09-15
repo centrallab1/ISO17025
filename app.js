@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.0';
+const APP_VERSION = '2.2';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -3721,7 +3721,9 @@ function historyModalView(){
     .hist-tl-title{ font-size:12.5px; font-weight:700; color:var(--ink-900); }
     .hist-tl-detail{ font-size:11.5px; color:var(--ink-500); margin-top:2px; }
     .hist-tl-meta{ font-size:10.5px; color:var(--ink-500); margin-top:3px; }
-    .hist-summary .kv-row{ padding:6px 0; }
+    .hist-summary .kv-row{ padding:6px 0; display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+    .hist-summary .kv-row .k{ flex:0 0 auto; padding-top:1px; }
+    .hist-summary .kv-row .v{ text-align:right; }
     .hist-summary-actions{ display:flex; flex-direction:column; gap:8px; margin-top:12px; }
     .hist-summary-actions .btn{ justify-content:flex-start; width:100%; }
     .hist-status-banner{ display:flex; align-items:center; gap:10px; background:var(--green-50); border:1px solid var(--green-600); border-radius:10px; padding:10px 12px; margin-top:14px; }
