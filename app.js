@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.5';
+const APP_VERSION = '1.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -3480,10 +3480,28 @@ function closeHistoryModal(){ state.historyModal = null; renderModalLayer(); }
 // chronological (oldest → newest) event list for the numbered lifecycle
 // timeline — the mirror image of the "latest first" activity feed used
 // elsewhere, since a lifecycle reads top-to-bottom as it happened.
+// Turns a raw "ลิงก์: https://..." (or a bare URL) inside comment text into
+// a short clickable "🔗 ลิงก์" hyperlink instead of dumping the whole long
+// URL as text — keeps long SharePoint share-links from overflowing/cluttering
+// the timeline and activity log.
+function linkifyShort(text){
+  if(!text) return text;
+  return text.replace(/(ลิงก์:\s*)?(https?:\/\/[^\s,)]+)/g, (m, prefix, url)=>
+    `<a href="${url}" target="_blank" rel="noopener" style="color:var(--blue-600); font-weight:700; white-space:nowrap;">${ic('link','sm-icon')} ลิงก์</a>`
+  );
+}
+// The top "ไทม์ไลน์เอกสาร" is meant to show what's currently happening, not
+// the entire history from day one — full past cycles are still one click
+// away via their row in the Activity Log below (see historyLogRows /
+// openHistoryRequestDetail). So this only surfaces the document's creation
+// plus whichever request cycle is the MOST RECENT one (groupHistoryByRequest
+// returns cycles newest-first, so index 0 is what we want).
 function historyTimelineEvents(d){
+  const groups = groupHistoryByRequest(d);
+  const latestGroupEvents = groups.length ? groups[0].events : [];
   const events = [
     ...(d.createdDate ? [{ icon:'plus', bg:'--blue-600', title:'จัดทำเอกสาร (Draft)', time:d.createdDate, detail:'สร้างเอกสารเวอร์ชันแรก', actor:d.preparedBy || '' }] : []),
-    ...(d.comments||[]).map(c=>{ const cls = classifyEvent(c.text); return { ...cls, time:c.time, detail:c.text, actor:c.by }; }),
+    ...latestGroupEvents.map(c=>{ const cls = classifyEvent(c.text); return { ...cls, time:c.time, detail:c.text, actor:c.by }; }),
   ];
   return events.sort((a,b)=>(a.time||0)-(b.time||0));
 }
@@ -3587,15 +3605,16 @@ function historyModalView(){
 
         <div class="hist-grid">
           <div>
-            <div class="panel-title" style="margin-bottom:12px;">ไทม์ไลน์เอกสาร (Document Lifecycle Timeline)</div>
+            <div class="panel-title" style="margin-bottom:2px;">ไทม์ไลน์เอกสาร (Document Lifecycle Timeline)</div>
+            ${groupHistoryByRequest(d).length > 1 ? `<div style="font-size:10.5px; color:var(--ink-500); margin-bottom:10px;">แสดงเฉพาะกิจกรรมล่าสุด — ดูคำขอปรับปรุงรอบก่อนหน้าได้ที่ Activity Log ด้านล่าง</div>` : `<div style="margin-bottom:12px;"></div>`}
             <div class="hist-tl">
               ${events.length ? events.map((e,i)=>`
                 <div class="hist-tl-item">
                   <div class="hist-tl-num" style="background:var(${e.bg})">${i+1}</div>
                   <div>
                     <div class="hist-tl-title">${e.title}</div>
-                    ${e.detail ? `<div class="hist-tl-detail">${e.detail}</div>` : ''}
-                    <div class="hist-tl-meta">${fmtDateTime(e.time)}${e.actor ? ` · โดย ${e.actor}` : ''}</div>
+                    ${e.detail ? `<div class="hist-tl-detail">${linkifyShort(e.detail)}</div>` : ''}
+                    <div class="hist-tl-meta">${fmtDateTime(e.time)}${e.actor ? ` · โดย <span class="actor-pill">${e.actor}</span>` : ''}</div>
                   </div>
                 </div>`).join('') : `<div style="color:var(--ink-500); font-size:12px;">ยังไม่มีประวัติ</div>`}
             </div>
@@ -3604,7 +3623,7 @@ function historyModalView(){
               ${ic('check')}
               <div>
                 <div style="font-size:12px; font-weight:800; color:var(--green-600);">สถานะปัจจุบัน: ${d.note}${d.approvalStatus ? ` · ${d.approvalStatus}` : ''}</div>
-                <div style="font-size:11px; color:var(--ink-500);">อัปเดตล่าสุดเมื่อ ${fmtDateTime(d.lastUpdated)}${latest.actor ? ` โดย ${latest.actor}` : ''}</div>
+                <div style="font-size:11px; color:var(--ink-500);">อัปเดตล่าสุดเมื่อ ${fmtDateTime(d.lastUpdated)}${latest.actor ? ` โดย <span class="actor-pill">${latest.actor}</span>` : ''}</div>
               </div>
             </div>` : ''}
           </div>
@@ -3636,8 +3655,8 @@ function historyModalView(){
               <tr class="${r.kind==='revision' ? 'hist-log-clickable' : ''}" ${r.kind==='revision' ? `data-hist-req-at="${r.group.requestedAt}"` : ''} style="${r.kind==='revision' ? 'cursor:pointer;' : ''}">
                 <td class="mono">${fmtDateTime(r.time)}</td>
                 <td>${r.label}</td>
-                <td>${r.kind==='revision' ? `<span class="panel-link">ดูรายละเอียด →</span>` : (r.detail || '—')}</td>
-                <td>${r.by || '—'}</td>
+                <td>${r.kind==='revision' ? `<span class="panel-link">ดูรายละเอียด →</span>` : (linkifyShort(r.detail) || '—')}</td>
+                <td>${r.by ? `<span class="actor-pill">${r.by}</span>` : '—'}</td>
               </tr>`).join('') : `<tr><td colspan="4" style="text-align:center; padding:20px 0; color:var(--ink-500);">ยังไม่มีกิจกรรม</td></tr>`}
             </tbody>
           </table></div>
@@ -3707,7 +3726,7 @@ function historyReqEventItem(c, d){
     <div class="eitem-icon" style="background:var(${cls.bg})">${ic(cls.icon)}</div>
     <div class="eitem-body">
       <div class="eitem-head"><div class="eitem-title">${cls.title}</div><div class="eitem-time">${fmtDateTime(c.time)}</div></div>
-      ${detail ? `<div class="eitem-detail" style="overflow-wrap:anywhere; word-break:break-word;">${detail}</div>` : ''}
+      ${detail ? `<div class="eitem-detail" style="overflow-wrap:anywhere; word-break:break-word;">${linkifyShort(detail)}</div>` : ''}
       ${showLinkBtn ? `<div style="margin-top:6px;"><a class="btn ghost" href="${d.link}" target="_blank" rel="noopener" style="display:inline-flex; padding:4px 10px; font-size:11.5px;">${ic('link')} เปิดลิงก์ที่วางไว้</a></div>` : ''}
       <div class="eitem-actor">โดย <span class="actor-pill">${c.by || 'ไม่ระบุ'}</span></div>
     </div>
