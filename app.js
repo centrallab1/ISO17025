@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '2.3';
+const APP_VERSION = '2.4';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -3171,7 +3171,7 @@ function renderFormConfirmBox(d){
   }
   return `
   <div class="side-box" style="border-color:var(--amber-600); background:var(--amber-50); margin-bottom:18px;">
-    <div style="font-size:12.5px; font-weight:800; color:var(--amber-600); margin-bottom:8px;">ขั้นที่ 2: กรอกฟอร์มคำขอใน SharePoint</div>
+    <div style="font-size:12.5px; font-weight:800; color:var(--amber-600); margin-bottom:8px;">ขั้นตอนถัดไป: กรอกฟอร์มคำขอใน SharePoint</div>
     <div style="font-size:11.5px; color:var(--ink-700); margin-bottom:10px;">เปิดฟอร์มด้านล่างแล้วกรอกให้ครบก่อน จากนั้นกดยืนยันเพื่อส่งคำขอเข้าสู่การทบทวน</div>
     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
       <a class="btn ghost" href="${EXTERNAL_REQUEST_FORM_LINK}" target="_blank" rel="noopener">${ic('link')} เปิดฟอร์ม</a>
@@ -3273,7 +3273,7 @@ function renderDcRegisterBox(d){
   }
   return `
   <div class="side-box" style="border-color:var(--amber-600); background:var(--amber-50); margin-bottom:18px;">
-    <div style="font-size:12.5px; font-weight:800; color:var(--amber-600); margin-bottom:8px;">ขั้นที่ 3: DC วางลิงก์เอกสารและเลือกข้อกำหนด</div>
+    <div style="font-size:12.5px; font-weight:800; color:var(--amber-600); margin-bottom:8px;">ขั้นตอนถัดไป: DC วางลิงก์เอกสารและเลือกข้อกำหนด</div>
     <div style="font-size:11.5px; color:var(--ink-700); margin-bottom:10px;">ลิงก์นี้จะแสดงให้ผู้ทบทวนและผู้อนุมัติเห็นตลอด เพื่อให้เข้าไปอ่านเอกสารได้</div>
     <div class="field"><label>ลิงก์เอกสาร</label>
       <input id="dcLinkInput" placeholder="https://mitrphol.sharepoint.com/..." style="border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px; width:100%; box-sizing:border-box;"></div>
