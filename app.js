@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.1';
+const APP_VERSION = '1.2';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -914,6 +914,8 @@ const state = {
   revisionTimelineExpanded: false,
   cancelRequestModal: null, // { docId }
   evidenceYearModal: null, // { clause, year } for the popup card, or null
+  historyModal: null, // { docId } for the document History popup, or null
+  historyModalLinksOpen: false,
 };
 
 const ICONS = {
@@ -941,6 +943,7 @@ const ICONS = {
   logout: `<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>`,
   lock: `<rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>`,
   eye: `<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/><circle cx="12" cy="12" r="3"/>`,
+  download: `<path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>`,
   eyeOff: `<path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a20.7 20.7 0 0 1 5.06-5.94M9.9 4.24A10.4 10.4 0 0 1 12 4c7 0 11 7 11 7a20.6 20.6 0 0 1-2.29 3.31M14.12 14.12a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/>`,
 };
 function ic(name, cls=''){ return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||''}</svg>`; }
@@ -1239,6 +1242,9 @@ function renderModalLayer(){
   } else if(state.evidenceYearModal){
     layer.innerHTML = evidenceYearModal();
     wireEvidenceYearModal();
+  } else if(state.historyModal){
+    layer.innerHTML = historyModalView();
+    wireHistoryModal();
   } else {
     layer.innerHTML = '';
   }
@@ -2778,7 +2784,7 @@ function attachDetailActionHandlers(){
   const reviseBtn = document.getElementById('btnDetailRevise');
   if(reviseBtn) reviseBtn.addEventListener('click', ()=> openModal({ mode:'revise', id: state.selectedDoc }));
   const historyBtn = document.querySelector('[data-go-revision-history]');
-  if(historyBtn) historyBtn.addEventListener('click', ()=> goTo('revision', { selectedDoc: state.selectedDoc, revisionDetailOpen: true, revisionTimelineExpanded: false, dcPublishEditing: false }));
+  if(historyBtn) historyBtn.addEventListener('click', ()=> openHistoryModal(state.selectedDoc));
   const delBtn = document.getElementById('btnDetailDelete');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
@@ -3454,6 +3460,182 @@ function viewRevisionDetailInline(d, standalone){
     </div>
     ${shownItems.join('')}
   </div>`;
+}
+
+// ============================================================
+// HISTORY POPUP — opened from the "History" button on the document
+// detail page. Shows the same lifecycle-timeline data as the Revision
+// detail page, but as an in-place modal instead of navigating away
+// (see attachDetailActionHandlers()). Built from real data only: the
+// document's own comment trail (via classifyEvent/eitem) and its
+// linkHistory — no invented revision numbers or steps.
+// ============================================================
+function openHistoryModal(docId){ state.historyModal = { docId }; state.historyModalLinksOpen = false; renderModalLayer(); }
+function closeHistoryModal(){ state.historyModal = null; renderModalLayer(); }
+
+// chronological (oldest → newest) event list for the numbered lifecycle
+// timeline — the mirror image of the "latest first" activity feed used
+// elsewhere, since a lifecycle reads top-to-bottom as it happened.
+function historyTimelineEvents(d){
+  const events = [
+    ...(d.createdDate ? [{ icon:'plus', bg:'--blue-600', title:'จัดทำเอกสาร (Draft)', time:d.createdDate, detail:'สร้างเอกสารเวอร์ชันแรก', actor:d.preparedBy || '' }] : []),
+    ...(d.comments||[]).map(c=>{ const cls = classifyEvent(c.text); return { ...cls, time:c.time, detail:c.text, actor:c.by }; }),
+  ];
+  return events.sort((a,b)=>(a.time||0)-(b.time||0));
+}
+function historyPersonCell(label, name, time){
+  return `
+    <div class="hist-person">
+      <div class="hist-avatar">${(name||'?').trim().charAt(0).toUpperCase()}</div>
+      <div>
+        <div class="hist-person-label">${label}</div>
+        <div class="hist-person-name">${name || '—'}</div>
+        ${time ? `<div class="hist-person-time">${fmtDateTime(time)}</div>` : ''}
+      </div>
+    </div>`;
+}
+function historyModalView(){
+  const { docId } = state.historyModal;
+  const d = DOCUMENTS.find(x=>x.id===docId);
+  if(!d) return `<div class="modal-backdrop" id="historyModalBackdrop"><div class="modal"><div class="modal-body">${emptyState('ไม่พบเอกสาร','')}</div><div class="modal-actions"><button class="btn ghost" id="historyModalCloseBtn2">ปิด</button></div></div></div>`;
+
+  const events = historyTimelineEvents(d);
+  const nrd = nextReviewDate(d);
+  const days = daysUntil(nrd);
+  const isOverdue = days < 0;
+  const latest = events[events.length-1];
+
+  return `
+  <style>
+    .hist-modal{ width:min(980px, 94vw); max-width:980px; }
+    .hist-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; padding-bottom:16px; border-bottom:1px solid var(--line); margin-bottom:16px; }
+    .hist-head-title{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .hist-people{ display:flex; gap:22px; flex-wrap:wrap; }
+    .hist-person{ display:flex; align-items:center; gap:8px; }
+    .hist-avatar{ width:28px; height:28px; border-radius:50%; background:var(--blue-50); color:var(--blue-600); font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .hist-person-label{ font-size:10.5px; color:var(--ink-500); }
+    .hist-person-name{ font-size:12px; font-weight:700; color:var(--ink-900); }
+    .hist-person-time{ font-size:10.5px; color:var(--ink-500); }
+    .hist-grid{ display:grid; grid-template-columns:1.4fr 1fr; gap:20px; align-items:start; }
+    @media (max-width:720px){ .hist-grid{ grid-template-columns:1fr; } }
+    .hist-tl{ position:relative; }
+    .hist-tl-item{ display:flex; gap:12px; position:relative; padding-bottom:20px; }
+    .hist-tl-item:last-child{ padding-bottom:0; }
+    .hist-tl-item::before{ content:''; position:absolute; left:14px; top:30px; bottom:0; width:2px; background:var(--line); }
+    .hist-tl-item:last-child::before{ display:none; }
+    .hist-tl-num{ width:29px; height:29px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:12px; font-weight:800; z-index:1; }
+    .hist-tl-title{ font-size:12.5px; font-weight:700; color:var(--ink-900); }
+    .hist-tl-detail{ font-size:11.5px; color:var(--ink-500); margin-top:2px; }
+    .hist-tl-meta{ font-size:10.5px; color:var(--ink-500); margin-top:3px; }
+    .hist-summary .kv-row{ padding:6px 0; }
+    .hist-summary-actions{ display:flex; flex-direction:column; gap:8px; margin-top:12px; }
+    .hist-summary-actions .btn{ justify-content:flex-start; width:100%; }
+    .hist-status-banner{ display:flex; align-items:center; gap:10px; background:var(--green-50); border:1px solid var(--green-600); border-radius:10px; padding:10px 12px; margin-top:14px; }
+    .hist-links-panel{ margin-top:16px; padding-top:16px; border-top:1px solid var(--line); }
+    .hist-link-item{ padding:10px 0; border-bottom:1px solid var(--line); font-size:12px; }
+    .hist-link-item:last-child{ border-bottom:none; }
+    .hist-link-item a{ color:var(--blue-600); word-break:break-all; }
+    .hist-link-meta{ color:var(--ink-500); font-size:10.5px; margin-top:2px; }
+  </style>
+  <div class="modal-backdrop" id="historyModalBackdrop">
+    <div class="modal hist-modal">
+      <div class="modal-head"><div class="modal-title">ประวัติเอกสาร</div><button class="modal-close" id="historyModalCloseBtn">✕</button></div>
+      <div class="modal-body">
+        <div class="hist-head">
+          <div>
+            <div class="hist-head-title"><div class="detail-title">${d.id}</div>${statusBadge(d.note)}${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, false)}</div>
+            <div class="detail-sub" style="margin-bottom:6px;">${cleanName(d)}${d.rev ? ` <span style="color:var(--ink-500); font-weight:600;">· Rev.${d.rev}</span>` : ''}</div>
+            <div style="font-size:11px; color:${isOverdue?'var(--red-600)':'var(--ink-500)'};">${ic('clock','sm-icon')} ทบทวนครั้งถัดไป: ${fmtDate(nrd)} (${isOverdue?`เกินกำหนด ${Math.abs(days)} วัน`:`อีก ${days} วัน`})</div>
+          </div>
+          <div class="hist-people">
+            ${historyPersonCell('ผู้จัดทำ', d.publishedPreparedBy || d.preparedBy, d.publishedPreparedAt||d.preparedAt||d.createdDate)}
+            ${historyPersonCell('ผู้ทบทวน', d.publishedReviewerName || d.reviewerName, d.reviewedAt)}
+            ${historyPersonCell('ผู้อนุมัติ', d.publishedApproverName || d.approverName || d.approvedBy, d.approvedAt)}
+          </div>
+        </div>
+
+        <div class="hist-grid">
+          <div>
+            <div class="panel-title" style="margin-bottom:12px;">ไทม์ไลน์เอกสาร (Document Lifecycle Timeline)</div>
+            <div class="hist-tl">
+              ${events.length ? events.map((e,i)=>`
+                <div class="hist-tl-item">
+                  <div class="hist-tl-num" style="background:var(${e.bg})">${i+1}</div>
+                  <div>
+                    <div class="hist-tl-title">${e.title}</div>
+                    ${e.detail ? `<div class="hist-tl-detail">${e.detail}</div>` : ''}
+                    <div class="hist-tl-meta">${fmtDateTime(e.time)}${e.actor ? ` · โดย ${e.actor}` : ''}</div>
+                  </div>
+                </div>`).join('') : `<div style="color:var(--ink-500); font-size:12px;">ยังไม่มีประวัติ</div>`}
+            </div>
+            ${latest ? `
+            <div class="hist-status-banner">
+              ${ic('check')}
+              <div>
+                <div style="font-size:12px; font-weight:800; color:var(--green-600);">สถานะปัจจุบัน: ${d.note}${d.approvalStatus ? ` · ${d.approvalStatus}` : ''}</div>
+                <div style="font-size:11px; color:var(--ink-500);">อัปเดตล่าสุดเมื่อ ${fmtDateTime(d.lastUpdated)}${latest.actor ? ` โดย ${latest.actor}` : ''}</div>
+              </div>
+            </div>` : ''}
+          </div>
+
+          <div class="hist-summary">
+            <div class="side-box-title" style="margin-bottom:8px;">สรุปข้อมูลเอกสาร</div>
+            <div class="kv-row"><div class="k">รหัสเอกสาร</div><div class="v">${d.id}</div></div>
+            <div class="kv-row"><div class="k">ชื่อเอกสาร</div><div class="v">${cleanName(d)}</div></div>
+            <div class="kv-row"><div class="k">ประเภทเอกสาร</div><div class="v">${docTypeLabel(d)}</div></div>
+            <div class="kv-row"><div class="k">Revision</div><div class="v">${d.rev || '—'}</div></div>
+            <div class="kv-row"><div class="k">ข้อกำหนด ISO</div><div class="v">${d.clause ? clauseLabel(d.clause) : 'ไม่ระบุ'}</div></div>
+            <div class="kv-row"><div class="k">สถานะ</div><div class="v">${d.note}</div></div>
+            <div class="kv-row"><div class="k">สร้างเมื่อ</div><div class="v">${d.createdDate ? fmtDateTime(d.createdDate) : '—'}</div></div>
+            <div class="kv-row"><div class="k">อัปเดตล่าสุด</div><div class="v">${fmtDateTime(d.lastUpdated)}</div></div>
+
+            <div class="hist-summary-actions">
+              ${displayLink(d) ? `<a class="btn primary" href="${displayLink(d)}" target="_blank" rel="noopener">${ic('link')} เปิดใน SharePoint</a>` : `<button class="btn ghost" disabled>${ic('link')} ยังไม่มีลิงก์</button>`}
+              ${(d.linkHistory && d.linkHistory.length) ? `<button class="btn ghost" id="historyModalToggleLinks">${ic('folder')} ${state.historyModalLinksOpen ? 'ซ่อน' : 'ดู'}ลิงก์ทั้งหมด (${d.linkHistory.length + (displayLink(d)?1:0)})</button>` : ''}
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top:20px; box-shadow:none; border:1px solid var(--line); padding:16px;">
+          <div class="panel-title" style="margin-bottom:10px;">Activity Log (ประวัติกิจกรรมทั้งหมด)</div>
+          <div class="table-wrap"><table class="dtable">
+            <thead><tr><th>วันที่ / เวลา</th><th>กิจกรรม</th><th>รายละเอียด</th><th>โดย</th></tr></thead>
+            <tbody>
+              ${events.length ? events.slice().reverse().map(e=>`
+              <tr>
+                <td class="mono">${fmtDateTime(e.time)}</td>
+                <td>${e.title}</td>
+                <td>${e.detail || '—'}</td>
+                <td>${e.actor || '—'}</td>
+              </tr>`).join('') : `<tr><td colspan="4" style="text-align:center; padding:20px 0; color:var(--ink-500);">ยังไม่มีกิจกรรม</td></tr>`}
+            </tbody>
+          </table></div>
+        </div>
+
+        ${state.historyModalLinksOpen && (d.linkHistory && d.linkHistory.length) ? `
+        <div class="hist-links-panel">
+          <div class="panel-title" style="margin-bottom:6px;">ลิงก์เอกสาร (Links)</div>
+          ${displayLink(d) ? `<div class="hist-link-item"><b>ลิงก์ปัจจุบัน</b> — <a href="${displayLink(d)}" target="_blank" rel="noopener">${displayLink(d)}</a><div class="hist-link-meta">เผยแพร่ล่าสุด</div></div>` : ''}
+          ${d.linkHistory.slice().reverse().map(h=>`
+          <div class="hist-link-item">${h.note||'ลิงก์เดิม'} — <a href="${h.link}" target="_blank" rel="noopener">${h.link}</a><div class="hist-link-meta">เพิ่มเมื่อ ${fmtDate(h.time)}${h.by ? ` โดย ${h.by}` : ''}</div></div>`).join('')}
+        </div>` : ''}
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="historyModalCloseBtn2">ปิด</button>
+      </div>
+    </div>
+  </div>`;
+}
+function wireHistoryModal(){
+  const backdrop = document.getElementById('historyModalBackdrop');
+  if(!backdrop) return;
+  const close = ()=> closeHistoryModal();
+  document.getElementById('historyModalCloseBtn').addEventListener('click', close);
+  const closeBtn2 = document.getElementById('historyModalCloseBtn2');
+  if(closeBtn2) closeBtn2.addEventListener('click', close);
+  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) close(); });
+  const toggleLinksBtn = document.getElementById('historyModalToggleLinks');
+  if(toggleLinksBtn) toggleLinksBtn.addEventListener('click', ()=>{ state.historyModalLinksOpen = !state.historyModalLinksOpen; renderModalLayer(); });
 }
 
 // ============================================================
