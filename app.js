@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.10';
+const APP_VERSION = '1.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -4556,6 +4556,8 @@ function attachApprovalHandlers(){
       }
     }
 
+    if(!confirm(`ยืนยัน${currentIdx===STATUS_FLOW.length-2 ? 'การอนุมัติขั้นสุดท้าย' : 'การอนุมัติ (ไปขั้นตอนถัดไป)'}สำหรับ "${d.id} ${cleanName(d)}" ใช่หรือไม่?`)) return;
+
     const now = Date.now();
     let docCancelledToArchive = false;
     d.approvalStatus = nextStatus;
@@ -4668,6 +4670,7 @@ function attachApprovalHandlers(){
       return;
     }
     if(!comment){ errEl.textContent='กรอกความเห็นก่อนกด "ไม่อนุมัติ"'; errEl.style.display='block'; return; }
+    if(!confirm(`ยืนยันการไม่อนุมัติ (ปฏิเสธ) เอกสาร "${d.id} ${cleanName(d)}" ใช่หรือไม่?`)) return;
     const now = Date.now();
     d.comments = d.comments || [];
     d.comments.push({ by:actor, text:comment, time: now });
