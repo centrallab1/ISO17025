@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '2.1';
+const APP_VERSION = '1.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -4395,7 +4395,7 @@ function viewApprovalDetail(){
     .utl-item{ display:flex; gap:10px; align-items:flex-start; padding:9px 0; border-bottom:1px solid var(--line); }
     .utl-item:last-child{ border-bottom:none; }
     .utl-icon{ width:26px; height:26px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; }
-    .utl-icon svg{ width:13px; height:13px; }
+    .utl-icon svg{ width:13px; height:13px; stroke:currentColor; stroke-width:2.2; fill:none; }
     .utl-main{ flex:1; min-width:0; }
     .utl-title{ font-size:12px; font-weight:700; color:var(--ink-900); }
     .utl-text{ font-size:11.5px; color:var(--ink-500); margin-top:1px; word-break:break-word; }
