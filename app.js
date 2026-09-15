@@ -2718,7 +2718,7 @@ function viewDocDetail(docId){
         <div class="detail-title-row"><div class="detail-title">${d.id}</div>${statusBadge(d.note)}${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, false)}${d.lastRequestType==='new'||d.lastRequestType==='revision' ? (d.publishedLink ? `<span class="badge active">เผยแพร่แล้ว</span>` : `<span class="badge review">รอ DC เผยแพร่</span>`) : ''}</div>
         <div class="detail-sub">${cleanName(d)}${d.rev ? ` <span style="color:var(--ink-500); font-weight:600;">· Rev.${d.rev}</span>` : ''}</div>
         <div class="kv-row"><div class="k">ประเภท</div><div class="v">${docTypeLabel(d)}</div></div>
-        <div class="kv-row"><div class="k">วันที่จัดทำ</div><div class="v">${d.createdDate ? fmtDate(d.createdDate) : '—'}</div></div>
+        <div class="kv-row"><div class="k">วันที่จัดทำ</div><div class="v">${(d.publishedPreparedAt||d.preparedAt||d.createdDate) ? fmtDate(d.publishedPreparedAt||d.preparedAt||d.createdDate) : '—'}</div></div>
         <div class="kv-row"><div class="k">วันที่ประกาศใช้</div><div class="v">${d.effectiveDate ? fmtDate(d.effectiveDate) : '—'}</div></div>
         ${d.cancelledDate ? `<div class="kv-row"><div class="k">วันที่ยกเลิก</div><div class="v">${fmtDate(d.cancelledDate)}</div></div>` : ''}
         <div class="kv-row"><div class="k">อัปเดตล่าสุด</div><div class="v">${fmtDateTime(d.lastUpdated)}</div></div>
