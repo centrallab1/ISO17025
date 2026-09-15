@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '2.0';
+const APP_VERSION = '2.1';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -939,6 +939,7 @@ const state = {
   queueListOpen: false,
   approvalTab: 'active',
   approvalDetailOpen: false,
+  approvalStepView: null, // null = show latest step; 0/1/2 = viewing a past (done) step via the green chevron
   approvalCommentsExpanded: false,
   dcPublishEditing: false,
   dcLinkEditing: false,
@@ -1251,7 +1252,7 @@ function renderNotifPanel(){
       e.stopPropagation();
       notifOpen = false;
       renderNotifPanel();
-      goTo('approval', { selectedDoc: elx.dataset.notifDoc, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false });
+      goTo('approval', { selectedDoc: elx.dataset.notifDoc, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false, approvalStepView:null });
     });
   });
   wrap.querySelectorAll('[data-notif-overdue-doc]').forEach(elx=>{
@@ -2244,7 +2245,7 @@ function wireModalControls(){
       });
       closeModal();
       await persistDocs();
-      goTo('approval', { selectedDoc: id, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false });
+      goTo('approval', { selectedDoc: id, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false, approvalStepView:null });
       return;
     }
 
@@ -2285,7 +2286,7 @@ function wireModalControls(){
       d.lastUpdated = Date.now();
       closeModal();
       await persistDocs();
-      goTo('approval', { selectedDoc: d.id, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false });
+      goTo('approval', { selectedDoc: d.id, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false, approvalStepView:null });
       return;
     }
 
@@ -3042,7 +3043,7 @@ function wireCancelRequestModal(){
     d.lastUpdated = now;
     state.cancelRequestModal = null;
     await persistDocs();
-    goTo('approval', { selectedDoc: d.id, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false });
+    goTo('approval', { selectedDoc: d.id, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false, approvalStepView:null });
   });
 }
 
@@ -4126,7 +4127,7 @@ function attachRevisionDashboardHandlers(){
   if(approvalBtn) approvalBtn.addEventListener('click', ()=>{
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
     const tab = d && ['อนุมัติแล้ว','ไม่อนุมัติ'].includes(d.approvalStatus) ? 'history' : 'active';
-    goTo('approval', { selectedDoc: state.selectedDoc, approvalTab: tab, approvalPage: 1, approvalDetailOpen: true, approvalCommentsExpanded: false, dcPublishEditing: false, dcLinkEditing: false });
+    goTo('approval', { selectedDoc: state.selectedDoc, approvalTab: tab, approvalPage: 1, approvalDetailOpen: true, approvalCommentsExpanded: false, dcPublishEditing: false, dcLinkEditing: false, approvalStepView: null });
   });
   const delBtn = document.getElementById('revDetailDelete');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
@@ -4158,11 +4159,11 @@ function attachRevisionDashboardHandlers(){
     d.comments.push({ by:actor, text:'ขอทบทวนประจำปี — ไม่มีการแก้ไขเอกสาร', time: now });
     d.lastUpdated = now;
     await persistDocs();
-    goTo('approval', { selectedDoc: d.id, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false });
+    goTo('approval', { selectedDoc: d.id, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false, approvalStepView:null });
   });
   const goReviewApprovalBtn = document.getElementById('btnGoReviewApproval');
   if(goReviewApprovalBtn) goReviewApprovalBtn.addEventListener('click', ()=>{
-    goTo('approval', { selectedDoc: state.selectedDoc, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false });
+    goTo('approval', { selectedDoc: state.selectedDoc, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false, approvalStepView:null });
   });
 }
 
@@ -4379,6 +4380,9 @@ function viewApprovalDetail(){
     .chevron-step.done{ background:var(--green-600); }
     .chevron-step.pending{ background:var(--blue-600); }
     .chevron-step.rejected{ background:var(--red-600); }
+    .chevron-step.clickable{ cursor:pointer; }
+    .chevron-step.clickable:hover{ filter:brightness(1.08); }
+    .chevron-step.active-view{ box-shadow:inset 0 0 0 2px #fff; }
     .chevron-num{ font-size:9.5px; font-weight:700; opacity:.85; display:block; }
     .chevron-label{ font-size:11.5px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     @media (max-width:640px){
@@ -4407,7 +4411,10 @@ function viewApprovalDetail(){
     </div>
 
     <div class="chevron-track">
-      ${chevronSteps.map((s,i)=>`<div class="chevron-step ${s.cls}"><span class="chevron-num">[${i+1}]</span><span class="chevron-label">${s.label}</span></div>`).join('')}
+      ${chevronSteps.map((s,i)=>{
+        const clickable = s.cls==='done' && i<3; // steps 0/1/2 (ร่าง/รอทบทวน/รออนุมัติ) each have a past-step box to view
+        return `<div class="chevron-step ${s.cls} ${clickable?'clickable':''} ${state.approvalStepView===i?'active-view':''}" ${clickable?`data-step-view="${i}"`:''}><span class="chevron-num">[${i+1}]</span><span class="chevron-label">${s.label}</span></div>`;
+      }).join('')}
       ${isRejected ? `<div class="chevron-step rejected"><span class="chevron-num">✕</span><span class="chevron-label">ไม่อนุมัติ</span></div>` : ''}
     </div>
 
@@ -4438,28 +4445,35 @@ function viewApprovalDetail(){
       </div>`}
     </div>
 
-    <div class="panel-title" style="font-size:13px; margin-bottom:8px;">ศูนย์ดำเนินการ (Active Action Center)</div>
     <div class="action-center">
-      ${renderFormConfirmBox(d)}
-      ${renderDcRegisterBox(d)}
-      ${renderReviewBox(d)}
-
-      ${isApproved ? renderApprovedBox(d) : isRejected ? renderRejectedBox(d) : ((status==='ร่าง' || (status==='รอทบทวน' && !d.linkSetAt)) && (d.lastRequestType==='new'||d.lastRequestType==='revision')) ? '' : `
-      ${(d.lastRequestType==='new'||d.lastRequestType==='revision') && currentIdx===1 ? `<div style="font-size:11.5px; font-weight:700; color:var(--amber-600); margin-bottom:10px;">${ic('clock','sm-icon')} ขั้นที่ 4: ต้องทบทวนโดย QM หรือ DC</div>` : ''}
-      ${(d.lastRequestType==='new'||d.lastRequestType==='revision') && currentIdx===2 ? `<div style="font-size:11.5px; font-weight:700; color:var(--amber-600); margin-bottom:10px;">${ic('clock','sm-icon')} ขั้นที่ 5: ต้องอนุมัติโดย Lab Manager (LM)</div>` : ''}
-      <div class="field" style="max-width:320px;"><label>ผู้ดำเนินการ</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()} <span style="color:var(--ink-500); font-weight:600;">(${currentUser.role})</span></div></div>
-      <div class="comment-box">
-        <label style="font-size:12px; font-weight:700; color:var(--ink-700); display:block; margin-bottom:8px;">ความเห็น (จำเป็นถ้ากด "ไม่อนุมัติ")</label>
-        <textarea id="approvalComment" placeholder="Enter comment..."></textarea>
-        <div id="approvalError" class="field-error" style="display:none;"></div>
-        <div class="comment-actions">
-          <button class="btn danger" id="btnReject">Reject</button>
-          <button class="btn success" id="btnApprove">${currentIdx===STATUS_FLOW.length-2 ? 'Final Approve':'Approve / Next Step'}</button>
+      ${(()=>{
+        const pastBoxes = [renderFormConfirmBox(d), renderDcRegisterBox(d), renderReviewBox(d)];
+        const viewing = (state.approvalStepView===0||state.approvalStepView===1||state.approvalStepView===2) ? state.approvalStepView : null;
+        if(viewing!==null && pastBoxes[viewing]){
+          return `
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+            <div style="font-size:11.5px; color:var(--ink-500); font-weight:700; display:flex; align-items:center; gap:5px;">${ic('clock','sm-icon')} กำลังดูขั้นตอนที่ผ่านมา</div>
+            <button class="panel-link" id="btnBackToLatestStep" style="cursor:pointer;">กลับไปขั้นตอนล่าสุด →</button>
+          </div>
+          ${pastBoxes[viewing]}`;
+        }
+        return `
+        ${isApproved ? renderApprovedBox(d) : isRejected ? renderRejectedBox(d) : ((status==='ร่าง' || (status==='รอทบทวน' && !d.linkSetAt)) && (d.lastRequestType==='new'||d.lastRequestType==='revision')) ? '' : `
+        ${(d.lastRequestType==='new'||d.lastRequestType==='revision') && currentIdx===1 ? `<div style="font-size:11.5px; font-weight:700; color:var(--amber-600); margin-bottom:10px;">${ic('clock','sm-icon')} ขั้นที่ 4: ต้องทบทวนโดย QM หรือ DC</div>` : ''}
+        ${(d.lastRequestType==='new'||d.lastRequestType==='revision') && currentIdx===2 ? `<div style="font-size:11.5px; font-weight:700; color:var(--amber-600); margin-bottom:10px;">${ic('clock','sm-icon')} ขั้นที่ 5: ต้องอนุมัติโดย Lab Manager (LM)</div>` : ''}
+        <div class="field" style="max-width:320px;"><label>ผู้ดำเนินการ</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()} <span style="color:var(--ink-500); font-weight:600;">(${currentUser.role})</span></div></div>
+        <div class="comment-box">
+          <label style="font-size:12px; font-weight:700; color:var(--ink-700); display:block; margin-bottom:8px;">ความเห็น (จำเป็นถ้ากด "ไม่อนุมัติ")</label>
+          <textarea id="approvalComment" placeholder="Enter comment..."></textarea>
+          <div id="approvalError" class="field-error" style="display:none;"></div>
+          <div class="comment-actions">
+            <button class="btn danger" id="btnReject">Reject</button>
+            <button class="btn success" id="btnApprove">${currentIdx===STATUS_FLOW.length-2 ? 'Final Approve':'Approve / Next Step'}</button>
+          </div>
         </div>
-      </div>
-      `}
-
-      ${renderPublishBox(d)}
+        `}
+        ${renderPublishBox(d)}`;
+      })()}
     </div>
 
     <div class="panel-head" style="margin:20px 0 10px;">
@@ -4497,8 +4511,17 @@ function attachApprovalHandlers(){
   const pgPrev = document.getElementById('apPgPrev'); if(pgPrev) pgPrev.addEventListener('click', ()=>{ state.approvalPage=Math.max(1,state.approvalPage-1); render(); });
   const pgNext = document.getElementById('apPgNext'); if(pgNext) pgNext.addEventListener('click', ()=>{ state.approvalPage=state.approvalPage+1; render(); });
   document.querySelectorAll('[data-select-approval]').forEach(row=>{
-    row.addEventListener('click', ()=>{ goTo('approval', { selectedDoc: row.dataset.selectApproval, approvalDetailOpen: true, approvalCommentsExpanded: false, dcPublishEditing: false, dcLinkEditing: false }); });
+    row.addEventListener('click', ()=>{ goTo('approval', { selectedDoc: row.dataset.selectApproval, approvalDetailOpen: true, approvalCommentsExpanded: false, dcPublishEditing: false, dcLinkEditing: false, approvalStepView: null }); });
   });
+  document.querySelectorAll('[data-step-view]').forEach(chip=>{
+    chip.addEventListener('click', ()=>{
+      const idx = parseInt(chip.dataset.stepView, 10);
+      state.approvalStepView = state.approvalStepView===idx ? null : idx; // click again to collapse back to latest
+      render();
+    });
+  });
+  const backToLatestBtn = document.getElementById('btnBackToLatestStep');
+  if(backToLatestBtn) backToLatestBtn.addEventListener('click', ()=>{ state.approvalStepView = null; render(); });
   document.querySelectorAll('[data-del-request]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       if(!isDC()) return; // defense in depth — button only renders for DC anyway
