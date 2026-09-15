@@ -746,6 +746,20 @@ async function loadDocs(){
       if(d.reviewedAt===undefined){ d.reviewedAt=null; needsMigration = true; }
       if(d.publishedBy===undefined){ d.publishedBy=null; needsMigration = true; }
       if(d.publishedAt===undefined){ d.publishedAt=null; needsMigration = true; }
+      // BUG FIX: documents that came in via the master-list import (or any
+      // other route that never touched the in-app publish step) have a
+      // real effectiveDate ("วันที่ประกาศใช้") from that import but no
+      // publishedAt, since publishedAt is normally only stamped by
+      // wireDcPublish. Every list that shows "วันที่เผยแพร่ / Published"
+      // was showing "—" for these older, already-in-force documents even
+      // though they clearly do have a publish date on record. One-time
+      // backfill: for a document already at rest (approved, or one of the
+      // settled note values) with an effectiveDate but no publishedAt,
+      // treat that effectiveDate as its publishedAt too.
+      if(!d.publishedAt && d.effectiveDate && (d.approvalStatus==='อนุมัติแล้ว' || ['ควบคุม','แจกจ่าย','สนับสนุน','ยกเลิก'].includes(d.note))){
+        d.publishedAt = d.effectiveDate;
+        needsMigration = true;
+      }
       // one-time snapshot for documents that already existed before the
       // published-name snapshot fields did (imported from master list, or
       // already approved+published in the app previously). Without this,
@@ -1294,6 +1308,18 @@ function closeArchiveModal(){ state.archiveModal = null; renderModalLayer(); }
 // live Document page until DC actually publishes (Step 6).
 function displayLink(d){
   return d && d.publishedLink ? d.publishedLink : '';
+}
+
+// The date to show anywhere the UI says "published"/"เผยแพร่". Normally
+// this is d.publishedAt (set the moment DC actually clicks publish — see
+// wireDcPublish). Documents that entered the system via the master-list
+// import (applyMasterListRow) never went through that in-app publish
+// step, so they have no publishedAt — for those, d.effectiveDate (the
+// "วันที่ประกาศใช้" carried over from the master list itself) IS their
+// real publish date, so it's the fallback. Returns null (not a fabricated
+// date) for anything genuinely never published, so callers can show "—".
+function publishedDateOf(d){
+  return (d && (d.publishedAt || d.effectiveDate)) || null;
 }
 
 // Same "show only the officially published version" rule as displayLink,
@@ -1912,12 +1938,12 @@ function renderDocumentsInto(){
       <div style="font-size:12px; color:var(--ink-500); font-weight:600;">${list.length} entries</div>
     </div>
     <div class="table-wrap"><table class="dtable">
-      <thead><tr><th>Document ID</th><th>Document Name</th><th>Clause</th><th>Type</th><th>Status</th><th>Approval</th><th>Updated</th><th></th></tr></thead>
+      <thead><tr><th>Document ID</th><th>Document Name</th><th>Clause</th><th>Type</th><th>Status</th><th>Approval</th><th>Published</th><th></th></tr></thead>
       <tbody>
         ${pageItems.length ? pageItems.map(d=>`
         <tr data-open-doc="${d.id}">
           <td class="mono">${d.id}</td><td class="name" title="${cleanName(d).replace(/"/g,'&quot;')}">${cleanName(d)}</td><td>${displayClause(d) || '<span style="color:var(--ink-400);">—</span>'}</td>
-          <td>${docTypeLabel(d)}</td><td>${statusBadge(d.note)}</td><td>${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, true)}</td><td>${fmtDate(d.lastUpdated)}</td>
+          <td>${docTypeLabel(d)}</td><td>${statusBadge(d.note)}</td><td>${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, true)}</td><td>${publishedDateOf(d) ? fmtDate(publishedDateOf(d)) : '—'}</td>
           <td><div class="row-actions" onclick="event.stopPropagation()">
             ${isDC() ? `<button data-edit="${d.id}" title="Edit">${ic('edit')}</button>
             <button data-del="${d.id}" class="del" title="Delete">${ic('trash')}</button>` : ''}
@@ -4297,7 +4323,7 @@ function viewApproval(){
           <td>${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, true)}</td>
           <td>${stepIndicator(d.approvalStatus||'ร่าง')}</td>
           <td><div class="actor-cell"><div class="row-avatar">${initials(actor.name)}</div><div><div class="actor-name">${actor.name||'—'}</div><div class="actor-role">${actor.role}</div></div></div></td>
-          <td>${d.publishedAt ? fmtDate(d.publishedAt) : '—'}</td>
+          <td>${publishedDateOf(d) ? fmtDate(publishedDateOf(d)) : '—'}</td>
           ${isDC() ? `<td><div class="row-actions" onclick="event.stopPropagation()"><button data-del-request="${d.id}" class="del" title="ลบคำขอ">${ic('trash')}</button></div></td>` : ''}
         </tr>`;
         }).join('') : `<tr><td colspan="${isDC()?8:7}" style="text-align:center; padding:40px 0; color:var(--ink-500);">ไม่มีเอกสารในหมวดนี้</td></tr>`}
@@ -4957,6 +4983,11 @@ function applyMasterListRow(row, d){
       d.approvedBy = d.approverName || '';
       d.approvedAt = d.effectiveDate || d.lastUpdated || Date.now();
     }
+    // see publishedDateOf()'s comment — these settled/imported records
+    // never go through the in-app publish step, so stamp their real
+    // publishedAt from the effective date here too, not just via the
+    // one-time loadDocs() migration.
+    if(!d.publishedAt) d.publishedAt = d.effectiveDate || d.approvedAt || null;
   }
   d.lastUpdated = Date.now();
 }
