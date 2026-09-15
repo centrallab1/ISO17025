@@ -3721,6 +3721,14 @@ function requestTypeBadge(d){
   const cls = d.lastRequestType==='revision' ? 'review' : d.lastRequestType==='review' ? 'pending' : 'active';
   return `<span class="badge ${cls}">${label}</span>`;
 }
+// Approved formal (new/revision) requests still need DC to paste the live
+// link + effective date (see renderPublishBox/wireDcPublish) before they're
+// really "done" — this is true regardless of which list/tab is asking, so
+// it lives here once rather than being re-derived in viewApproval().
+function isPendingPublishDoc(d){
+  return d.approvalStatus==='อนุมัติแล้ว' && (d.lastRequestType==='new'||d.lastRequestType==='revision') && !d.publishedLink;
+}
+
 function viewApproval(){
   const queue = pendingQueue();
   if(!state.selectedDoc) state.selectedDoc = (queue[0] || DOCUMENTS[0] || {}).id;
@@ -3737,18 +3745,29 @@ function viewApproval(){
   const countWaitApprove = DOCUMENTS.filter(x=>x.approvalStatus==='รออนุมัติ').length;
   const countApproved = DOCUMENTS.filter(x=>x.approvalStatus==='อนุมัติแล้ว').length;
   const countRejected = DOCUMENTS.filter(x=>x.approvalStatus==='ไม่อนุมัติ').length;
+  const countPendingPublish = DOCUMENTS.filter(isPendingPublishDoc).length;
   const total = DOCUMENTS.length;
   const activeCount = countDraft + countReview + countWaitApprove;
-  const historyCount = countApproved + countRejected;
+  // "history" now means genuinely finished: published (or no-publish-step
+  // request types like review/cancel) + rejected. Anything approved but
+  // still awaiting DC's link moves to its own tab instead of hiding inside
+  // "history", since it still has an outstanding action.
+  const historyCount = (countApproved - countPendingPublish) + countRejected;
 
   const tabs = [
     { key:'active', label:'คำขอที่กำลังดำเนินการ', n: activeCount },
+    { key:'pendingpublish', label:'รอ DC เผยแพร่', n: countPendingPublish },
     { key:'history', label:'ประวัติ', n: historyCount },
   ];
 
-  let filtered = state.approvalTab==='history'
-    ? DOCUMENTS.filter(x=> x.approvalStatus==='อนุมัติแล้ว' || x.approvalStatus==='ไม่อนุมัติ')
-    : DOCUMENTS.filter(x=> !x.approvalStatus || x.approvalStatus==='ร่าง' || x.approvalStatus==='รอทบทวน' || x.approvalStatus==='รออนุมัติ');
+  let filtered;
+  if(state.approvalTab==='pendingpublish'){
+    filtered = DOCUMENTS.filter(isPendingPublishDoc);
+  } else if(state.approvalTab==='history'){
+    filtered = DOCUMENTS.filter(x=> (x.approvalStatus==='อนุมัติแล้ว' && !isPendingPublishDoc(x)) || x.approvalStatus==='ไม่อนุมัติ');
+  } else {
+    filtered = DOCUMENTS.filter(x=> !x.approvalStatus || x.approvalStatus==='ร่าง' || x.approvalStatus==='รอทบทวน' || x.approvalStatus==='รออนุมัติ');
+  }
   if(state.approvalTypeFilter!=='All') filtered = filtered.filter(x=>docTypeCode(x)===state.approvalTypeFilter);
   filtered = filtered.slice().sort((a,b)=> (b.lastUpdated||0)-(a.lastUpdated||0));
 
