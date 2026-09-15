@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.8';
+const APP_VERSION = '1.9';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -2437,9 +2437,9 @@ function buildArchiveTree(items){
     const cat = a.category || 'ไม่ระบุหมวดหมู่';
     const dt = new Date(a.uploadedAt || Date.now());
     const year = dt.getFullYear() + 543;
-    tree[year] = tree[year] || {};
-    tree[year][cat] = tree[year][cat] || [];
-    tree[year][cat].push(a);
+    tree[cat] = tree[cat] || {};
+    tree[cat][year] = tree[cat][year] || [];
+    tree[cat][year].push(a);
   });
   return tree;
 }
@@ -2453,27 +2453,27 @@ function countArchiveNode(node){
 }
 function archiveBreadcrumb(){
   const f = state.archiveFolder;
-  const parts = [`<span data-archive-crumb="root" style="cursor:pointer; color:${f.year?'var(--blue-600)':'var(--ink-900)'}; font-weight:700;">${ic('folder','sm-icon')} คลังเอกสาร</span>`];
-  if(f.year) parts.push(`<span data-archive-crumb="year" style="cursor:pointer; color:${f.category?'var(--blue-600)':'var(--ink-900)'}; font-weight:700;">ปี ${f.year}</span>`);
-  if(f.category) parts.push(`<span style="color:var(--ink-900); font-weight:700;">${f.category}</span>`);
+  const parts = [`<span data-archive-crumb="root" style="cursor:pointer; color:${f.category?'var(--blue-600)':'var(--ink-900)'}; font-weight:700;">${ic('folder','sm-icon')} คลังเอกสาร</span>`];
+  if(f.category) parts.push(`<span data-archive-crumb="category" style="cursor:pointer; color:${f.year?'var(--blue-600)':'var(--ink-900)'}; font-weight:700;">${f.category}</span>`);
+  if(f.year) parts.push(`<span style="color:var(--ink-900); font-weight:700;">ปี ${f.year}</span>`);
   return `<div style="display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:18px; flex-wrap:wrap;">${parts.join('<span style="color:var(--ink-400);">/</span>')}</div>`;
 }
 function renderArchiveFolderView(tree){
   const f = state.archiveFolder;
   const crumb = archiveBreadcrumb();
 
-  if(!f.year){
-    const years = Object.keys(tree).map(Number).sort((a,b)=>b-a);
-    if(!years.length) return `<div class="panel">${crumb}${emptyState('ยังไม่มีเอกสารในคลัง','เพิ่มรายการแรกได้จากปุ่ม "เพิ่มเอกสาร" ด้านบน')}</div>`;
-    return `<div class="panel">${crumb}<div class="folder-grid">${years.map(y=>`
-      <div class="folder-card" data-open-year="${y}">${ic('folder')}<div class="folder-label">ปี ${y}</div><div class="folder-count">${countArchiveNode(tree[y])} รายการ</div></div>`).join('')}</div></div>`;
-  }
   if(!f.category){
-    const cats = archiveCategoryOrderFor(tree[f.year]||{});
+    const cats = archiveCategoryOrderFor(tree);
+    if(!cats.length) return `<div class="panel">${crumb}${emptyState('ยังไม่มีเอกสารในคลัง','เพิ่มรายการแรกได้จากปุ่ม "เพิ่มเอกสาร" ด้านบน')}</div>`;
     return `<div class="panel">${crumb}<div class="folder-grid">${cats.map(c=>`
-      <div class="folder-card" data-open-category="${c}">${ic('folder')}<div class="folder-label">${c}</div><div class="folder-count">${countArchiveNode(tree[f.year][c])} รายการ</div></div>`).join('')}</div></div>`;
+      <div class="folder-card" data-open-category="${c}">${ic('folder')}<div class="folder-label">${c}</div><div class="folder-count">${countArchiveNode(tree[c])} รายการ</div></div>`).join('')}</div></div>`;
   }
-  const items = (tree[f.year] && tree[f.year][f.category]) || [];
+  if(!f.year){
+    const years = Object.keys(tree[f.category]||{}).map(Number).sort((a,b)=>b-a);
+    return `<div class="panel">${crumb}<div class="folder-grid">${years.map(y=>`
+      <div class="folder-card" data-open-year="${y}">${ic('folder')}<div class="folder-label">ปี ${y}</div><div class="folder-count">${countArchiveNode(tree[f.category][y])} รายการ</div></div>`).join('')}</div></div>`;
+  }
+  const items = (tree[f.category] && tree[f.category][f.year]) || [];
   return `<div class="panel">${crumb}<div style="display:flex; flex-direction:column;">${items.map(archiveItemRow).join('') || emptyState('ไม่มีเอกสารในโฟลเดอร์นี้','')}</div></div>`;
 }
 function viewArchive(){
@@ -2511,7 +2511,7 @@ function viewArchive(){
   return `
   <div class="panel">
     <div class="panel-title">คลังเอกสาร</div>
-    <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">เก็บเอกสารทั่วไปที่ไม่ใช่เอกสารควบคุมของระบบ ISO เช่น สรุปประชุม, เอกสารสอบเทียบ, ใบรับรองจากภายนอก — ต้องผ่านการตรวจสอบยืนยันจาก DC ก่อนจึงจะถือว่าสมบูรณ์ · กดเข้าโฟลเดอร์ ปี → หมวดหมู่ เพื่อดูเอกสาร · ระบุข้อกำหนด ISO ได้เมื่อเป็นเอกสาร Evidence/Support</div>
+    <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">เก็บเอกสารทั่วไปที่ไม่ใช่เอกสารควบคุมของระบบ ISO เช่น สรุปประชุม, เอกสารสอบเทียบ, ใบรับรองจากภายนอก — ต้องผ่านการตรวจสอบยืนยันจาก DC ก่อนจึงจะถือว่าสมบูรณ์ · กดเข้าโฟลเดอร์ หมวดหมู่ → ปี เพื่อดูเอกสาร · ระบุข้อกำหนด ISO ได้เมื่อเป็นเอกสาร Evidence/Support</div>
   </div>
   <div class="grid grid-3">
     <div class="stat-card"><div class="stat-icon blue">${ic('doc')}</div><div><div class="stat-num">${total}</div><div class="stat-label">เอกสารทั้งหมด</div></div></div>
@@ -2570,16 +2570,16 @@ function attachArchiveHandlers(){
   if(newBtn) newBtn.addEventListener('click', ()=> openArchiveModal({ mode:'new' }));
   wireArchiveItemActions();
   // folder navigation
-  document.querySelectorAll('[data-open-year]').forEach(el=> el.addEventListener('click', ()=>{
-    state.archiveFolder = { year: Number(el.dataset.openYear), category:null }; render();
-  }));
   document.querySelectorAll('[data-open-category]').forEach(el=> el.addEventListener('click', ()=>{
-    state.archiveFolder.category = el.dataset.openCategory; render();
+    state.archiveFolder = { category: el.dataset.openCategory, year:null }; render();
+  }));
+  document.querySelectorAll('[data-open-year]').forEach(el=> el.addEventListener('click', ()=>{
+    state.archiveFolder.year = Number(el.dataset.openYear); render();
   }));
   document.querySelectorAll('[data-archive-crumb]').forEach(el=> el.addEventListener('click', ()=>{
     const level = el.dataset.archiveCrumb;
     if(level==='root') state.archiveFolder = { year:null, category:null };
-    else if(level==='year') state.archiveFolder = { year: state.archiveFolder.year, category:null };
+    else if(level==='category') state.archiveFolder = { category: state.archiveFolder.category, year:null };
     render();
   }));
 }
