@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '2.2';
+const APP_VERSION = '2.3';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -3402,7 +3402,7 @@ function renderPublishBox(d){
           <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px; word-break:break-all;">${d.publishedLink}</div>
         </div>
         <div style="display:flex; gap:8px;">
-          <a class="btn ghost" href="${d.publishedLink}" target="_blank" rel="noopener">${ic('link')} เปิดลิงก์</a>
+          <a class="btn ghost" href="${d.publishedLink}" target="_blank" rel="noopener">${ic('link')} เปิดเอกสารเผยแพร่</a>
           ${isDC() ? `<button class="btn ghost" id="btnDcEditPublish">${ic('edit')} แก้ไขลิงก์</button>` : ''}
         </div>
       </div>
@@ -4414,8 +4414,8 @@ function viewApprovalDetail(){
 
     <div class="chevron-track">
       ${chevronSteps.map((s,i)=>{
-        const clickable = s.cls==='done' && i<3; // steps 0/1/2 (ร่าง/รอทบทวน/รออนุมัติ) each have a past-step box to view
-        return `<div class="chevron-step ${s.cls} ${clickable?'clickable':''} ${state.approvalStepView===i?'active-view':''}" ${clickable?`data-step-view="${i}"`:''}><span class="chevron-num">[${i+1}]</span><span class="chevron-label">${s.label}</span></div>`;
+        const clickable = s.cls==='done';
+        return `<div class="chevron-step ${s.cls} ${clickable?'clickable':''} ${state.approvalStepView===i?'active-view':''}" ${clickable?`data-step-view="${i}"`:''}><span class="chevron-label">${s.label}</span></div>`;
       }).join('')}
       ${isRejected ? `<div class="chevron-step rejected"><span class="chevron-num">✕</span><span class="chevron-label">ไม่อนุมัติ</span></div>` : ''}
     </div>
@@ -4441,7 +4441,7 @@ function viewApprovalDetail(){
       <div id="dcLinkEditError" class="field-error" style="display:none; margin-top:6px;"></div>` : `
       <div style="margin-top:6px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
         ${d.link
-          ? `<a class="btn ghost" href="${d.link}" target="_blank" rel="noopener">${ic('link')} เปิดลิงก์เอกสาร</a>`
+          ? `<a class="btn ghost" href="${d.link}" target="_blank" rel="noopener">${ic('link')} เอกสารขอขึ้นทะเบียน</a>`
           : `<div style="font-size:12.5px; color:var(--ink-500);">ยังไม่มีลิงก์เอกสาร</div>`}
         ${isDC() ? `<button class="btn ghost" id="btnDcLinkEdit">${ic('edit')} แก้ไขลิงก์</button>` : ''}
       </div>`}
@@ -4449,8 +4449,8 @@ function viewApprovalDetail(){
 
     <div class="action-center">
       ${(()=>{
-        const pastBoxes = [renderFormConfirmBox(d), renderDcRegisterBox(d), renderReviewBox(d)];
-        const viewing = (state.approvalStepView===0||state.approvalStepView===1||state.approvalStepView===2) ? state.approvalStepView : null;
+        const pastBoxes = [renderFormConfirmBox(d), renderDcRegisterBox(d), renderReviewBox(d), renderApprovedBox(d), renderPublishBox(d)];
+        const viewing = (state.approvalStepView!==null && state.approvalStepView>=0 && state.approvalStepView<pastBoxes.length) ? state.approvalStepView : null;
         if(viewing!==null && pastBoxes[viewing]){
           return `
           <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
@@ -4460,7 +4460,7 @@ function viewApprovalDetail(){
           ${pastBoxes[viewing]}`;
         }
         return `
-        ${isApproved ? renderApprovedBox(d) : isRejected ? renderRejectedBox(d) : ((status==='ร่าง' || (status==='รอทบทวน' && !d.linkSetAt)) && (d.lastRequestType==='new'||d.lastRequestType==='revision')) ? '' : `
+        ${isApproved ? renderApprovedBox(d) : isRejected ? renderRejectedBox(d) : ((status==='ร่าง' || (status==='รอทบทวน' && !d.linkSetAt)) && (d.lastRequestType==='new'||d.lastRequestType==='revision')) ? (status==='ร่าง' ? pastBoxes[0] : pastBoxes[1]) : `
         ${(d.lastRequestType==='new'||d.lastRequestType==='revision') && currentIdx===1 ? `<div style="font-size:11.5px; font-weight:700; color:var(--amber-600); margin-bottom:10px;">${ic('clock','sm-icon')} ขั้นที่ 4: ต้องทบทวนโดย QM หรือ DC</div>` : ''}
         ${(d.lastRequestType==='new'||d.lastRequestType==='revision') && currentIdx===2 ? `<div style="font-size:11.5px; font-weight:700; color:var(--amber-600); margin-bottom:10px;">${ic('clock','sm-icon')} ขั้นที่ 5: ต้องอนุมัติโดย Lab Manager (LM)</div>` : ''}
         <div class="field" style="max-width:320px;"><label>ผู้ดำเนินการ</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()} <span style="color:var(--ink-500); font-weight:600;">(${currentUser.role})</span></div></div>
