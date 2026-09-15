@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.0';
+const APP_VERSION = '2.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -4359,7 +4359,44 @@ function viewApprovalDetail(){
   const allComments = (d.comments||[]).slice().reverse();
   const shownComments = state.approvalCommentsExpanded ? allComments : allComments.slice(0,5);
 
+  // compact chevron tracker — STATUS_FLOW steps plus, for formal new/revision
+  // requests, a trailing "เผยแพร่" cell representing renderPublishBox's step 6
+  // (not part of STATUS_FLOW itself, since publish is a flag on top of
+  // 'อนุมัติแล้ว', not a separate approvalStatus value).
+  const showPublishStep = !isRejected && (d.lastRequestType==='new'||d.lastRequestType==='revision');
+  const chevronSteps = steps.slice();
+  if(showPublishStep){
+    chevronSteps.push({ label:'เผยแพร่', cls: d.publishedLink ? 'done' : (isApproved ? 'pending' : 'waiting') });
+  }
+
   return `
+  <style>
+    .chevron-track{ display:flex; margin:14px 0 20px; }
+    .chevron-step{ position:relative; flex:1; min-width:0; padding:9px 12px 9px 24px; text-align:center; color:#fff; background:#c7cbe0; }
+    .chevron-step:first-child{ padding-left:14px; clip-path:polygon(0 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 0 100%); }
+    .chevron-step:not(:first-child){ margin-left:-14px; clip-path:polygon(0 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 0 100%, 14px 50%); }
+    .chevron-step:last-child{ clip-path:polygon(0 0, 100% 0, 100% 100%, 0 100%, 14px 50%); }
+    .chevron-step.done{ background:var(--green-600); }
+    .chevron-step.pending{ background:var(--blue-600); }
+    .chevron-step.rejected{ background:var(--red-600); }
+    .chevron-num{ font-size:9.5px; font-weight:700; opacity:.85; display:block; }
+    .chevron-label{ font-size:11.5px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    @media (max-width:640px){
+      .chevron-track{ flex-wrap:wrap; gap:6px; }
+      .chevron-step, .chevron-step:first-child, .chevron-step:not(:first-child), .chevron-step:last-child{ clip-path:none; margin-left:0; border-radius:8px; flex:1 1 42%; }
+    }
+    .action-center .side-box{ margin-bottom:10px !important; }
+    .action-center .side-box:last-child{ margin-bottom:0 !important; }
+    .action-center .comment-box{ margin-top:0; }
+    .utl-item{ display:flex; gap:10px; align-items:flex-start; padding:9px 0; border-bottom:1px solid var(--line); }
+    .utl-item:last-child{ border-bottom:none; }
+    .utl-icon{ width:26px; height:26px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; }
+    .utl-icon svg{ width:13px; height:13px; }
+    .utl-main{ flex:1; min-width:0; }
+    .utl-title{ font-size:12px; font-weight:700; color:var(--ink-900); }
+    .utl-text{ font-size:11.5px; color:var(--ink-500); margin-top:1px; word-break:break-word; }
+    .utl-time{ font-size:10.5px; color:var(--ink-500); white-space:nowrap; padding-top:2px; }
+  </style>
   <div class="panel">
     <div class="panel-head">
       <div>
@@ -4369,14 +4406,19 @@ function viewApprovalDetail(){
       <button class="btn ghost" data-go="docdetail">${ic('doc')} ดูรายละเอียดเอกสาร</button>
     </div>
 
-    <div class="grid grid-3" style="margin-bottom:18px;">
+    <div class="chevron-track">
+      ${chevronSteps.map((s,i)=>`<div class="chevron-step ${s.cls}"><span class="chevron-num">[${i+1}]</span><span class="chevron-label">${s.label}</span></div>`).join('')}
+      ${isRejected ? `<div class="chevron-step rejected"><span class="chevron-num">✕</span><span class="chevron-label">ไม่อนุมัติ</span></div>` : ''}
+    </div>
+
+    <div class="panel-title" style="font-size:13px; margin-bottom:8px;">ข้อมูลเอกสารและผู้เกี่ยวข้อง</div>
+    <div class="grid grid-3" style="margin-bottom:8px;">
       <div class="side-box"><div class="side-box-title">ผู้จัดทำ / ผู้ร่าง</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.preparedBy || '—'}</div>${(d.preparedAt||d.createdDate) ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.preparedAt||d.createdDate)}</div>` : ''}</div>
       <div class="side-box"><div class="side-box-title">ผู้ทบทวน</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.reviewerName || '—'}</div>${d.reviewedAt ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.reviewedAt)}</div>` : ''}</div>
       <div class="side-box"><div class="side-box-title">ผู้อนุมัติ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.approverName || d.approvedBy || '—'}</div>${d.approvedAt ? `<div style="font-size:11px; color:var(--ink-500); margin-top:2px;">${fmtDateTime(d.approvedAt)}</div>` : ''}</div>
-      <div class="side-box"><div class="side-box-title">วันที่จัดทำ</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.createdDate ? fmtDate(d.createdDate) : '—'}</div></div>
-      <div class="side-box"><div class="side-box-title">วันที่ประกาศใช้</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${d.effectiveDate ? fmtDate(d.effectiveDate) : '—'}</div></div>
-      ${d.cancelledDate ? `<div class="side-box"><div class="side-box-title">วันที่ยกเลิก</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${fmtDate(d.cancelledDate)}</div></div>` : ''}
-      <div class="side-box"><div class="side-box-title">อัปเดตล่าสุด</div><div style="font-size:12.5px; font-weight:700; color:var(--ink-900);">${fmtDateTime(d.lastUpdated)}</div></div>
+    </div>
+    <div style="font-size:11px; color:var(--ink-500); margin-bottom:16px;">
+      จัดทำ: ${d.createdDate ? fmtDate(d.createdDate) : '—'} · ประกาศใช้: ${d.effectiveDate ? fmtDate(d.effectiveDate) : '—'}${d.cancelledDate ? ` · ยกเลิก: ${fmtDate(d.cancelledDate)}` : ''} · อัปเดตล่าสุด: ${fmtDateTime(d.lastUpdated)}
     </div>
 
     <div class="side-box" style="margin-bottom:18px;">
@@ -4396,47 +4438,43 @@ function viewApprovalDetail(){
       </div>`}
     </div>
 
-    <div class="approval-flow">
-      ${steps.map((s,i)=>`
-        ${i>0?`<div class="af-line ${steps[i-1].cls==='done'?'done':''}"></div>`:''}
-        <div class="af-step">
-          <div class="af-circle ${s.cls}">${ic(s.cls==='done'?'check':'clock')}</div>
-          <div class="af-name">${s.label}</div>
-          <div class="af-status ${s.cls}">${s.cls==='done'?'Done':s.cls==='pending'?'Pending':'Waiting'}</div>
-        </div>`).join('')}
-      ${isRejected ? `<div class="af-line"></div><div class="af-step"><div class="af-circle" style="border-color:var(--red-600); background:var(--red-50);">${ic('alert')}</div><div class="af-name">ไม่อนุมัติ</div><div class="af-status" style="background:var(--red-50); color:var(--red-600);">Rejected</div></div>` : ''}
-    </div>
+    <div class="panel-title" style="font-size:13px; margin-bottom:8px;">ศูนย์ดำเนินการ (Active Action Center)</div>
+    <div class="action-center">
+      ${renderFormConfirmBox(d)}
+      ${renderDcRegisterBox(d)}
+      ${renderReviewBox(d)}
 
-    ${renderFormConfirmBox(d)}
-    ${renderDcRegisterBox(d)}
-    ${renderReviewBox(d)}
-
-    ${isApproved ? renderApprovedBox(d) : isRejected ? renderRejectedBox(d) : ((status==='ร่าง' || (status==='รอทบทวน' && !d.linkSetAt)) && (d.lastRequestType==='new'||d.lastRequestType==='revision')) ? '' : `
-    ${(d.lastRequestType==='new'||d.lastRequestType==='revision') && currentIdx===1 ? `<div style="font-size:11.5px; font-weight:700; color:var(--amber-600); margin-bottom:10px;">${ic('clock','sm-icon')} ขั้นที่ 4: ต้องทบทวนโดย QM หรือ DC</div>` : ''}
-    ${(d.lastRequestType==='new'||d.lastRequestType==='revision') && currentIdx===2 ? `<div style="font-size:11.5px; font-weight:700; color:var(--amber-600); margin-bottom:10px;">${ic('clock','sm-icon')} ขั้นที่ 5: ต้องอนุมัติโดย Lab Manager (LM)</div>` : ''}
-    <div class="field" style="max-width:320px;"><label>ผู้ดำเนินการ</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()} <span style="color:var(--ink-500); font-weight:600;">(${currentUser.role})</span></div></div>
-    <div class="comment-box">
-      <label style="font-size:12px; font-weight:700; color:var(--ink-700); display:block; margin-bottom:8px;">ความเห็น (จำเป็นถ้ากด "ไม่อนุมัติ")</label>
-      <textarea id="approvalComment" placeholder="Enter comment..."></textarea>
-      <div id="approvalError" class="field-error" style="display:none;"></div>
-      <div class="comment-actions">
-        <button class="btn danger" id="btnReject">Reject</button>
-        <button class="btn success" id="btnApprove">${currentIdx===STATUS_FLOW.length-2 ? 'Final Approve':'Approve / Next Step'}</button>
+      ${isApproved ? renderApprovedBox(d) : isRejected ? renderRejectedBox(d) : ((status==='ร่าง' || (status==='รอทบทวน' && !d.linkSetAt)) && (d.lastRequestType==='new'||d.lastRequestType==='revision')) ? '' : `
+      ${(d.lastRequestType==='new'||d.lastRequestType==='revision') && currentIdx===1 ? `<div style="font-size:11.5px; font-weight:700; color:var(--amber-600); margin-bottom:10px;">${ic('clock','sm-icon')} ขั้นที่ 4: ต้องทบทวนโดย QM หรือ DC</div>` : ''}
+      ${(d.lastRequestType==='new'||d.lastRequestType==='revision') && currentIdx===2 ? `<div style="font-size:11.5px; font-weight:700; color:var(--amber-600); margin-bottom:10px;">${ic('clock','sm-icon')} ขั้นที่ 5: ต้องอนุมัติโดย Lab Manager (LM)</div>` : ''}
+      <div class="field" style="max-width:320px;"><label>ผู้ดำเนินการ</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()} <span style="color:var(--ink-500); font-weight:600;">(${currentUser.role})</span></div></div>
+      <div class="comment-box">
+        <label style="font-size:12px; font-weight:700; color:var(--ink-700); display:block; margin-bottom:8px;">ความเห็น (จำเป็นถ้ากด "ไม่อนุมัติ")</label>
+        <textarea id="approvalComment" placeholder="Enter comment..."></textarea>
+        <div id="approvalError" class="field-error" style="display:none;"></div>
+        <div class="comment-actions">
+          <button class="btn danger" id="btnReject">Reject</button>
+          <button class="btn success" id="btnApprove">${currentIdx===STATUS_FLOW.length-2 ? 'Final Approve':'Approve / Next Step'}</button>
+        </div>
       </div>
-    </div>
-    `}
+      `}
 
-    ${renderPublishBox(d)}
+      ${renderPublishBox(d)}
+    </div>
 
     <div class="panel-head" style="margin:20px 0 10px;">
-      <div class="panel-title" style="margin:0;">ประวัติความเห็น ${allComments.length ? `<span style="color:var(--ink-500); font-weight:600; font-size:12px;">(${allComments.length})</span>` : ''}</div>
+      <div class="panel-title" style="margin:0;">Unified Timeline Log ${allComments.length ? `<span style="color:var(--ink-500); font-weight:600; font-size:12px;">(${allComments.length})</span>` : ''}</div>
       ${allComments.length > 5 ? `<button class="panel-link" id="btnToggleComments" style="cursor:pointer;">${state.approvalCommentsExpanded ? 'ย่อ ▲' : `แสดงทั้งหมด (${allComments.length}) ▼`}</button>` : ''}
     </div>
-    ${shownComments.length ? shownComments.map(c=>`
-      <div class="at-item"><div class="at-icon">${ic('user')}</div>
-        <div class="at-main"><div class="at-title">${c.by}</div><div class="at-meta">${c.text}</div></div>
-        <div class="at-time">${fmtDateTime(c.time)}</div>
-      </div>`).join('') : `<div style="color:var(--ink-500); font-size:12.5px;">ยังไม่มีความเห็น</div>`}
+    ${shownComments.length ? shownComments.map(c=>{
+      const ev = classifyEvent(c.text) || {};
+      return `
+      <div class="utl-item">
+        <div class="utl-icon" style="background:var(${ev.bg||'--ink-500'})">${ic(ev.icon||'user')}</div>
+        <div class="utl-main"><div class="utl-title">${c.by}</div><div class="utl-text">${c.text}</div></div>
+        <div class="utl-time">${fmtDateTime(c.time)}</div>
+      </div>`;
+    }).join('') : `<div style="color:var(--ink-500); font-size:12.5px;">ยังไม่มีความเห็น</div>`}
   </div>`;
 }
 
