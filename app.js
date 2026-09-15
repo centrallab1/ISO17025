@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.9';
+const APP_VERSION = '1.10';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -4285,7 +4285,7 @@ function viewApproval(){
     </div>
 
     <div class="table-wrap"><table class="dtable">
-      <thead><tr><th>รหัสเอกสาร</th><th>ชื่อเอกสาร</th><th>ประเภทคำขอ</th><th>สถานะ</th><th>ขั้นตอนปัจจุบัน</th><th>ผู้ดำเนินการ</th><th>อัปเดตล่าสุด</th>${isDC() ? '<th></th>' : ''}</tr></thead>
+      <thead><tr><th>รหัสเอกสาร</th><th>ชื่อเอกสาร</th><th>ประเภทคำขอ</th><th>สถานะ</th><th>ขั้นตอนปัจจุบัน</th><th>ผู้ดำเนินการ</th><th>วันที่เผยแพร่</th>${isDC() ? '<th></th>' : ''}</tr></thead>
       <tbody>
         ${pageItems.length ? pageItems.map(d=>{
           const actor = actorForDoc(d);
@@ -4297,7 +4297,7 @@ function viewApproval(){
           <td>${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, true)}</td>
           <td>${stepIndicator(d.approvalStatus||'ร่าง')}</td>
           <td><div class="actor-cell"><div class="row-avatar">${initials(actor.name)}</div><div><div class="actor-name">${actor.name||'—'}</div><div class="actor-role">${actor.role}</div></div></div></td>
-          <td>${fmtDateTime(d.lastUpdated)}</td>
+          <td>${d.publishedAt ? fmtDate(d.publishedAt) : '—'}</td>
           ${isDC() ? `<td><div class="row-actions" onclick="event.stopPropagation()"><button data-del-request="${d.id}" class="del" title="ลบคำขอ">${ic('trash')}</button></div></td>` : ''}
         </tr>`;
         }).join('') : `<tr><td colspan="${isDC()?8:7}" style="text-align:center; padding:40px 0; color:var(--ink-500);">ไม่มีเอกสารในหมวดนี้</td></tr>`}
