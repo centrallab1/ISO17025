@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.0';
+const APP_VERSION = '1.6';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -721,6 +721,20 @@ async function loadDocs(){
       if(d.lastReviewedAt===undefined){ d.lastReviewedAt=null; needsMigration = true; }
       if(d.lastReviewedBy===undefined){ d.lastReviewedBy=''; needsMigration = true; }
       if(d.publishedLink===undefined){ d.publishedLink=null; needsMigration = true; }
+      // BUG FIX: documents imported/created outside the formal new/revision
+      // request→approve→publish workflow (lastRequestType never 'new' or
+      // 'revision') have no "DC publish" gate — for them d.link (set via
+      // the plain edit form) IS meant to be the public link. Before this
+      // fix, editing such a document's link only ever touched d.link, never
+      // d.publishedLink, so the detail page kept showing "ยังไม่มีลิงก์"
+      // even with a link on file. One-time backfill for docs already in
+      // that broken state; see the matching fix in the edit-save handler
+      // below (docModal's "edit" branch) that keeps this in sync going
+      // forward. Docs actually mid-workflow are untouched — their
+      // publishedLink still only ever comes from the explicit publish step.
+      if(!d.publishedLink && d.link && d.lastRequestType!=='new' && d.lastRequestType!=='revision'){
+        d.publishedLink = d.link; needsMigration = true;
+      }
       if(!Array.isArray(d.linkHistory)){ d.linkHistory=[]; needsMigration = true; }
       if(d.dcRegisteredLink===undefined){ d.dcRegisteredLink=null; needsMigration = true; }
       if(d.dcRegisteredBy===undefined){ d.dcRegisteredBy=null; needsMigration = true; }
@@ -2212,6 +2226,12 @@ function wireModalControls(){
     if(!id || !name){ errEl.textContent = 'กรอกรหัสเอกสารและชื่อเอกสารให้ครบ'; errEl.style.display='block'; return; }
     const d = DOCUMENTS.find(x=>x.id===state.modal.id);
     d.name = name; d.clause = clause; d.link = link; d.note = note; d.rev = rev || d.rev;
+    // keep publishedLink in sync for documents outside the formal
+    // new/revision workflow — see matching migration comment above for why
+    // this direct-edit form is the "publish" step for them, and why docs
+    // mid-workflow must NOT get this (their working link stays hidden from
+    // the public page until DC's explicit publish action).
+    if(d.lastRequestType!=='new' && d.lastRequestType!=='revision'){ d.publishedLink = link; }
     const lastReqFrom = document.getElementById('mfLastRequestFrom');
     if(lastReqFrom) d.lastRequestFrom = lastReqFrom.value.trim() || null;
     const created = document.getElementById('mfCreated');
