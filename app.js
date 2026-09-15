@@ -37,6 +37,10 @@ const watermarkLogRef = doc(dbFirestore, "iso17025", "watermarklog");
 const EXTERNAL_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/ServiceLab/JADi783WMc0gT6wo8iS0ojrJAc8VFmVEeOfR9ClBWLZ8qRA?nav=MWZmZDZkOGItZDc3Zi00NjcwLWI3M2MtNTZkN2YwNzNkZDc5';
 const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/ServiceLab/JADhGyH13Pk6SqlllkAu7GzNATtPwZWsYXJ41ls_zZh4CWc?nav=ODllNjg3ODktZDk0ZS00YmU2LTk0OTgtYzlmZmUxNjlhZTQz';
 
+// App version shown on the login screen and in the settings panel — bump
+// this by hand whenever a meaningful set of changes is deployed.
+const APP_VERSION = '1.0';
+
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
   { id:'thidarati', password:'ISO123',       name:'Thitarat Intakham',  role:'QM' },
@@ -620,6 +624,7 @@ function renderLoginScreen(){
         <svg width="16" height="16" viewBox="0 0 16 16"><rect x="0" y="0" width="7" height="7" fill="#f35325"/><rect x="9" y="0" width="7" height="7" fill="#81bc06"/><rect x="0" y="9" width="7" height="7" fill="#05a6f0"/><rect x="9" y="9" width="7" height="7" fill="#ffba08"/></svg>
         เข้าสู่ระบบด้วย Microsoft 365
       </button>
+      <div style="text-align:center; font-size:11px; color:#b7c0cc; margin-top:18px;">v${APP_VERSION}</div>
     </div>`;
   document.body.appendChild(el);
   const doLogin = ()=>{
@@ -1133,6 +1138,7 @@ function renderSettingsPanel(){
     </div>
     <div class="dp-divider"></div>
     <button class="dp-btn danger" id="btnLogoutMenu">${ic('logout')} ออกจากระบบ (Logout)</button>
+    <div style="text-align:center; font-size:11px; color:var(--ink-500); margin-top:10px;">v${APP_VERSION}</div>
   `;
   const thBtn = document.getElementById('langTh');
   const enBtn = document.getElementById('langEn');
