@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.0';
+const APP_VERSION = '2.9';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -2229,9 +2229,7 @@ function wireModalControls(){
       const requestNote = noteInput ? noteInput.value.trim() : '';
       if(!id || !name){ errEl.textContent = 'กรอกรหัสเอกสารและชื่อเอกสารให้ครบ'; errEl.style.display='block'; return; }
       if(!requestNote){ errEl.textContent = 'กรอกหมายเหตุก่อนบันทึก'; errEl.style.display='block'; return; }
-      const newCore = docNumberCore(id);
-      const idCollision = DOCUMENTS.some(x=> newCore ? docNumberCore(x.id)===newCore : x.id===id);
-      if(idCollision){ errEl.textContent = 'รหัสเอกสารนี้มีอยู่แล้ว'; errEl.style.display='block'; return; }
+      if(docNumberTaken(id, null)){ errEl.textContent = 'รหัสเอกสารนี้มีอยู่แล้ว (หรือเคยใช้กับเอกสารที่ยกเลิกไปแล้ว)'; errEl.style.display='block'; return; }
       const actor = currentActorName();
       const now = Date.now();
       const presetClauseEl = document.getElementById('mfPresetClause');
@@ -2301,11 +2299,7 @@ function wireModalControls(){
     const rev = document.getElementById('mfRev').value.trim();
     if(!id || !name){ errEl.textContent = 'กรอกรหัสเอกสารและชื่อเอกสารให้ครบ'; errEl.style.display='block'; return; }
     const d = DOCUMENTS.find(x=>x.id===state.modal.id);
-    if(id !== d.id){
-      const newCore = docNumberCore(id);
-      const collision = DOCUMENTS.some(x=> x.id!==d.id && (newCore ? docNumberCore(x.id)===newCore : x.id===id));
-      if(collision){ errEl.textContent = 'รหัสเอกสารนี้ซ้ำกับเลขที่มีอยู่แล้ว (เลขเดียวกัน คนละ Rev. ก็ถือว่าซ้ำ)'; errEl.style.display='block'; return; }
-    }
+    if(id !== d.id && docNumberTaken(id, d.id)){ errEl.textContent = 'รหัสเอกสารนี้ซ้ำกับเลขที่มีอยู่แล้ว (เลขเดียวกัน คนละ Rev. หรือเลขที่เคยใช้กับเอกสารที่ยกเลิกไปแล้ว ก็ถือว่าซ้ำ)'; errEl.style.display='block'; return; }
     const oldId = d.id;
     d.id = id;
     d.name = name; d.clause = clause; d.link = link; d.note = note; d.rev = rev || d.rev;
