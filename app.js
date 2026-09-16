@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.0';
+const APP_VERSION = '3.7';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -1325,14 +1325,20 @@ function nextRevNumber(currentRev){
 function openModal(opts){ state.modal = opts; renderModalLayer(); }
 function closeModal(){ state.modal = null; renderModalLayer(); }
 // Any container marked data-scroll-id keeps its scroll position across a
-// renderModalLayer() re-render (e.g. clicking "แก้ไข"/"เพิ่มแถว" in the
-// revision-log editor, or opening the linked-list panel) — without this,
-// replacing layer.innerHTML wholesale snaps every scrollable area (the
-// modal body itself, the Activity Log table, the revision-log table) back
-// to the top, which reads as the card "jumping" to the top of the screen.
+// renderModalLayer() re-render (e.g. clicking "แก้ไข"/"เพิ่มแถว"/"บันทึก"
+// in the revision-log editor) — without this, replacing layer.innerHTML
+// wholesale snaps every scrollable area back to the top, which reads as
+// the card "jumping". We restore BOTH: (a) any specific element inside
+// the modal marked data-scroll-id (modal root, Activity Log table,
+// revision-log table — whichever of these actually has the overflow in
+// this app's CSS), and (b) the page/window scroll itself, in case the
+// modal isn't a fixed-position overlay and the browser's own scroll
+// position is what moves. Belt-and-suspenders since the exact scrolling
+// element depends on CSS not present in this file.
 function captureScrollPositions(layer){
   const map = {};
   layer.querySelectorAll('[data-scroll-id]').forEach(el=>{ map[el.dataset.scrollId] = el.scrollTop; });
+  map.__window = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
   return map;
 }
 function restoreScrollPositions(layer, map){
@@ -1340,6 +1346,11 @@ function restoreScrollPositions(layer, map){
     const v = map[el.dataset.scrollId];
     if(v!=null) el.scrollTop = v;
   });
+  if(map.__window!=null){
+    window.scrollTo(0, map.__window);
+    document.documentElement.scrollTop = map.__window;
+    document.body.scrollTop = map.__window;
+  }
 }
 function renderModalLayer(){
   const layer = document.getElementById('modalLayer');
@@ -1373,6 +1384,10 @@ function renderModalLayer(){
     layer.innerHTML = '';
   }
   restoreScrollPositions(layer, scrollMap);
+  // some browsers/layouts don't have final scrollHeight available the
+  // instant innerHTML is swapped in (e.g. if content re-flows on the next
+  // paint) — reapply once more after a frame as a safety net.
+  requestAnimationFrame(()=> restoreScrollPositions(layer, scrollMap));
 }
 function openArchiveModal(opts){ state.archiveModal = opts; renderModalLayer(); }
 function closeArchiveModal(){ state.archiveModal = null; renderModalLayer(); }
@@ -3875,7 +3890,7 @@ function historyModalView(){
     .revlog-src-auto{ color:var(--ink-500); font-size:10.5px; }
   </style>
   <div class="modal-backdrop" id="historyModalBackdrop">
-    <div class="modal hist-modal">
+    <div class="modal hist-modal" data-scroll-id="historyModalRoot">
       <div class="modal-head"><div class="modal-title">ประวัติเอกสาร</div><button class="modal-close" id="historyModalCloseBtn">✕</button></div>
       <div class="modal-body" data-scroll-id="historyModalBody">
         <div class="hist-head">
