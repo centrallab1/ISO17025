@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '3.0';
+const APP_VERSION = '3.1';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -1899,10 +1899,10 @@ function isoTabBody(docs, evidence, related){
   return `<div style="display:flex; flex-direction:column; gap:2px;">${related.map(r=>`<div class="audit-link" data-clause-jump="${r.id}"><span class="dot"></span>${r.id} ${r.title}</div>`).join('')}</div>`;
 }
 function docTable(docs){
-  return `<div class="table-wrap"><table class="dtable">
+  return `<div class="table-wrap" style="overflow-x:auto;"><table class="dtable">
     <thead><tr><th>Document ID</th><th>Document Name</th><th>Type</th><th>Status</th><th>Approval</th><th>Last Updated</th></tr></thead>
     <tbody>${docs.map(d=>`<tr data-open-doc="${d.id}">
-      <td class="mono">${d.id}</td><td class="name" title="${cleanName(d).replace(/"/g,'&quot;')}">${cleanName(d)}</td><td>${docTypeLabel(d)}</td>
+      <td class="mono" style="white-space:nowrap;">${d.id}</td><td class="name" title="${cleanName(d).replace(/"/g,'&quot;')}">${cleanName(d)}</td><td>${docTypeLabel(d)}</td>
       <td>${statusBadge(d.note)}</td><td>${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, true)}</td><td>${fmtDate(d.lastUpdated)}</td>
     </tr>`).join('')}</tbody>
   </table></div>`;
@@ -2017,12 +2017,12 @@ function renderDocumentsInto(){
       <div class="spacer"></div>
       <div style="font-size:12px; color:var(--ink-500); font-weight:600;">${list.length} entries</div>
     </div>
-    <div class="table-wrap"><table class="dtable">
+    <div class="table-wrap" style="overflow-x:auto;"><table class="dtable">
       <thead><tr><th>Document ID</th><th>Document Name</th><th>Clause</th><th>Type</th><th>Status</th><th>Approval</th><th>Published</th><th></th></tr></thead>
       <tbody>
         ${pageItems.length ? pageItems.map(d=>`
         <tr data-open-doc="${d.id}">
-          <td class="mono">${d.id}</td><td class="name" title="${cleanName(d).replace(/"/g,'&quot;')}">${cleanName(d)}</td><td>${displayClause(d) || '<span style="color:var(--ink-400);">—</span>'}</td>
+          <td class="mono" style="white-space:nowrap;">${d.id}</td><td class="name" title="${cleanName(d).replace(/"/g,'&quot;')}">${cleanName(d)}</td><td>${displayClause(d) || '<span style="color:var(--ink-400);">—</span>'}</td>
           <td>${docTypeLabel(d)}</td><td>${statusBadge(d.note)}</td><td>${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, true)}</td><td>${publishedDateOf(d) ? fmtDate(publishedDateOf(d)) : '—'}</td>
           <td><div class="row-actions" onclick="event.stopPropagation()">
             ${isDC() ? `<button data-edit="${d.id}" title="Edit">${ic('edit')}</button>
@@ -3905,12 +3905,12 @@ function historyModalView(){
 
         <div class="panel" style="margin-top:20px; box-shadow:none; border:1px solid var(--line); padding:16px;">
           <div class="panel-title" style="margin-bottom:10px;">Activity Log (ประวัติกิจกรรมทั้งหมด)</div>
-          <div class="table-wrap"><table class="dtable">
+          <div class="table-wrap" style="overflow-x:auto;"><table class="dtable">
             <thead><tr><th>วันที่ / เวลา</th><th>กิจกรรม</th><th>รายละเอียด</th><th>โดย</th></tr></thead>
             <tbody>
               ${logRows.length ? logRows.map(r=>`
               <tr class="${r.kind==='revision' ? 'hist-log-clickable' : ''}" ${r.kind==='revision' ? `data-hist-req-at="${r.group.requestedAt}"` : ''} style="${r.kind==='revision' ? 'cursor:pointer;' : ''}">
-                <td class="mono">${fmtDateTime(r.time)}</td>
+                <td class="mono" style="white-space:nowrap;">${fmtDateTime(r.time)}</td>
                 <td>${r.label}</td>
                 <td>${r.kind==='revision' ? `<span class="panel-link">ดูรายละเอียด →</span>` : (linkifyShort(r.detail) || '—')}</td>
                 <td>${r.by ? `<span class="actor-pill">${r.by}</span>` : '—'}</td>
@@ -4143,7 +4143,7 @@ function viewRevisionDashboard(){
       <select class="select" id="revFType">${typeOpts.map(([v,l])=>`<option value="${v}" ${v===state.revFilter.type?'selected':''}>${l}</option>`).join('')}</select>
       <select class="select" id="revFStatus">${statusOpts.map(([v,l])=>`<option value="${v}" ${v===state.revFilter.status?'selected':''}>${l}</option>`).join('')}</select>
     </div>
-    <div class="table-wrap"><table class="dtable">
+    <div class="table-wrap" style="overflow-x:auto;"><table class="dtable">
       <thead><tr><th>เอกสาร</th><th>ข้อกำหนด</th><th>เวอร์ชันปัจจุบัน</th><th>สถานะ</th><th>แก้ไขล่าสุด</th><th>ถัดไป (ทบทวนภายใน)</th><th></th></tr></thead>
       <tbody>
         ${pageItems.length ? pageItems.map(d=>{
@@ -4152,7 +4152,7 @@ function viewRevisionDashboard(){
           const isOverdue = days < 0;
           return `
         <tr class="${d.id===state.selectedDoc?'current-row':''}" data-open-rev="${d.id}">
-          <td class="mono">${d.id}<div class="name" title="${cleanName(d).replace(/"/g,'&quot;')}" style="max-width:220px;">${cleanName(d)}</div></td>
+          <td class="mono" style="white-space:nowrap;">${d.id}<div class="name" title="${cleanName(d).replace(/"/g,'&quot;')}" style="max-width:220px;">${cleanName(d)}</div></td>
           <td>${displayClause(d) || '<span style="color:var(--ink-400);">—</span>'}</td>
           <td>${d.rev || '—'}</td>
           <td>${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, true)}</td>
@@ -4281,7 +4281,7 @@ const STEP_COLOR_VAR = { active:'--green-600', review:'--amber-600', pending:'--
 function stepIndicator(status){
   const cls = APPROVAL_STATUS_STYLE[status] || 'draft';
   const cv = STEP_COLOR_VAR[cls];
-  return `<span style="display:inline-flex; align-items:center; gap:6px; font-weight:600; font-size:12px; color:var(${cv});"><span style="width:7px;height:7px;border-radius:50%;background:var(${cv});display:inline-block; flex-shrink:0;"></span>${STEP_LABEL[status]||status}</span>`;
+  return `<span style="display:inline-flex; align-items:center; gap:6px; font-weight:600; font-size:12px; color:var(${cv}); white-space:nowrap;"><span style="width:7px;height:7px;border-radius:50%;background:var(${cv});display:inline-block; flex-shrink:0;"></span>${STEP_LABEL[status]||status}</span>`;
 }
 function actorForDoc(d){
   const status = d.approvalStatus || 'ร่าง';
@@ -4312,10 +4312,10 @@ function requestTypeBadge(d){
   // give it its own red/alert styling instead, matching the red used for
   // this same event type in the activity timeline (classifyEvent above).
   if(d.lastRequestType==='cancel'){
-    return `<span class="badge badge-cancel">${label}</span>`;
+    return `<span class="badge badge-cancel" style="white-space:nowrap;">${label}</span>`;
   }
   const cls = d.lastRequestType==='revision' ? 'review' : d.lastRequestType==='review' ? 'pending' : 'active';
-  return `<span class="badge ${cls}">${label}</span>`;
+  return `<span class="badge ${cls}" style="white-space:nowrap;">${label}</span>`;
 }
 // Approved formal (new/revision) requests still need DC to paste the live
 // link + effective date (see renderPublishBox/wireDcPublish) before they're
@@ -4415,14 +4415,14 @@ function viewApproval(){
       ${tabs.map(t=>`<button class="tab ${state.approvalTab===t.key?'active':''}" data-ap-tab="${t.key}">${t.label}<span class="cnt">${t.n}</span></button>`).join('')}
     </div>
 
-    <div class="table-wrap"><table class="dtable">
+    <div class="table-wrap" style="overflow-x:auto;"><table class="dtable">
       <thead><tr><th>รหัสเอกสาร</th><th>ชื่อเอกสาร</th><th>ประเภทคำขอ</th><th>สถานะ</th><th>ขั้นตอนปัจจุบัน</th><th>ผู้ดำเนินการ</th><th>วันที่เผยแพร่</th>${isDC() ? '<th></th>' : ''}</tr></thead>
       <tbody>
         ${pageItems.length ? pageItems.map(d=>{
           const actor = actorForDoc(d);
           return `
         <tr class="${d.id===state.selectedDoc?'current-row':''}" data-select-approval="${d.id}">
-          <td class="mono">${d.id}</td>
+          <td class="mono" style="white-space:nowrap;">${d.id}</td>
           <td class="name" title="${cleanName(d).replace(/"/g,'&quot;')}">${cleanName(d)}</td>
           <td>${requestTypeBadge(d)}</td>
           <td>${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, true)}</td>
@@ -5399,7 +5399,7 @@ function viewWatermarkTool(){
 
     <div style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line);">
       <div style="font-size:12.5px; font-weight:800; color:var(--ink-900); margin-bottom:10px;">ทะเบียนสำเนา (ดาวน์โหลด ${WATERMARK_LOG.filter(e=>e.type!=='distribute').length} · แจกจ่าย ${WATERMARK_LOG.filter(e=>e.type==='distribute').length} ฉบับ จาก ${docIds.length} เอกสาร)</div>
-      ${docIds.length ? `<div class="table-wrap"><table class="dtable">
+      ${docIds.length ? `<div class="table-wrap" style="overflow-x:auto;"><table class="dtable">
         <thead><tr><th>รหัสเอกสาร</th><th>ดาวน์โหลด</th><th>แจกจ่ายแล้ว</th><th>เรียกคืนแล้ว</th><th>คงเหลือนอกระบบ</th><th>ล่าสุด</th><th></th></tr></thead>
         <tbody>
           ${docIds.map(id=>{
@@ -5410,7 +5410,7 @@ function viewWatermarkTool(){
             const last = c.entries.slice().sort((a,b)=>b.at-a.at)[0];
             return `
           <tr data-wm-toggle="${id}" style="cursor:pointer;">
-            <td class="mono">${id}</td>
+            <td class="mono" style="white-space:nowrap;">${id}</td>
             <td>${c.downloaded}</td>
             <td>${c.distributed}</td>
             <td>${c.recalled}</td>
