@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.0';
+const APP_VERSION = '2.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -962,6 +962,7 @@ const state = {
   historyModal: null, // { docId } for the document History popup, or null
   historyModalLinksOpen: false,
   historyModalRequestDetail: null, // { fromRev, toRev, requestedBy, requestedAt, events } — popup on top of the History modal
+  docDetailModal: null, // { docId } — document detail popup, opened instead of navigating to a new page
 };
 
 const ICONS = {
@@ -1294,6 +1295,9 @@ function renderModalLayer(){
   } else if(state.historyModal){
     layer.innerHTML = historyModalView();
     wireHistoryModal();
+  } else if(state.docDetailModal){
+    layer.innerHTML = docDetailModalView();
+    wireDocDetailModal();
   } else {
     layer.innerHTML = '';
   }
@@ -1524,6 +1528,7 @@ function wireSidebarToggle(){
 }
 function goTo(view, extra={}){
   navStack.push(snapshotState());
+  state.docDetailModal = null; // navigating to a real page dismisses the document-detail popup
   Object.assign(state, extra);
   state.view = view;
   syncNavActive();
@@ -1579,13 +1584,17 @@ function render(){
 }
 function attachGlobalRowHandlers(){
   document.querySelectorAll('[data-open-doc]').forEach(row=>{
-    row.addEventListener('click', ()=> goTo('docdetail', { selectedDoc: row.dataset.openDoc }));
+    row.addEventListener('click', ()=> openDocDetailModal(row.dataset.openDoc));
   });
   document.querySelectorAll('[data-back]').forEach(elx=>{
     elx.addEventListener('click', ()=> goBack());
   });
   document.querySelectorAll('[data-go]').forEach(elx=>{
     elx.addEventListener('click', ()=>{
+      if(elx.dataset.go === 'docdetail'){
+        openDocDetailModal(state.selectedDoc);
+        return;
+      }
       if(elx.dataset.preset){
         goTo(elx.dataset.go, { docFilter:{ clause:'All', type:'All', status:'All', q:'', preset:elx.dataset.preset }, docPage:1 });
       } else {
@@ -2863,6 +2872,11 @@ function viewDocDetail(docId){
   return `
   <div class="crumb" data-back="1">‹ Back</div>
   <div class="panel">
+    ${docDetailContent(d)}
+  </div>`;
+}
+function docDetailContent(d){
+  return `
     <div class="detail-head">
       <div class="doc-thumb">${ic('pdf')}<span>${docTypeCode(d)}</span></div>
       <div style="flex:1;">
@@ -2915,7 +2929,40 @@ function viewDocDetail(docId){
       <b>ประวัติลิงก์เอกสาร:</b><br>
       ${d.linkHistory.slice().reverse().map(h=>`<div style="margin-top:6px; word-break:break-all;">${h.note||'ลิงก์เดิม'} — <a href="${h.link}" target="_blank" rel="noopener" style="color:var(--blue-600);">${h.link}</a> <span style="color:var(--ink-500);">(${fmtDate(h.time)})</span></div>`).join('')}
     </div>` : ''}
+  `;
+}
+// Document detail popup — opened via openDocDetailModal() instead of
+// navigating to a separate page. Reuses docDetailContent(), the same
+// markup viewDocDetail() (kept for reference) wraps in a full page.
+function openDocDetailModal(docId){ state.docDetailModal = { docId }; state.selectedDoc = docId; state.docManageMenuOpen = false; state.docRequestMenuOpen = false; renderModalLayer(); }
+function closeDocDetailModal(){ state.docDetailModal = null; renderModalLayer(); }
+function docDetailModalView(){
+  const docId = state.docDetailModal.docId;
+  const d = DOCUMENTS.find(x=>x.id===docId);
+  if(!d) return `<div class="modal-backdrop" id="docDetailModalBackdrop"><div class="modal"><div class="modal-body">${emptyState('ไม่พบเอกสาร','')}</div><div class="modal-actions"><button class="btn ghost" id="docDetailModalCloseBtn2">ปิด</button></div></div></div>`;
+  return `
+  <div class="modal-backdrop" id="docDetailModalBackdrop">
+    <div class="modal" style="width:min(820px, 94vw); max-width:820px;">
+      <div class="modal-head"><div class="modal-title">${d.id}</div><button class="modal-close" id="docDetailModalCloseBtn">✕</button></div>
+      <div class="modal-body">
+        ${docDetailContent(d)}
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="docDetailModalCloseBtn2">ปิด</button>
+      </div>
+    </div>
   </div>`;
+}
+function wireDocDetailModal(){
+  const backdrop = document.getElementById('docDetailModalBackdrop');
+  if(!backdrop) return;
+  const close = ()=> closeDocDetailModal();
+  const closeBtn = document.getElementById('docDetailModalCloseBtn');
+  if(closeBtn) closeBtn.addEventListener('click', close);
+  const closeBtn2 = document.getElementById('docDetailModalCloseBtn2');
+  if(closeBtn2) closeBtn2.addEventListener('click', close);
+  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) close(); });
+  attachDetailActionHandlers();
 }
 function attachDetailActionHandlers(){
   const openMenu = (stateKey, menuId, btnId)=>{
@@ -2952,7 +2999,7 @@ function attachDetailActionHandlers(){
     if(!confirm(`ลบเอกสาร "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
     DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
     await persistDocs();
-    goBack();
+    if(state.docDetailModal){ closeDocDetailModal(); render(); } else { goBack(); }
   });
   const cancelDocBtn = document.getElementById('btnDetailCancelDoc');
   if(cancelDocBtn) cancelDocBtn.addEventListener('click', ()=>{
