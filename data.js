@@ -201,6 +201,15 @@ function nextAvailableNumber(prefix){
   while(used.has(n)) n++;
   return `MPIR-${prefix}-${String(n).padStart(3,'0')}-00`;
 }
+// The trailing "-NN" on a document id is its revision, not part of the
+// document's identity — MPIR-WI-008-00 and MPIR-WI-008-06 are the SAME
+// document number at two different revisions, and must never coexist as
+// two separate documents. Returns e.g. "WI-008", or null if id doesn't
+// match the expected pattern (fall back to exact-string comparison then).
+function docNumberCore(id){
+  const m = String(id||'').match(/^(?:RDI|MPIR)-([A-Za-z]+)-(\d+)/i);
+  return m ? (m[1].toUpperCase()+'-'+m[2]) : null;
+}
 
 // Converts an old RDI-xx-### id to the new MPIR-xx-###-rr format, reusing
 // the existing document number and stamping the current revision.
