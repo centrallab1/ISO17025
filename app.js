@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.0';
+const APP_VERSION = '3.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -65,11 +65,15 @@ function personAvatarFor(name){
 }
 // Renders either the matched illustrated avatar (as a photo-fill circle)
 // or the existing plain initials circle, using whatever CSS class the
-// call site already relies on for size/shape (row-avatar, hist-avatar, ...).
-function avatarNodeHTML(name, cls, fallbackText){
+// call site already relies on for shape/position (row-avatar, hist-avatar,
+// ...) but with an explicit inline size so it renders bigger than that
+// class's own (smaller) default, consistently across every feature.
+function avatarNodeHTML(name, cls, fallbackText, size){
+  const px = size || 42;
+  const sizeStyle = `width:${px}px; height:${px}px; min-width:${px}px; border-radius:50%; font-size:${Math.round(px*0.38)}px;`;
   const src = personAvatarFor(name);
-  if(src) return `<div class="${cls}" style="background-image:url('${src}'); background-size:cover; background-position:center;"></div>`;
-  return `<div class="${cls}">${fallbackText}</div>`;
+  if(src) return `<div class="${cls}" style="${sizeStyle} background-image:url('${src}'); background-size:cover; background-position:center;"></div>`;
+  return `<div class="${cls}" style="${sizeStyle} display:flex; align-items:center; justify-content:center;">${fallbackText}</div>`;
 }
 // With exactly one account per role (DC/QM/LM), the reviewer and approver
 // for any new/revision request can be worked out immediately instead of
@@ -696,6 +700,13 @@ function updateUserBadge(){
   const nameEl = document.getElementById('userNameDisplay');
   const roleEl = document.getElementById('userRoleDisplay');
   if(avatarEl){
+    // explicit inline size so it renders bigger than #userAvatar's own
+    // (smaller) CSS default, same as the other avatar spots in the app
+    avatarEl.style.width = '42px';
+    avatarEl.style.height = '42px';
+    avatarEl.style.minWidth = '42px';
+    avatarEl.style.borderRadius = '50%';
+    avatarEl.style.fontSize = '16px';
     const photo = personAvatarFor(currentUser.name);
     if(photo){
       avatarEl.textContent = '';
@@ -3804,7 +3815,7 @@ function historyModalView(){
     .hist-head-title{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .hist-people{ display:flex; gap:22px; flex-wrap:wrap; }
     .hist-person{ display:flex; align-items:center; gap:8px; }
-    .hist-avatar{ width:28px; height:28px; border-radius:50%; background:var(--blue-50); color:var(--blue-600); font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .hist-avatar{ width:42px; height:42px; border-radius:50%; background:var(--blue-50); color:var(--blue-600); font-size:16px; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
     .hist-person-label{ font-size:10.5px; color:var(--ink-500); }
     .hist-person-name{ font-size:12px; font-weight:700; color:var(--ink-900); }
     .hist-person-time{ font-size:10.5px; color:var(--ink-500); }
