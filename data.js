@@ -186,6 +186,16 @@ function nextAvailableNumber(prefix){
     const m = idStr.match(re);
     if(m) nums.push(parseInt(m[1],10));
   });
+  // เอกสารที่ถูกยกเลิกจะถูกย้ายออกจาก DOCUMENTS ไปไว้ที่ ARCHIVE_ITEMS แทน (ดู
+  // cancelDocumentToArchive/archiveCancelledRow ใน app.js) — ถ้าไม่เช็คตรงนี้
+  // ด้วย เลขของเอกสารที่ยกเลิกไปแล้วจะกลายเป็น "ว่าง" แล้วถูกออกซ้ำให้เอกสารใหม่
+  if(typeof ARCHIVE_ITEMS !== 'undefined'){
+    ARCHIVE_ITEMS.forEach(a=>{
+      const idStr = String((a && (a.sourceDocId || a.id)) || '');
+      const m = idStr.match(re);
+      if(m) nums.push(parseInt(m[1],10));
+    });
+  }
   const used = new Set(nums);
   let n = 1;
   while(used.has(n)) n++;
