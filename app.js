@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '3.5';
+const APP_VERSION = '1.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -1324,9 +1324,27 @@ function nextRevNumber(currentRev){
 }
 function openModal(opts){ state.modal = opts; renderModalLayer(); }
 function closeModal(){ state.modal = null; renderModalLayer(); }
+// Any container marked data-scroll-id keeps its scroll position across a
+// renderModalLayer() re-render (e.g. clicking "แก้ไข"/"เพิ่มแถว" in the
+// revision-log editor, or opening the linked-list panel) — without this,
+// replacing layer.innerHTML wholesale snaps every scrollable area (the
+// modal body itself, the Activity Log table, the revision-log table) back
+// to the top, which reads as the card "jumping" to the top of the screen.
+function captureScrollPositions(layer){
+  const map = {};
+  layer.querySelectorAll('[data-scroll-id]').forEach(el=>{ map[el.dataset.scrollId] = el.scrollTop; });
+  return map;
+}
+function restoreScrollPositions(layer, map){
+  layer.querySelectorAll('[data-scroll-id]').forEach(el=>{
+    const v = map[el.dataset.scrollId];
+    if(v!=null) el.scrollTop = v;
+  });
+}
 function renderModalLayer(){
   const layer = document.getElementById('modalLayer');
   if(!layer) return;
+  const scrollMap = captureScrollPositions(layer);
   if(state.modal){
     layer.innerHTML = docModal();
     wireModalControls();
@@ -1354,6 +1372,7 @@ function renderModalLayer(){
   } else {
     layer.innerHTML = '';
   }
+  restoreScrollPositions(layer, scrollMap);
 }
 function openArchiveModal(opts){ state.archiveModal = opts; renderModalLayer(); }
 function closeArchiveModal(){ state.archiveModal = null; renderModalLayer(); }
@@ -3858,7 +3877,7 @@ function historyModalView(){
   <div class="modal-backdrop" id="historyModalBackdrop">
     <div class="modal hist-modal">
       <div class="modal-head"><div class="modal-title">ประวัติเอกสาร</div><button class="modal-close" id="historyModalCloseBtn">✕</button></div>
-      <div class="modal-body">
+      <div class="modal-body" data-scroll-id="historyModalBody">
         <div class="hist-head">
           <div>
             <div class="hist-head-title"><div class="detail-title">${d.id}</div>${statusBadge(d.note)}${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, false)}</div>
@@ -3917,7 +3936,7 @@ function historyModalView(){
 
         <div class="panel" style="margin-top:20px; box-shadow:none; border:1px solid var(--line); padding:16px;">
           <div class="panel-title" style="margin-bottom:10px;">Activity Log (ประวัติกิจกรรมทั้งหมด)</div>
-          <div class="table-wrap" style="overflow-x:auto; max-height:280px; overflow-y:auto;"><table class="dtable">
+          <div class="table-wrap" data-scroll-id="activityLogTable" style="overflow-x:auto; max-height:280px; overflow-y:auto;"><table class="dtable">
             <thead><tr><th>วันที่ / เวลา</th><th>กิจกรรม</th><th>รายละเอียด</th><th>โดย</th></tr></thead>
             <tbody>
               ${logRows.length ? logRows.map(r=>`
@@ -5865,7 +5884,7 @@ function revLogSectionView(d){
         `}
       </div>
     </div>
-    <div class="table-wrap" style="overflow-x:auto; max-height:320px; overflow-y:auto;">
+    <div class="table-wrap" data-scroll-id="revLogTable" style="overflow-x:auto; max-height:320px; overflow-y:auto;">
       <table class="dtable revlog-table">
         <thead><tr><th>แก้ไขครั้งที่</th><th>วันที่ประกาศใช้</th><th>รายละเอียดการแก้ไข</th><th>ผู้แก้ไข (ตำแหน่ง)</th>${editing ? '<th style="width:40px;"></th>' : ''}</tr></thead>
         <tbody>
