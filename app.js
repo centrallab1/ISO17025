@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '2.9';
+const APP_VERSION = '1.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -1393,6 +1393,22 @@ async function startApp(){
   updateUserBadge();
 }
 function initApp(){
+  document.addEventListener('click', (evt)=>{
+    const menus = [
+      { flag:'docManageMenuOpen', menuId:'docManageActionMenu', btnId:'btnDocManageMenuBtn' },
+      { flag:'docRequestMenuOpen', menuId:'docRequestActionMenu', btnId:'btnDocRequestMenuBtn' },
+      { flag:'docDetailMenuOpen', menuId:'revDetailActionMenu', btnId:'revDetailMoreBtn' },
+    ];
+    let changed = false;
+    menus.forEach(m=>{
+      if(!state[m.flag]) return;
+      const menu = document.getElementById(m.menuId);
+      const btn = document.getElementById(m.btnId);
+      const inside = (menu && menu.contains(evt.target)) || (btn && btn.contains(evt.target));
+      if(!inside){ state[m.flag] = false; changed = true; }
+    });
+    if(changed) render();
+  });
   tryRestoreSession();
   if(currentUser) startApp();
   else renderLoginScreen();
@@ -1480,6 +1496,14 @@ function wireNav(){
       goTo(btn.dataset.view, extra);
     });
   });
+  const sidebar = document.querySelector('.sidebar');
+  if(sidebar && !document.getElementById('sidebarVersionTag')){
+    const tag = document.createElement('div');
+    tag.id = 'sidebarVersionTag';
+    tag.style.cssText = 'margin-top:auto; padding:14px 20px; font-size:11px; color:var(--ink-500,#8a94a6); text-align:center;';
+    tag.textContent = `v${APP_VERSION}`;
+    sidebar.appendChild(tag);
+  }
 }
 function openSidebar(){
   document.querySelector('.sidebar').classList.add('open');
@@ -2903,18 +2927,6 @@ function attachDetailActionHandlers(){
       state.docManageMenuOpen = (stateKey==='docManageMenuOpen') ? !state[stateKey] : false;
       state.docRequestMenuOpen = (stateKey==='docRequestMenuOpen') ? !state[stateKey] : false;
       render();
-      if(state[stateKey]){
-        const closeOnOutsideClick = (evt)=>{
-          const menu = document.getElementById(menuId);
-          const trigger = document.getElementById(btnId);
-          if(menu && !menu.contains(evt.target) && evt.target!==trigger){
-            state[stateKey] = false;
-            render();
-          }
-          document.removeEventListener('click', closeOnOutsideClick);
-        };
-        setTimeout(()=> document.addEventListener('click', closeOnOutsideClick), 0);
-      }
     });
   };
   openMenu('docManageMenuOpen', 'docManageActionMenu', 'btnDocManageMenuBtn');
@@ -3991,6 +4003,12 @@ function viewRevisionDashboard(){
        wrap onto a second row instead of overflowing on narrower desktop
        windows. The Type/Status dropdowns are left exactly as they were. */
     .revdash-wrap{ overflow-x:hidden; }
+    .revdash-wrap .grid-2{ min-width:0; }
+    .revdash-wrap .grid-2 > .panel{ min-width:0; }
+    .revdash-wrap .notif-item{ min-width:0; }
+    .revdash-wrap .notif-text{ min-width:0; }
+    .revdash-wrap .notif-title{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .revdash-wrap .notif-sub{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .revdash-wrap .stat-row-5{ grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
     .revdash-wrap .toolbar{ flex-wrap:wrap; }
     .revdash-wrap .toolbar select.select#revFClause{
@@ -4108,19 +4126,6 @@ function attachRevisionDashboardHandlers(){
     e.stopPropagation();
     state.docDetailMenuOpen = !state.docDetailMenuOpen;
     render();
-    if(state.docDetailMenuOpen){
-      // close the menu on the next click anywhere else on the page
-      const closeOnOutsideClick = (evt)=>{
-        const menu = document.getElementById('revDetailActionMenu');
-        const btn = document.getElementById('revDetailMoreBtn');
-        if(menu && !menu.contains(evt.target) && evt.target!==btn){
-          state.docDetailMenuOpen = false;
-          render();
-        }
-        document.removeEventListener('click', closeOnOutsideClick);
-      };
-      setTimeout(()=> document.addEventListener('click', closeOnOutsideClick), 0);
-    }
   });
   wireFormConfirm();
   wireDcRegister();
