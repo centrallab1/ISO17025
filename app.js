@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '2.4';
+const APP_VERSION = '2.5';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -3422,7 +3422,7 @@ function renderPublishBox(d){
     <div class="field"><label>ลิงก์เอกสารที่ขึ้นระบบแล้ว</label>
       <input id="dcPublishLink" placeholder="https://mitrphol.sharepoint.com/..." value="${(state.dcPublishEditing ? d.publishedLink : (d.link || d.publishedLink)) || ''}" style="border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px; width:100%; box-sizing:border-box;"></div>
     <div class="field"><label>วันที่ประกาศใช้</label>
-      <input id="dcEffectiveDate" type="date" value="${d.effectiveDate ? new Date(d.effectiveDate).toISOString().slice(0,10) : ''}" style="border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px;"></div>
+      <input id="dcEffectiveDate" type="date" value="${new Date(Date.now()).toISOString().slice(0,10)}" style="border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px;"></div>
     <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
       <div style="font-size:12px; color:var(--ink-500);">โดย ${currentActorName()}</div>
       <button class="btn success" id="btnDcPublish">${ic('link')} ${d.publishedLink ? 'บันทึกใหม่' : 'เผยแพร่ + เสร็จสิ้น'}</button>
