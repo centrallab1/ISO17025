@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '3.2';
+const APP_VERSION = '3.4';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -1014,8 +1014,7 @@ const state = {
   historyModalLinksOpen: false,
   historyModalRequestDetail: null, // { fromRev, toRev, requestedBy, requestedAt, events } — popup on top of the History modal
   docDetailModal: null, // { docId } — document detail popup, opened instead of navigating to a new page
-  revLogModal: null, // { docId } — ทะเบียนประวัติการแก้ไขเอกสาร popup, or null
-  revLogEditing: false, // true while the ทะเบียนฯ table is in edit mode
+  revLogEditing: false, // true while the ทะเบียนประวัติเอกสาร table (inside the History modal) is in edit mode
   revLogDraftRows: null, // working copy of rows while revLogEditing is true
 };
 
@@ -1352,9 +1351,6 @@ function renderModalLayer(){
   } else if(state.docDetailModal){
     layer.innerHTML = docDetailModalView();
     wireDocDetailModal();
-  } else if(state.revLogModal){
-    layer.innerHTML = revLogModalView();
-    wireRevLogModal();
   } else {
     layer.innerHTML = '';
   }
@@ -2950,7 +2946,6 @@ function docDetailContent(d){
         <div class="detail-actions">
           ${displayLink(d) ? `<a class="btn primary" href="${displayLink(d)}" target="_blank" rel="noopener">${ic('link')} Open in SharePoint</a>` : `<button class="btn ghost" disabled>${ic('link')} ยังไม่มีลิงก์</button>`}
           <button class="btn ghost" data-go-revision-history="1">${ic('history')} History</button>
-          <button class="btn ghost" data-go-revlog="1">${ic('edit')} ทะเบียนแก้ไขเอกสาร</button>
         </div>
         <div class="detail-actions-label">จัดการเอกสาร</div>
         <div class="detail-actions" style="align-items:flex-start;">
@@ -3050,8 +3045,6 @@ function attachDetailActionHandlers(){
   });
   const historyBtn = document.querySelector('[data-go-revision-history]');
   if(historyBtn) historyBtn.addEventListener('click', ()=> openHistoryModal(state.selectedDoc));
-  const revLogBtn = document.querySelector('[data-go-revlog]');
-  if(revLogBtn) revLogBtn.addEventListener('click', ()=> openRevLogModal(state.selectedDoc));
   const delBtn = document.getElementById('btnDetailDelete');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
@@ -3743,8 +3736,8 @@ function viewRevisionDetailInline(d, standalone){
 // document's own comment trail (via classifyEvent/eitem) and its
 // linkHistory — no invented revision numbers or steps.
 // ============================================================
-function openHistoryModal(docId){ state.historyModal = { docId }; state.historyModalLinksOpen = false; renderModalLayer(); }
-function closeHistoryModal(){ state.historyModal = null; renderModalLayer(); }
+function openHistoryModal(docId){ state.historyModal = { docId }; state.historyModalLinksOpen = false; state.revLogEditing = false; state.revLogDraftRows = null; renderModalLayer(); }
+function closeHistoryModal(){ state.historyModal = null; state.revLogEditing = false; state.revLogDraftRows = null; renderModalLayer(); }
 
 // chronological (oldest → newest) event list for the numbered lifecycle
 // timeline — the mirror image of the "latest first" activity feed used
@@ -3856,6 +3849,11 @@ function historyModalView(){
     .hist-link-item:last-child{ border-bottom:none; }
     .hist-link-item a{ color:var(--blue-600); word-break:break-all; }
     .hist-link-meta{ color:var(--ink-500); font-size:10.5px; margin-top:2px; }
+    .revlog-table td:first-child, .revlog-table th:first-child{ width:70px; text-align:center; }
+    .revlog-table td:nth-child(2), .revlog-table th:nth-child(2){ width:130px; text-align:center; }
+    .revlog-table input, .revlog-table textarea{ width:100%; border:1px solid var(--line); border-radius:6px; padding:5px 6px; font-size:12.5px; font-family:inherit; box-sizing:border-box; }
+    .revlog-table textarea{ resize:vertical; min-height:38px; }
+    .revlog-src-auto{ color:var(--ink-500); font-size:10.5px; }
   </style>
   <div class="modal-backdrop" id="historyModalBackdrop">
     <div class="modal hist-modal">
@@ -3933,6 +3931,8 @@ function historyModalView(){
           </table></div>
         </div>
 
+        ${revLogSectionView(d)}
+
         ${state.historyModalLinksOpen && (d.linkHistory && d.linkHistory.length) ? `
         <div class="hist-links-panel">
           <div class="panel-title" style="margin-bottom:6px;">ลิงก์เอกสาร (Links)</div>
@@ -3968,6 +3968,8 @@ function wireHistoryModal(){
       if(group) openHistoryRequestDetail(group);
     });
   });
+  const dForRevLog = DOCUMENTS.find(x=>x.id===state.historyModal.docId);
+  if(dForRevLog) wireRevLogSection(dForRevLog);
 }
 
 // Detail popup for a single revision request, opened from the Activity Log
@@ -5803,21 +5805,9 @@ async function mergeAutoRevLogRows(d){
   if(added){ d.lastUpdated = Date.now(); await persistDocs(); }
   return added;
 }
-function openRevLogModal(docId){
-  state.revLogModal = { docId };
-  state.revLogEditing = false;
-  state.revLogDraftRows = null;
-  renderModalLayer();
-}
-function closeRevLogModal(){
-  state.revLogModal = null;
-  state.revLogEditing = false;
-  state.revLogDraftRows = null;
-  renderModalLayer();
-}
 // Reads whatever is currently typed in the edit-mode inputs back into
 // state.revLogDraftRows, so add/remove-row buttons (which re-render the
-// whole table) never lose in-progress edits.
+// whole modal) never lose in-progress edits.
 function syncRevLogDraftFromDom(){
   if(!state.revLogDraftRows) return;
   document.querySelectorAll('[data-revlog-row]').forEach(rowEl=>{
@@ -5832,81 +5822,52 @@ function syncRevLogDraftFromDom(){
     if(detailEl) row.detail = detailEl.value;
   });
 }
-function revLogModalView(){
-  const { docId } = state.revLogModal;
-  const d = DOCUMENTS.find(x=>x.id===docId);
-  if(!d) return `<div class="modal-backdrop" id="revLogBackdrop"><div class="modal"><div class="modal-body">${emptyState('ไม่พบเอกสาร','')}</div><div class="modal-actions"><button class="btn ghost" id="revLogCloseBtn2">ปิด</button></div></div></div>`;
+// "ทะเบียนประวัติเอกสาร" — rendered as a section INSIDE the existing
+// History modal (historyModalView), not a separate popup, so it always
+// opens together with the document's History.
+function revLogSectionView(d){
   const editing = state.revLogEditing;
   const rows = editing ? (state.revLogDraftRows || []) : sortRevLogRows(d.revisionLog||[]);
   const canEdit = isDC();
   return `
-  <style>
-    .revlog-modal{ width:min(760px, 94vw); max-width:760px; }
-    .revlog-table{ border-collapse:collapse; width:100%; }
-    .revlog-table th, .revlog-table td{ border:1px solid var(--line); padding:8px 10px; font-size:12.5px; vertical-align:top; }
-    .revlog-table th{ background:var(--blue-50); text-align:center; }
-    .revlog-table td:first-child, .revlog-table th:first-child{ width:70px; text-align:center; }
-    .revlog-table td:nth-child(2), .revlog-table th:nth-child(2){ width:130px; text-align:center; }
-    .revlog-table input, .revlog-table textarea{ width:100%; border:1px solid var(--line); border-radius:6px; padding:5px 6px; font-size:12.5px; font-family:inherit; box-sizing:border-box; }
-    .revlog-table textarea{ resize:vertical; min-height:38px; }
-    .revlog-src-auto{ color:var(--ink-500); font-size:10.5px; }
-  </style>
-  <div class="modal-backdrop" id="revLogBackdrop">
-    <div class="modal revlog-modal">
-      <div class="modal-head">
-        <div class="modal-title">ทะเบียนประวัติการแก้ไขเอกสาร</div>
-        <button class="modal-close" id="revLogCloseBtn">✕</button>
-      </div>
-      <div class="modal-body">
-        <div class="detail-sub" style="margin-bottom:12px;">${d.id} · ${cleanName(d)}</div>
-        <div class="table-wrap" style="overflow-x:auto;">
-          <table class="revlog-table">
-            <thead><tr><th>แก้ไขครั้งที่</th><th>วันที่ประกาศใช้</th><th>รายละเอียดการแก้ไข</th>${editing ? '<th style="width:40px;"></th>' : ''}</tr></thead>
-            <tbody>
-              ${rows.length ? rows.map(r=> editing ? `
-              <tr data-revlog-row="${r.id}">
-                <td><input data-f="no" value="${escapeHtml(r.no||'')}"></td>
-                <td><input data-f="date" type="date" value="${r.date ? new Date(r.date).toISOString().slice(0,10) : ''}"></td>
-                <td><textarea data-f="detail">${escapeHtml(r.detail||'')}</textarea></td>
-                <td style="text-align:center;"><button type="button" class="btn ghost" style="padding:4px 8px;" data-revlog-del="${r.id}">${ic('trash')}</button></td>
-              </tr>` : `
-              <tr>
-                <td>${escapeHtml(r.no||'—')}</td>
-                <td>${r.date ? fmtDate(r.date) : '—'}</td>
-                <td style="white-space:pre-wrap;">${escapeHtml(r.detail||'')}${r.source==='auto' ? ' <span class="revlog-src-auto">(อัตโนมัติ)</span>' : ''}</td>
-              </tr>`).join('') : `<tr><td colspan="${editing?4:3}" style="text-align:center; padding:20px 0; color:var(--ink-500);">ยังไม่มีประวัติการแก้ไข</td></tr>`}
-            </tbody>
-          </table>
-        </div>
-        ${editing ? `<button type="button" class="btn ghost" id="revLogAddRowBtn" style="margin-top:10px;">${ic('plus')} เพิ่มแถว</button>` : ''}
-        ${!editing && !canEdit ? `<div style="font-size:11px; color:var(--ink-500); margin-top:10px;">เฉพาะ Document Control เท่านั้นที่แก้ไขทะเบียนนี้ได้</div>` : ''}
-      </div>
-      <div class="modal-actions" style="flex-wrap:wrap;">
+  <div class="panel" style="margin-top:20px; box-shadow:none; border:1px solid var(--line); padding:16px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+      <div class="panel-title" style="margin-bottom:0;">ทะเบียนประวัติเอกสาร</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
         ${editing ? `
           <button class="btn ghost" id="revLogCancelEditBtn">ยกเลิก</button>
           <button class="btn primary" id="revLogSaveBtn">${ic('check')} บันทึก</button>
         ` : `
-          <button class="btn ghost" id="revLogCloseBtn2">ปิด</button>
           <button class="btn ghost" id="revLogExportBtn">${ic('download')} ส่งออกไฟล์ Word</button>
           ${canEdit ? `<button class="btn ghost" id="revLogAutoFillBtn">${ic('history')} ดึงจากประวัติอัตโนมัติ</button>` : ''}
-          ${canEdit ? `<button class="btn primary" id="revLogEditBtn">${ic('edit')} แก้ไข</button>` : ''}
+          ${canEdit ? `<button class="btn ghost" id="revLogEditBtn">${ic('edit')} แก้ไข</button>` : ''}
         `}
       </div>
     </div>
+    <div class="table-wrap" style="overflow-x:auto;">
+      <table class="dtable revlog-table">
+        <thead><tr><th>แก้ไขครั้งที่</th><th>วันที่ประกาศใช้</th><th>รายละเอียดการแก้ไข</th>${editing ? '<th style="width:40px;"></th>' : ''}</tr></thead>
+        <tbody>
+          ${rows.length ? rows.map(r=> editing ? `
+          <tr data-revlog-row="${r.id}">
+            <td><input data-f="no" value="${escapeHtml(r.no||'')}"></td>
+            <td><input data-f="date" type="date" value="${r.date ? new Date(r.date).toISOString().slice(0,10) : ''}"></td>
+            <td><textarea data-f="detail">${escapeHtml(r.detail||'')}</textarea></td>
+            <td style="text-align:center;"><button type="button" class="btn ghost" style="padding:4px 8px;" data-revlog-del="${r.id}">${ic('trash')}</button></td>
+          </tr>` : `
+          <tr>
+            <td style="text-align:center;">${escapeHtml(r.no||'—')}</td>
+            <td style="text-align:center; white-space:nowrap;">${r.date ? fmtDate(r.date) : '—'}</td>
+            <td style="white-space:pre-wrap;">${escapeHtml(r.detail||'')}${r.source==='auto' ? ' <span class="revlog-src-auto">(อัตโนมัติ)</span>' : ''}</td>
+          </tr>`).join('') : `<tr><td colspan="${editing?4:3}" style="text-align:center; padding:16px 0; color:var(--ink-500);">ยังไม่มีประวัติการแก้ไข</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+    ${editing ? `<button type="button" class="btn ghost" id="revLogAddRowBtn" style="margin-top:10px;">${ic('plus')} เพิ่มแถว</button>` : ''}
+    ${!editing && !canEdit ? `<div style="font-size:11px; color:var(--ink-500); margin-top:10px;">เฉพาะ Document Control เท่านั้นที่แก้ไขทะเบียนนี้ได้</div>` : ''}
   </div>`;
 }
-function wireRevLogModal(){
-  const backdrop = document.getElementById('revLogBackdrop');
-  if(!backdrop) return;
-  const close = ()=> closeRevLogModal();
-  document.getElementById('revLogCloseBtn').addEventListener('click', close);
-  const closeBtn2 = document.getElementById('revLogCloseBtn2');
-  if(closeBtn2) closeBtn2.addEventListener('click', close);
-  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) close(); });
-
-  const d = DOCUMENTS.find(x=>x.id===state.revLogModal.docId);
-  if(!d) return;
-
+function wireRevLogSection(d){
   const exportBtn = document.getElementById('revLogExportBtn');
   if(exportBtn) exportBtn.addEventListener('click', ()=> exportRevLogToWord(d));
 
