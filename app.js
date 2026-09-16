@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '3.1';
+const APP_VERSION = '3.2';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -782,6 +782,11 @@ async function loadDocs(){
         d.publishedLink = d.link; needsMigration = true;
       }
       if(!Array.isArray(d.linkHistory)){ d.linkHistory=[]; needsMigration = true; }
+      // ทะเบียนประวัติการแก้ไขเอกสาร (แก้ไขครั้งที่ / วันที่ประกาศใช้ /
+      // รายละเอียดการแก้ไข) — ตารางแบบเดียวกับหน้าปกท้ายเอกสารจริง เก็บแยก
+      // จาก comments/groupHistoryByRequest เพื่อให้ DC แก้ไข/เพิ่มเองได้อิสระ
+      // โดยไม่กระทบ audit trail อัตโนมัติ ดู buildAutoRevLogRows() ด้านล่าง
+      if(!Array.isArray(d.revisionLog)){ d.revisionLog=[]; needsMigration = true; }
       if(d.dcRegisteredLink===undefined){ d.dcRegisteredLink=null; needsMigration = true; }
       if(d.dcRegisteredBy===undefined){ d.dcRegisteredBy=null; needsMigration = true; }
       if(d.dcRegisteredAt===undefined){ d.dcRegisteredAt=null; needsMigration = true; }
@@ -1009,6 +1014,9 @@ const state = {
   historyModalLinksOpen: false,
   historyModalRequestDetail: null, // { fromRev, toRev, requestedBy, requestedAt, events } — popup on top of the History modal
   docDetailModal: null, // { docId } — document detail popup, opened instead of navigating to a new page
+  revLogModal: null, // { docId } — ทะเบียนประวัติการแก้ไขเอกสาร popup, or null
+  revLogEditing: false, // true while the ทะเบียนฯ table is in edit mode
+  revLogDraftRows: null, // working copy of rows while revLogEditing is true
 };
 
 const ICONS = {
@@ -1344,6 +1352,9 @@ function renderModalLayer(){
   } else if(state.docDetailModal){
     layer.innerHTML = docDetailModalView();
     wireDocDetailModal();
+  } else if(state.revLogModal){
+    layer.innerHTML = revLogModalView();
+    wireRevLogModal();
   } else {
     layer.innerHTML = '';
   }
@@ -2939,6 +2950,7 @@ function docDetailContent(d){
         <div class="detail-actions">
           ${displayLink(d) ? `<a class="btn primary" href="${displayLink(d)}" target="_blank" rel="noopener">${ic('link')} Open in SharePoint</a>` : `<button class="btn ghost" disabled>${ic('link')} ยังไม่มีลิงก์</button>`}
           <button class="btn ghost" data-go-revision-history="1">${ic('history')} History</button>
+          <button class="btn ghost" data-go-revlog="1">${ic('edit')} ทะเบียนแก้ไขเอกสาร</button>
         </div>
         <div class="detail-actions-label">จัดการเอกสาร</div>
         <div class="detail-actions" style="align-items:flex-start;">
@@ -3038,6 +3050,8 @@ function attachDetailActionHandlers(){
   });
   const historyBtn = document.querySelector('[data-go-revision-history]');
   if(historyBtn) historyBtn.addEventListener('click', ()=> openHistoryModal(state.selectedDoc));
+  const revLogBtn = document.querySelector('[data-go-revlog]');
+  if(revLogBtn) revLogBtn.addEventListener('click', ()=> openRevLogModal(state.selectedDoc));
   const delBtn = document.getElementById('btnDetailDelete');
   if(delBtn) delBtn.addEventListener('click', async ()=>{
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
@@ -5723,6 +5737,285 @@ function attachWatermarkHandlers(){
     }
     btn.disabled = false;
   });
+}
+
+// ============================================================
+// ทะเบียนประวัติการแก้ไขเอกสาร (REVISION LOG)
+// A small, editable table per document — แก้ไขครั้งที่ / วันที่ประกาศใช้ /
+// รายละเอียดการแก้ไข — mirroring the printed cover-page table used on the
+// physical/PDF document itself (see the reference image this feature was
+// built from). Stored separately on d.revisionLog (not derived purely from
+// comments/groupHistoryByRequest) so DC can freely edit/add rows without
+// touching the automatic audit trail. buildAutoRevLogRows() below can
+// still pull a best-guess starting point from that audit trail on demand.
+// ============================================================
+function escapeHtml(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, ch=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[ch]));
+}
+// Best-guess rows derived from the existing comment trail: one row for the
+// original "จองเลขเอกสาร" (Rev.0) and one per "ขอปรับปรุงจาก Rev.X เป็น
+// Rev.Y" request, using each request's own note as the detail text and — if
+// the request actually made it to "ขั้นที่ 6: DC เผยแพร่เอกสาร" — that
+// publish moment as the effective date (falling back to the request date
+// otherwise, since the document may still be mid-workflow).
+function buildAutoRevLogRows(d){
+  const comments = (d.comments||[]).slice(); // stored oldest → newest
+  const rows = [];
+  let currentRow = null;
+  comments.forEach(c=>{
+    let m;
+    if((m = c.text.match(/^ขั้นที่ 1: จองเลขเอกสาร\s*—\s*(.*)$/))){
+      currentRow = { no:'0', date:c.time, detail: m[1] || 'จัดทำเอกสารใหม่' };
+      rows.push(currentRow);
+    } else if((m = c.text.match(/^ขั้นที่ 1: ขอปรับปรุงจาก Rev\.(.*?) เป็น Rev\.([^\s—]+)\s*—\s*(.*)$/))){
+      currentRow = { no:m[2], date:c.time, detail: m[3] || `ขอปรับปรุงจาก Rev.${m[1]} เป็น Rev.${m[2]}` };
+      rows.push(currentRow);
+    } else if(/^ขั้นที่ 6: DC เผยแพร่เอกสาร/.test(c.text) && currentRow){
+      currentRow.date = c.time; // publish/effective date supersedes the request date
+    }
+  });
+  return rows;
+}
+function sortRevLogRows(rows){
+  return rows.slice().sort((a,b)=>{
+    const na = parseFloat(a.no), nb = parseFloat(b.no);
+    if(!isNaN(na) && !isNaN(nb) && na!==nb) return na-nb;
+    if(!isNaN(na) && !isNaN(nb)) return (a.date||0)-(b.date||0);
+    return String(a.no||'').localeCompare(String(b.no||''));
+  });
+}
+function newRevLogId(){ return 'rl_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+// Pulls in any auto-derived row (see above) not already present as an
+// 'auto' row with the same แก้ไขครั้งที่ — never touches/duplicates rows
+// DC has already added or hand-edited.
+async function mergeAutoRevLogRows(d){
+  d.revisionLog = Array.isArray(d.revisionLog) ? d.revisionLog : [];
+  const auto = buildAutoRevLogRows(d);
+  let added = 0;
+  auto.forEach(a=>{
+    const exists = d.revisionLog.some(r=>r.source==='auto' && String(r.no)===String(a.no));
+    if(!exists){
+      d.revisionLog.push({ id:newRevLogId(), no:a.no, date:a.date, detail:a.detail, source:'auto' });
+      added++;
+    }
+  });
+  d.revisionLog = sortRevLogRows(d.revisionLog);
+  if(added){ d.lastUpdated = Date.now(); await persistDocs(); }
+  return added;
+}
+function openRevLogModal(docId){
+  state.revLogModal = { docId };
+  state.revLogEditing = false;
+  state.revLogDraftRows = null;
+  renderModalLayer();
+}
+function closeRevLogModal(){
+  state.revLogModal = null;
+  state.revLogEditing = false;
+  state.revLogDraftRows = null;
+  renderModalLayer();
+}
+// Reads whatever is currently typed in the edit-mode inputs back into
+// state.revLogDraftRows, so add/remove-row buttons (which re-render the
+// whole table) never lose in-progress edits.
+function syncRevLogDraftFromDom(){
+  if(!state.revLogDraftRows) return;
+  document.querySelectorAll('[data-revlog-row]').forEach(rowEl=>{
+    const id = rowEl.dataset.revlogRow;
+    const row = state.revLogDraftRows.find(r=>r.id===id);
+    if(!row) return;
+    const noEl = rowEl.querySelector('[data-f="no"]');
+    const dateEl = rowEl.querySelector('[data-f="date"]');
+    const detailEl = rowEl.querySelector('[data-f="detail"]');
+    if(noEl) row.no = noEl.value.trim();
+    if(dateEl) row.date = dateEl.value ? new Date(dateEl.value+'T00:00:00').getTime() : null;
+    if(detailEl) row.detail = detailEl.value;
+  });
+}
+function revLogModalView(){
+  const { docId } = state.revLogModal;
+  const d = DOCUMENTS.find(x=>x.id===docId);
+  if(!d) return `<div class="modal-backdrop" id="revLogBackdrop"><div class="modal"><div class="modal-body">${emptyState('ไม่พบเอกสาร','')}</div><div class="modal-actions"><button class="btn ghost" id="revLogCloseBtn2">ปิด</button></div></div></div>`;
+  const editing = state.revLogEditing;
+  const rows = editing ? (state.revLogDraftRows || []) : sortRevLogRows(d.revisionLog||[]);
+  const canEdit = isDC();
+  return `
+  <style>
+    .revlog-modal{ width:min(760px, 94vw); max-width:760px; }
+    .revlog-table{ border-collapse:collapse; width:100%; }
+    .revlog-table th, .revlog-table td{ border:1px solid var(--line); padding:8px 10px; font-size:12.5px; vertical-align:top; }
+    .revlog-table th{ background:var(--blue-50); text-align:center; }
+    .revlog-table td:first-child, .revlog-table th:first-child{ width:70px; text-align:center; }
+    .revlog-table td:nth-child(2), .revlog-table th:nth-child(2){ width:130px; text-align:center; }
+    .revlog-table input, .revlog-table textarea{ width:100%; border:1px solid var(--line); border-radius:6px; padding:5px 6px; font-size:12.5px; font-family:inherit; box-sizing:border-box; }
+    .revlog-table textarea{ resize:vertical; min-height:38px; }
+    .revlog-src-auto{ color:var(--ink-500); font-size:10.5px; }
+  </style>
+  <div class="modal-backdrop" id="revLogBackdrop">
+    <div class="modal revlog-modal">
+      <div class="modal-head">
+        <div class="modal-title">ทะเบียนประวัติการแก้ไขเอกสาร</div>
+        <button class="modal-close" id="revLogCloseBtn">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="detail-sub" style="margin-bottom:12px;">${d.id} · ${cleanName(d)}</div>
+        <div class="table-wrap" style="overflow-x:auto;">
+          <table class="revlog-table">
+            <thead><tr><th>แก้ไขครั้งที่</th><th>วันที่ประกาศใช้</th><th>รายละเอียดการแก้ไข</th>${editing ? '<th style="width:40px;"></th>' : ''}</tr></thead>
+            <tbody>
+              ${rows.length ? rows.map(r=> editing ? `
+              <tr data-revlog-row="${r.id}">
+                <td><input data-f="no" value="${escapeHtml(r.no||'')}"></td>
+                <td><input data-f="date" type="date" value="${r.date ? new Date(r.date).toISOString().slice(0,10) : ''}"></td>
+                <td><textarea data-f="detail">${escapeHtml(r.detail||'')}</textarea></td>
+                <td style="text-align:center;"><button type="button" class="btn ghost" style="padding:4px 8px;" data-revlog-del="${r.id}">${ic('trash')}</button></td>
+              </tr>` : `
+              <tr>
+                <td>${escapeHtml(r.no||'—')}</td>
+                <td>${r.date ? fmtDate(r.date) : '—'}</td>
+                <td style="white-space:pre-wrap;">${escapeHtml(r.detail||'')}${r.source==='auto' ? ' <span class="revlog-src-auto">(อัตโนมัติ)</span>' : ''}</td>
+              </tr>`).join('') : `<tr><td colspan="${editing?4:3}" style="text-align:center; padding:20px 0; color:var(--ink-500);">ยังไม่มีประวัติการแก้ไข</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+        ${editing ? `<button type="button" class="btn ghost" id="revLogAddRowBtn" style="margin-top:10px;">${ic('plus')} เพิ่มแถว</button>` : ''}
+        ${!editing && !canEdit ? `<div style="font-size:11px; color:var(--ink-500); margin-top:10px;">เฉพาะ Document Control เท่านั้นที่แก้ไขทะเบียนนี้ได้</div>` : ''}
+      </div>
+      <div class="modal-actions" style="flex-wrap:wrap;">
+        ${editing ? `
+          <button class="btn ghost" id="revLogCancelEditBtn">ยกเลิก</button>
+          <button class="btn primary" id="revLogSaveBtn">${ic('check')} บันทึก</button>
+        ` : `
+          <button class="btn ghost" id="revLogCloseBtn2">ปิด</button>
+          <button class="btn ghost" id="revLogExportBtn">${ic('download')} ส่งออกไฟล์ Word</button>
+          ${canEdit ? `<button class="btn ghost" id="revLogAutoFillBtn">${ic('history')} ดึงจากประวัติอัตโนมัติ</button>` : ''}
+          ${canEdit ? `<button class="btn primary" id="revLogEditBtn">${ic('edit')} แก้ไข</button>` : ''}
+        `}
+      </div>
+    </div>
+  </div>`;
+}
+function wireRevLogModal(){
+  const backdrop = document.getElementById('revLogBackdrop');
+  if(!backdrop) return;
+  const close = ()=> closeRevLogModal();
+  document.getElementById('revLogCloseBtn').addEventListener('click', close);
+  const closeBtn2 = document.getElementById('revLogCloseBtn2');
+  if(closeBtn2) closeBtn2.addEventListener('click', close);
+  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) close(); });
+
+  const d = DOCUMENTS.find(x=>x.id===state.revLogModal.docId);
+  if(!d) return;
+
+  const exportBtn = document.getElementById('revLogExportBtn');
+  if(exportBtn) exportBtn.addEventListener('click', ()=> exportRevLogToWord(d));
+
+  const autoFillBtn = document.getElementById('revLogAutoFillBtn');
+  if(autoFillBtn) autoFillBtn.addEventListener('click', async ()=>{
+    autoFillBtn.disabled = true;
+    const added = await mergeAutoRevLogRows(d);
+    renderModalLayer();
+    if(!added) alert('ไม่มีประวัติใหม่ให้ดึงเพิ่ม (รายการที่มีอยู่ครบแล้ว)');
+  });
+
+  const editBtn = document.getElementById('revLogEditBtn');
+  if(editBtn) editBtn.addEventListener('click', ()=>{
+    if(!isDC()) return; // defense in depth
+    state.revLogDraftRows = sortRevLogRows(d.revisionLog||[]).map(r=>({ ...r }));
+    state.revLogEditing = true;
+    renderModalLayer();
+  });
+
+  const cancelEditBtn = document.getElementById('revLogCancelEditBtn');
+  if(cancelEditBtn) cancelEditBtn.addEventListener('click', ()=>{
+    state.revLogEditing = false;
+    state.revLogDraftRows = null;
+    renderModalLayer();
+  });
+
+  const addRowBtn = document.getElementById('revLogAddRowBtn');
+  if(addRowBtn) addRowBtn.addEventListener('click', ()=>{
+    syncRevLogDraftFromDom();
+    state.revLogDraftRows.push({ id:newRevLogId(), no:'', date:null, detail:'', source:'manual' });
+    renderModalLayer();
+  });
+
+  document.querySelectorAll('[data-revlog-del]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      syncRevLogDraftFromDom();
+      const id = btn.dataset.revlogDel;
+      state.revLogDraftRows = state.revLogDraftRows.filter(r=>r.id!==id);
+      renderModalLayer();
+    });
+  });
+
+  const saveBtn = document.getElementById('revLogSaveBtn');
+  if(saveBtn) saveBtn.addEventListener('click', async ()=>{
+    if(!isDC()) return; // defense in depth
+    syncRevLogDraftFromDom();
+    // drop rows the user added but never actually filled in
+    const cleaned = state.revLogDraftRows.filter(r=> (r.no && r.no.trim()) || (r.detail && r.detail.trim()) || r.date);
+    d.revisionLog = sortRevLogRows(cleaned);
+    d.lastUpdated = Date.now();
+    state.revLogEditing = false;
+    state.revLogDraftRows = null;
+    renderModalLayer();
+    await persistDocs();
+  });
+}
+// Exports the ทะเบียนฯ table as a .doc file that opens directly in Microsoft
+// Word, laid out to match the printed cover-page table this feature is
+// based on (title + 3-column bordered table, Thai document-control style).
+// Uses the classic "HTML saved as .doc" approach rather than a real .docx
+// binary — no external library/CDN dependency needed, and Word opens/
+// renders it identically; the person can Save As .docx from within Word if
+// they specifically need the modern format.
+function exportRevLogToWord(d){
+  const rows = sortRevLogRows(d.revisionLog||[]);
+  const MIN_ROWS = 20; // pad with blank rows so the printed table has room for future entries, same as the reference template
+  const blankNeeded = Math.max(0, MIN_ROWS - rows.length);
+  const title = `ประวัติการแก้ไขเอกสาร${(typeof docTypeLabel==='function' ? docTypeLabel(d) : '') || ''}`;
+  const bodyRows = rows.map(r=>`
+    <tr>
+      <td style="text-align:center;">${escapeHtml(r.no||'')}</td>
+      <td style="text-align:center;">${r.date ? fmtDate(r.date) : ''}</td>
+      <td>${escapeHtml(r.detail||'').replace(/\n/g,'<br>')}</td>
+    </tr>`).join('');
+  const blankRows = Array.from({length:blankNeeded}).map(()=>`
+    <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>`).join('');
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(title)}</title>
+<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->
+<style>
+  @page{ size:A4; margin:2cm; }
+  body{ font-family:'TH SarabunPSK','Angsana New',serif; font-size:16pt; }
+  h1{ text-align:center; font-size:18pt; margin-bottom:16pt; }
+  table{ border-collapse:collapse; width:100%; }
+  td, th{ border:1px solid #000; padding:6px 8px; font-size:15pt; vertical-align:top; }
+  th{ text-align:center; font-weight:bold; }
+  td:first-child, th:first-child{ width:12%; }
+  td:nth-child(2), th:nth-child(2){ width:18%; }
+</style>
+</head>
+<body>
+  <h1>${escapeHtml(title)}</h1>
+  <table>
+    <thead><tr><th>แก้ไขครั้งที่</th><th>วันที่ประกาศใช้</th><th>รายละเอียดการแก้ไข</th></tr></thead>
+    <tbody>${bodyRows}${blankRows}</tbody>
+  </table>
+</body>
+</html>`;
+  const blob = new Blob(['\ufeff', html], { type:'application/msword' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${d.id}_ประวัติการแก้ไขเอกสาร.doc`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(()=> URL.revokeObjectURL(url), 3000);
 }
 
 // ============================================================
