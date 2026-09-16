@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.0';
+const APP_VERSION = '3.8';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -5788,6 +5788,36 @@ function attachWatermarkHandlers(){
 function escapeHtml(s){
   return String(s==null?'':s).replace(/[&<>"']/g, ch=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[ch]));
 }
+// วันที่แบบเดิมที่ใช้ทั่วทั้งแอป: "DD/MM/YYYY" (ปี พ.ศ.) — คงรูปแบบนี้ไว้
+// สำหรับทุกจุดยกเว้นทะเบียนประวัติเอกสาร (ดู fmtDateRevLog ด้านล่าง)
+function fmtDate(ts){
+  if(!ts) return '';
+  const dt = new Date(ts);
+  if(isNaN(dt.getTime())) return '';
+  const d = String(dt.getDate()).padStart(2,'0');
+  const m = String(dt.getMonth()+1).padStart(2,'0');
+  const y = dt.getFullYear()+543;
+  return `${d}/${m}/${y}`;
+}
+function fmtDateTime(ts){
+  if(!ts) return '';
+  const dt = new Date(ts);
+  if(isNaN(dt.getTime())) return '';
+  const hh = String(dt.getHours()).padStart(2,'0');
+  const mm = String(dt.getMinutes()).padStart(2,'0');
+  return `${fmtDate(ts)} ${hh}:${mm}`;
+}
+// วันที่แบบไทยเต็ม: "วัน เดือนเต็ม ปี พ.ศ." เช่น 2 มีนาคม 2564
+// ใช้เฉพาะในตาราง "ทะเบียนประวัติเอกสาร" (บนหน้าจอ + ไฟล์ Word ที่ส่งออก)
+// จุดอื่นๆ ในแอปยังคงใช้ fmtDate/fmtDateTime แบบสไลาช์ตามเดิม
+const TH_MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน',
+                    'กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+function fmtDateRevLog(ts){
+  if(!ts) return '';
+  const dt = new Date(ts);
+  if(isNaN(dt.getTime())) return '';
+  return `${dt.getDate()} ${TH_MONTHS[dt.getMonth()]} ${dt.getFullYear()+543}`;
+}
 // Converts a stored timestamp to the "YYYY-MM-DD" string a <input
 // type="date"> expects, using LOCAL date parts (getFullYear/getMonth/
 // getDate) rather than .toISOString() (which is always UTC). Mixing the
@@ -5949,8 +5979,8 @@ function revLogSectionView(d){
           </tr>` : `
           <tr>
             <td style="text-align:center;">${escapeHtml(r.no||'—')}</td>
-            <td style="text-align:center; white-space:nowrap;">${r.reqDate ? fmtDate(r.reqDate) : '—'}</td>
-            <td style="text-align:center; white-space:nowrap;">${r.date ? fmtDate(r.date) : '—'}</td>
+            <td style="text-align:center; white-space:nowrap;">${r.reqDate ? fmtDateRevLog(r.reqDate) : '—'}</td>
+            <td style="text-align:center; white-space:nowrap;">${r.date ? fmtDateRevLog(r.date) : '—'}</td>
             <td style="white-space:pre-wrap;">${escapeHtml(r.detail||'')}${r.source==='auto' ? ' <span class="revlog-src-auto">(อัตโนมัติ)</span>' : ''}</td>
             <td style="white-space:nowrap;">${escapeHtml((r.byLabel!=null ? r.byLabel : revLogByLabel(r.by))||'—')}</td>
           </tr>`).join('') : `<tr><td colspan="${editing?6:5}" style="text-align:center; padding:16px 0; color:var(--ink-500);">ยังไม่มีประวัติการแก้ไข</td></tr>`}
@@ -6037,8 +6067,8 @@ function exportRevLogToWord(d){
   const bodyRows = rows.map(r=>`
     <tr>
       <td style="text-align:center;">${escapeHtml(r.no||'')}</td>
-      <td style="text-align:center;">${r.reqDate ? fmtDate(r.reqDate) : ''}</td>
-      <td style="text-align:center;">${r.date ? fmtDate(r.date) : ''}</td>
+      <td style="text-align:center;">${r.reqDate ? fmtDateRevLog(r.reqDate) : ''}</td>
+      <td style="text-align:center;">${r.date ? fmtDateRevLog(r.date) : ''}</td>
       <td>${escapeHtml(r.detail||'').replace(/\n/g,'<br>')}</td>
       <td>${escapeHtml((r.byLabel!=null ? r.byLabel : revLogByLabel(r.by))||'')}</td>
     </tr>`).join('');
