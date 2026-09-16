@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '3.8';
+const APP_VERSION = '3.9';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -5812,11 +5812,27 @@ function fmtDateTime(ts){
 // จุดอื่นๆ ในแอปยังคงใช้ fmtDate/fmtDateTime แบบสไลาช์ตามเดิม
 const TH_MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน',
                     'กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
-function fmtDateRevLog(ts){
-  if(!ts) return '';
-  const dt = new Date(ts);
+// แปลงค่าวันที่ (ไม่ว่าจะเป็น timestamp แบบเก่า หรือสตริง "YYYY-MM-DD" ที่
+// บันทึกแบบใหม่แล้ว) ให้กลายเป็นสตริง "YYYY-MM-DD" เสมอ — ใช้เป็นค่ากลาง
+// สำหรับฟิลด์ reqDate/date ของทะเบียนประวัติเอกสาร เพื่อไม่ต้องแปลงผ่าน
+// Date object ซ้ำไปมา (ต้นตอของบั๊กวันที่ลดลงทุกครั้งที่แก้ไข-บันทึก
+// เพราะการแปลง timestamp <-> string ผ่าน timezone ซ้ำหลายรอบ)
+function toISODateStr(val){
+  if(!val) return '';
+  if(typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
+  const dt = new Date(val);
   if(isNaN(dt.getTime())) return '';
-  return `${dt.getDate()} ${TH_MONTHS[dt.getMonth()]} ${dt.getFullYear()+543}`;
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth()+1).padStart(2,'0');
+  const d = String(dt.getDate()).padStart(2,'0');
+  return `${y}-${m}-${d}`;
+}
+function fmtDateRevLog(val){
+  const iso = toISODateStr(val);
+  if(!iso) return '';
+  const [y, m] = iso.split('-').map(Number);
+  const day = Number(iso.slice(8,10));
+  return `${day} ${TH_MONTHS[m-1]} ${y+543}`;
 }
 // Converts a stored timestamp to the "YYYY-MM-DD" string a <input
 // type="date"> expects, using LOCAL date parts (getFullYear/getMonth/
@@ -5898,7 +5914,7 @@ function sortRevLogRows(rows){
   return rows.slice().sort((a,b)=>{
     const na = parseFloat(a.no), nb = parseFloat(b.no);
     if(!isNaN(na) && !isNaN(nb) && na!==nb) return na-nb;
-    if(!isNaN(na) && !isNaN(nb)) return (a.date||0)-(b.date||0);
+    if(!isNaN(na) && !isNaN(nb)) return toISODateStr(a.date).localeCompare(toISODateStr(b.date));
     return String(a.no||'').localeCompare(String(b.no||''));
   });
 }
@@ -5936,8 +5952,8 @@ function syncRevLogDraftFromDom(){
     const detailEl = rowEl.querySelector('[data-f="detail"]');
     const byLabelEl = rowEl.querySelector('[data-f="bylabel"]');
     if(noEl) row.no = noEl.value.trim();
-    if(reqDateEl) row.reqDate = reqDateEl.value ? new Date(reqDateEl.value+'T00:00:00').getTime() : null;
-    if(dateEl) row.date = dateEl.value ? new Date(dateEl.value+'T00:00:00').getTime() : null;
+    if(reqDateEl) row.reqDate = reqDateEl.value || null;
+    if(dateEl) row.date = dateEl.value || null;
     if(detailEl) row.detail = detailEl.value;
     if(byLabelEl) row.byLabel = byLabelEl.value.trim();
   });
@@ -5971,8 +5987,8 @@ function revLogSectionView(d){
           ${rows.length ? rows.map(r=> editing ? `
           <tr data-revlog-row="${r.id}">
             <td><input data-f="no" value="${escapeHtml(r.no||'')}"></td>
-            <td><input data-f="reqdate" type="date" value="${toDateInputValue(r.reqDate)}"></td>
-            <td><input data-f="date" type="date" value="${toDateInputValue(r.date)}"></td>
+            <td><input data-f="reqdate" type="date" value="${toISODateStr(r.reqDate)}"></td>
+            <td><input data-f="date" type="date" value="${toISODateStr(r.date)}"></td>
             <td><textarea data-f="detail">${escapeHtml(r.detail||'')}</textarea></td>
             <td><input data-f="bylabel" value="${escapeHtml(r.byLabel!=null ? r.byLabel : revLogByLabel(r.by))}" placeholder="ชื่อ (ตำแหน่ง)"></td>
             <td style="text-align:center;"><button type="button" class="btn ghost" style="padding:4px 8px;" data-revlog-del="${r.id}">${ic('trash')}</button></td>
@@ -6025,7 +6041,7 @@ function wireRevLogSection(d){
     // defaults to whoever's adding the row (DC), same "detect from the
     // logged-in account" logic used for the auto-pulled rows.
     const nextNo = String(state.revLogDraftRows.length).padStart(2,'0');
-    state.revLogDraftRows.push({ id:newRevLogId(), no:nextNo, reqDate:Date.now(), date:null, detail:'', byLabel:revLogByLabel(currentActorName()), source:'manual' });
+    state.revLogDraftRows.push({ id:newRevLogId(), no:nextNo, reqDate:toISODateStr(Date.now()), date:null, detail:'', byLabel:revLogByLabel(currentActorName()), source:'manual' });
     renderModalLayer();
   });
 
