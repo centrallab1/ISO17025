@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '2.5';
+const APP_VERSION = '2.7';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -2045,7 +2045,7 @@ function docModal(){
     // EDIT / correction — unchanged single-page form
     bodyFields = `
         <div class="field"><label>รหัสเอกสาร (Document ID)</label>
-          <input id="mfId" value="${d.id}" placeholder="เช่น MPIR-LF-074-00" disabled></div>
+          <input id="mfId" value="${d.id}" placeholder="เช่น MPIR-LF-074-00"></div>
         <div class="field"><label>ชื่อเอกสาร</label>
           <input id="mfName" value="${cleanName(d).replace(/"/g,'&quot;')}" placeholder="ชื่อเอกสาร"></div>
         <div class="field"><label>ข้อกำหนด ISO 17025</label>
@@ -2299,6 +2299,9 @@ function wireModalControls(){
     const rev = document.getElementById('mfRev').value.trim();
     if(!id || !name){ errEl.textContent = 'กรอกรหัสเอกสารและชื่อเอกสารให้ครบ'; errEl.style.display='block'; return; }
     const d = DOCUMENTS.find(x=>x.id===state.modal.id);
+    if(id !== d.id && DOCUMENTS.some(x=>x.id===id)){ errEl.textContent = 'รหัสเอกสารนี้มีอยู่แล้ว'; errEl.style.display='block'; return; }
+    const oldId = d.id;
+    d.id = id;
     d.name = name; d.clause = clause; d.link = link; d.note = note; d.rev = rev || d.rev;
     // keep publishedLink in sync for documents outside the formal
     // new/revision workflow — see matching migration comment above for why
@@ -2320,6 +2323,7 @@ function wireModalControls(){
     const apStatus = document.getElementById('mfApprovalStatus'); if(apStatus) d.approvalStatus = apStatus.value;
     const cycle = document.getElementById('mfReviewCycle'); if(cycle){ const n = parseInt(cycle.value,10); d.reviewCycleDays = isNaN(n) ? DEFAULT_REVIEW_CYCLE_DAYS : n; }
     d.lastUpdated = Date.now();
+    if(state.selectedDoc===oldId) state.selectedDoc = id;
     closeModal();
     render();
     await persistDocs();
