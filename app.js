@@ -5775,13 +5775,26 @@ function escapeHtml(s){
 }
 // Best-guess rows derived from the existing comment trail: one row for the
 // original "จองเลขเอกสาร" (Rev.0) and one per "ขอปรับปรุงจาก Rev.X เป็น
-// Rev.Y" request, using each request's own note as the detail text and — if
-// the request actually made it to "ขั้นที่ 6: DC เผยแพร่เอกสาร" — that
-// publish moment as the effective date (falling back to the request date
-// otherwise, since the document may still be mid-workflow).
+// Rev.Y" request, using each request's own note as the detail text.
+// Two separate dates are tracked: "reqDate" (วันที่แก้ไข) is the moment the
+// request/draft was actually created — the ขั้นที่ 1 comment's own
+// timestamp, i.e. when the requester submitted it — and never changes
+// after that. "date" (วันที่ประกาศใช้) is the effective/publish date: it
+// starts equal to reqDate but gets superseded once the request reaches
+// "ขั้นที่ 6: DC เผยแพร่เอกสาร" (falls back to the request date if the
+// document is still mid-workflow and hasn't published yet).
 // "by" on each row is the account that actually submitted that request
 // (comment's own .by — set to the logged-in actor at the time, see e.g.
 // the ขั้นที่ 1 comment pushes above), not necessarily the current user.
+// "byLabel" is a FROZEN snapshot of that person's name + position at the
+// moment the row is pulled in (via revLogByLabel below) — not recomputed
+// from the live USERS table on every render. This matters because a
+// person's role can change later (e.g. QM promoted to LM): without
+// freezing, every historical row would silently start showing their
+// CURRENT title instead of the title they actually held when they made
+// that request. DC can still hand-correct byLabel per row (edit mode) for
+// entries pulled in before this snapshot existed, or whenever the
+// recorded position needs a retroactive fix.
 // "no" is assigned sequentially (00, 01, 02, ...) in chronological order
 // rather than reusing the target Rev. number, since the two don't always
 // line up (e.g. a document whose Rev. numbering has gaps or a non-numeric
@@ -5793,10 +5806,10 @@ function buildAutoRevLogRows(d){
   comments.forEach(c=>{
     let m;
     if((m = c.text.match(/^ขั้นที่ 1: จองเลขเอกสาร\s*—\s*(.*)$/))){
-      currentRow = { date:c.time, detail: m[1] || 'จัดทำเอกสารใหม่', by:c.by||'' };
+      currentRow = { reqDate:c.time, date:c.time, detail: m[1] || 'จัดทำเอกสารใหม่', byLabel: revLogByLabel(c.by) };
       rows.push(currentRow);
     } else if((m = c.text.match(/^ขั้นที่ 1: ขอปรับปรุงจาก Rev\.(.*?) เป็น Rev\.([^\s—]+)\s*—\s*(.*)$/))){
-      currentRow = { date:c.time, detail: m[3] || `ขอปรับปรุงจาก Rev.${m[1]} เป็น Rev.${m[2]}`, by:c.by||'' };
+      currentRow = { reqDate:c.time, date:c.time, detail: m[3] || `ขอปรับปรุงจาก Rev.${m[1]} เป็น Rev.${m[2]}`, byLabel: revLogByLabel(c.by) };
       rows.push(currentRow);
     } else if(/^ขั้นที่ 6: DC เผยแพร่เอกสาร/.test(c.text) && currentRow){
       currentRow.date = c.time; // publish/effective date supersedes the request date
@@ -5809,7 +5822,10 @@ function buildAutoRevLogRows(d){
 // plus their role/position (e.g. "Yarapon Puttakot (Document Control)"),
 // looked up from USERS/ROLE_LABEL by name since only the name is stored
 // on the comment. Falls back gracefully if the account can no longer be
-// matched (e.g. name changed later).
+// matched (e.g. name changed later). Only used to compute the INITIAL
+// snapshot (byLabel) when a row is first pulled in — see the note above
+// buildAutoRevLogRows for why the result is then frozen on the row
+// instead of being recomputed from this function every render.
 function revLogByLabel(name){
   if(!name) return '';
   const u = USERS.find(x=>x.name===name);
@@ -5835,7 +5851,7 @@ async function mergeAutoRevLogRows(d){
   auto.forEach(a=>{
     const exists = d.revisionLog.some(r=>r.source==='auto' && String(r.no)===String(a.no));
     if(!exists){
-      d.revisionLog.push({ id:newRevLogId(), no:a.no, date:a.date, detail:a.detail, by:a.by||'', source:'auto' });
+      d.revisionLog.push({ id:newRevLogId(), no:a.no, date:a.date, reqDate:a.reqDate||null, detail:a.detail, byLabel:a.byLabel||'', source:'auto' });
       added++;
     }
   });
@@ -5853,13 +5869,15 @@ function syncRevLogDraftFromDom(){
     const row = state.revLogDraftRows.find(r=>r.id===id);
     if(!row) return;
     const noEl = rowEl.querySelector('[data-f="no"]');
+    const reqDateEl = rowEl.querySelector('[data-f="reqdate"]');
     const dateEl = rowEl.querySelector('[data-f="date"]');
     const detailEl = rowEl.querySelector('[data-f="detail"]');
-    const byEl = rowEl.querySelector('[data-f="by"]');
+    const byLabelEl = rowEl.querySelector('[data-f="bylabel"]');
     if(noEl) row.no = noEl.value.trim();
+    if(reqDateEl) row.reqDate = reqDateEl.value ? new Date(reqDateEl.value+'T00:00:00').getTime() : null;
     if(dateEl) row.date = dateEl.value ? new Date(dateEl.value+'T00:00:00').getTime() : null;
     if(detailEl) row.detail = detailEl.value;
-    if(byEl) row.by = byEl.value.trim();
+    if(byLabelEl) row.byLabel = byLabelEl.value.trim();
   });
 }
 // "ทะเบียนประวัติเอกสาร" — rendered as a section INSIDE the existing
@@ -5886,22 +5904,24 @@ function revLogSectionView(d){
     </div>
     <div class="table-wrap" data-scroll-id="revLogTable" style="overflow-x:auto; max-height:320px; overflow-y:auto;">
       <table class="dtable revlog-table">
-        <thead><tr><th>แก้ไขครั้งที่</th><th>วันที่ประกาศใช้</th><th>รายละเอียดการแก้ไข</th><th>ผู้แก้ไข (ตำแหน่ง)</th>${editing ? '<th style="width:40px;"></th>' : ''}</tr></thead>
+        <thead><tr><th>แก้ไขครั้งที่</th><th>วันที่แก้ไข</th><th>วันที่ประกาศใช้</th><th>รายละเอียดการแก้ไข</th><th>ผู้แก้ไข (ตำแหน่ง)</th>${editing ? '<th style="width:40px;"></th>' : ''}</tr></thead>
         <tbody>
           ${rows.length ? rows.map(r=> editing ? `
           <tr data-revlog-row="${r.id}">
             <td><input data-f="no" value="${escapeHtml(r.no||'')}"></td>
+            <td><input data-f="reqdate" type="date" value="${r.reqDate ? new Date(r.reqDate).toISOString().slice(0,10) : ''}"></td>
             <td><input data-f="date" type="date" value="${r.date ? new Date(r.date).toISOString().slice(0,10) : ''}"></td>
             <td><textarea data-f="detail">${escapeHtml(r.detail||'')}</textarea></td>
-            <td><input data-f="by" value="${escapeHtml(r.by||'')}" placeholder="ชื่อผู้แก้ไข"></td>
+            <td><input data-f="bylabel" value="${escapeHtml(r.byLabel!=null ? r.byLabel : revLogByLabel(r.by))}" placeholder="ชื่อ (ตำแหน่ง)"></td>
             <td style="text-align:center;"><button type="button" class="btn ghost" style="padding:4px 8px;" data-revlog-del="${r.id}">${ic('trash')}</button></td>
           </tr>` : `
           <tr>
             <td style="text-align:center;">${escapeHtml(r.no||'—')}</td>
+            <td style="text-align:center; white-space:nowrap;">${r.reqDate ? fmtDate(r.reqDate) : '—'}</td>
             <td style="text-align:center; white-space:nowrap;">${r.date ? fmtDate(r.date) : '—'}</td>
             <td style="white-space:pre-wrap;">${escapeHtml(r.detail||'')}${r.source==='auto' ? ' <span class="revlog-src-auto">(อัตโนมัติ)</span>' : ''}</td>
-            <td style="white-space:nowrap;">${escapeHtml(revLogByLabel(r.by))||'—'}</td>
-          </tr>`).join('') : `<tr><td colspan="${editing?5:4}" style="text-align:center; padding:16px 0; color:var(--ink-500);">ยังไม่มีประวัติการแก้ไข</td></tr>`}
+            <td style="white-space:nowrap;">${escapeHtml((r.byLabel!=null ? r.byLabel : revLogByLabel(r.by))||'—')}</td>
+          </tr>`).join('') : `<tr><td colspan="${editing?6:5}" style="text-align:center; padding:16px 0; color:var(--ink-500);">ยังไม่มีประวัติการแก้ไข</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -5943,7 +5963,7 @@ function wireRevLogSection(d){
     // defaults to whoever's adding the row (DC), same "detect from the
     // logged-in account" logic used for the auto-pulled rows.
     const nextNo = String(state.revLogDraftRows.length).padStart(2,'0');
-    state.revLogDraftRows.push({ id:newRevLogId(), no:nextNo, date:null, detail:'', by:currentActorName(), source:'manual' });
+    state.revLogDraftRows.push({ id:newRevLogId(), no:nextNo, reqDate:Date.now(), date:null, detail:'', byLabel:revLogByLabel(currentActorName()), source:'manual' });
     renderModalLayer();
   });
 
@@ -5961,7 +5981,7 @@ function wireRevLogSection(d){
     if(!isDC()) return; // defense in depth
     syncRevLogDraftFromDom();
     // drop rows the user added but never actually filled in
-    const cleaned = state.revLogDraftRows.filter(r=> (r.no && r.no.trim()) || (r.detail && r.detail.trim()) || r.date);
+    const cleaned = state.revLogDraftRows.filter(r=> (r.no && r.no.trim()) || (r.detail && r.detail.trim()) || r.date || r.reqDate);
     d.revisionLog = sortRevLogRows(cleaned);
     d.lastUpdated = Date.now();
     state.revLogEditing = false;
@@ -5985,12 +6005,13 @@ function exportRevLogToWord(d){
   const bodyRows = rows.map(r=>`
     <tr>
       <td style="text-align:center;">${escapeHtml(r.no||'')}</td>
+      <td style="text-align:center;">${r.reqDate ? fmtDate(r.reqDate) : ''}</td>
       <td style="text-align:center;">${r.date ? fmtDate(r.date) : ''}</td>
       <td>${escapeHtml(r.detail||'').replace(/\n/g,'<br>')}</td>
-      <td>${escapeHtml(revLogByLabel(r.by))}</td>
+      <td>${escapeHtml((r.byLabel!=null ? r.byLabel : revLogByLabel(r.by))||'')}</td>
     </tr>`).join('');
   const blankRows = Array.from({length:blankNeeded}).map(()=>`
-    <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>`).join('');
+    <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>`).join('');
   const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
 <head>
 <meta charset="utf-8">
@@ -6003,15 +6024,16 @@ function exportRevLogToWord(d){
   table{ border-collapse:collapse; width:100%; }
   td, th{ border:1px solid #000; padding:6px 8px; font-size:15pt; vertical-align:top; }
   th{ text-align:center; font-weight:bold; }
-  td:first-child, th:first-child{ width:10%; }
-  td:nth-child(2), th:nth-child(2){ width:15%; }
-  td:nth-child(4), th:nth-child(4){ width:22%; }
+  td:first-child, th:first-child{ width:9%; }
+  td:nth-child(2), th:nth-child(2){ width:13%; }
+  td:nth-child(3), th:nth-child(3){ width:13%; }
+  td:nth-child(5), th:nth-child(5){ width:20%; }
 </style>
 </head>
 <body>
   <h1>${escapeHtml(title)}</h1>
   <table>
-    <thead><tr><th>แก้ไขครั้งที่</th><th>วันที่ประกาศใช้</th><th>รายละเอียดการแก้ไข</th><th>ผู้แก้ไข (ตำแหน่ง)</th></tr></thead>
+    <thead><tr><th>แก้ไขครั้งที่</th><th>วันที่แก้ไข</th><th>วันที่ประกาศใช้</th><th>รายละเอียดการแก้ไข</th><th>ผู้แก้ไข (ตำแหน่ง)</th></tr></thead>
     <tbody>${bodyRows}${blankRows}</tbody>
   </table>
 </body>
