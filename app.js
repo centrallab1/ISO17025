@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '3.7';
+const APP_VERSION = '1.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -5788,6 +5788,23 @@ function attachWatermarkHandlers(){
 function escapeHtml(s){
   return String(s==null?'':s).replace(/[&<>"']/g, ch=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[ch]));
 }
+// Converts a stored timestamp to the "YYYY-MM-DD" string a <input
+// type="date"> expects, using LOCAL date parts (getFullYear/getMonth/
+// getDate) rather than .toISOString() (which is always UTC). Mixing the
+// two is exactly what was causing the revision-log dates to silently
+// shift back a day every time the row was re-opened for editing: dates
+// are stored as local midnight (new Date(value+'T00:00:00').getTime()),
+// but Thailand is UTC+7, so local midnight is 17:00 UTC the PREVIOUS
+// day — .toISOString().slice(0,10) was reading that previous-day date
+// back into the input.
+function toDateInputValue(ts){
+  if(!ts) return '';
+  const dt = new Date(ts);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth()+1).padStart(2,'0');
+  const day = String(dt.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
 // Best-guess rows derived from the existing comment trail: one row for the
 // original "จองเลขเอกสาร" (Rev.0) and one per "ขอปรับปรุงจาก Rev.X เป็น
 // Rev.Y" request, using each request's own note as the detail text.
@@ -5924,8 +5941,8 @@ function revLogSectionView(d){
           ${rows.length ? rows.map(r=> editing ? `
           <tr data-revlog-row="${r.id}">
             <td><input data-f="no" value="${escapeHtml(r.no||'')}"></td>
-            <td><input data-f="reqdate" type="date" value="${r.reqDate ? new Date(r.reqDate).toISOString().slice(0,10) : ''}"></td>
-            <td><input data-f="date" type="date" value="${r.date ? new Date(r.date).toISOString().slice(0,10) : ''}"></td>
+            <td><input data-f="reqdate" type="date" value="${toDateInputValue(r.reqDate)}"></td>
+            <td><input data-f="date" type="date" value="${toDateInputValue(r.date)}"></td>
             <td><textarea data-f="detail">${escapeHtml(r.detail||'')}</textarea></td>
             <td><input data-f="bylabel" value="${escapeHtml(r.byLabel!=null ? r.byLabel : revLogByLabel(r.by))}" placeholder="ชื่อ (ตำแหน่ง)"></td>
             <td style="text-align:center;"><button type="button" class="btn ghost" style="padding:4px 8px;" data-revlog-del="${r.id}">${ic('trash')}</button></td>
