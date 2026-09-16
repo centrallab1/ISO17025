@@ -210,6 +210,16 @@ function docNumberCore(id){
   const m = String(id||'').match(/^(?:RDI|MPIR)-([A-Za-z]+)-(\d+)/i);
   return m ? (m[1].toUpperCase()+'-'+m[2]) : null;
 }
+// excludeDocId lets a document's own current id pass the check when you're
+// re-saving it unchanged (or changing unrelated fields) — everything else
+// with the same core number, live or cancelled-and-archived, blocks it.
+function docNumberTaken(id, excludeDocId){
+  const core = docNumberCore(id);
+  const matches = (otherId)=> core ? docNumberCore(otherId)===core : otherId===id;
+  if(DOCUMENTS.some(x=> x.id!==excludeDocId && matches(x.id))) return true;
+  if(typeof ARCHIVE_ITEMS !== 'undefined' && ARCHIVE_ITEMS.some(a=> matches(a.sourceDocId || a.id))) return true;
+  return false;
+}
 
 // Converts an old RDI-xx-### id to the new MPIR-xx-###-rr format, reusing
 // the existing document number and stamping the current revision.
