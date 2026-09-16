@@ -2180,9 +2180,9 @@ function docModal(){
         </div>
         <div class="field"><label>Rev.</label><input id="mfRev" value="${d.rev||'0'}" placeholder="0"></div>
         ${d.lastRequestType==='revision' ? `<div class="field"><label>Rev. ก่อนขอปรับปรุง (ตัวเลขที่ 1 ใน badge "ปรับปรุง Rev.X → Y")</label><input id="mfLastRequestFrom" value="${d.lastRequestFrom||''}" placeholder="0"><div style="font-size:11px; color:var(--ink-500); margin-top:4px;">แก้ตรงนี้ถ้า badge คำขอปรับปรุงในหน้า Approval แสดงเลข Rev. เริ่มต้นผิด (เช่นแสดง "Rev.1 → 2" ทั้งที่ควรเป็น "Rev.0 → 1")</div></div>` : ''}
-        <div class="field"><label>วันที่จัดทำ</label><input id="mfCreated" type="date" value="${d.createdDate ? new Date(d.createdDate).toISOString().slice(0,10) : ''}"></div>
-        <div class="field"><label>วันที่ประกาศใช้</label><input id="mfEffective" type="date" value="${d.effectiveDate ? new Date(d.effectiveDate).toISOString().slice(0,10) : ''}"></div>
-        <div class="field"><label>วันที่ยกเลิก</label><input id="mfCancelled" type="date" value="${d.cancelledDate ? new Date(d.cancelledDate).toISOString().slice(0,10) : ''}"></div>
+        <div class="field"><label>วันที่จัดทำ</label><input id="mfCreated" type="date" value="${toDateInputValue(d.createdDate)}"></div>
+        <div class="field"><label>วันที่ประกาศใช้</label><input id="mfEffective" type="date" value="${toDateInputValue(d.effectiveDate)}"></div>
+        <div class="field"><label>วันที่ยกเลิก</label><input id="mfCancelled" type="date" value="${toDateInputValue(d.cancelledDate)}"></div>
         <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:14px;">กรอกเมื่อเปลี่ยนสถานะเอกสารเป็น "ยกเลิก" — ระบบจะเติมวันนี้ให้อัตโนมัติถ้ายังไม่ได้กรอก แก้ไขได้</div>
         <div class="field"><label>ผู้จัดทำ</label><input id="mfPrep" value="${(d.preparedBy||'').replace(/"/g,'&quot;')}"></div>
         <div class="field"><label>ผู้ทบทวน</label><input id="mfReviewer" value="${(d.reviewerName||'').replace(/"/g,'&quot;')}"></div>
@@ -2270,7 +2270,7 @@ function wireModalControls(){
   if(noteSel && cancelledInput){
     noteSel.addEventListener('change', ()=>{
       if(noteSel.value==='ยกเลิก' && !cancelledInput.value){
-        cancelledInput.value = new Date().toISOString().slice(0,10);
+        cancelledInput.value = toDateInputValue(Date.now());
       }
     });
   }
@@ -2794,10 +2794,10 @@ function archiveModal(){
         </div>
         ${isDC() ? `<div class="field"><label>ลิงก์เอกสาร</label><input id="archiveLink" value="${a.link||''}" placeholder="https://mitrphol.sharepoint.com/..."></div>` : ''}
         <div class="field"><label>ผู้อัปโหลด</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()}</div></div>
-        <div class="field"><label>วันที่เอกสาร</label><input type="date" id="archiveDate" value="${new Date(a.uploadedAt || Date.now()).toISOString().slice(0,10)}"></div>
+        <div class="field"><label>วันที่เอกสาร</label><input type="date" id="archiveDate" value="${toDateInputValue(a.uploadedAt || Date.now())}"></div>
         <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:14px;">แก้วันที่ได้ถ้าวางไฟล์ย้อนหลัง — ระบบจะจัดกลุ่มปี/เดือนตามวันที่นี้</div>
         ${a.category===CANCELLED_ARCHIVE_CATEGORY ? `
-        <div class="field"><label>วันที่ยกเลิก</label><input type="date" id="archiveCancelledDate" value="${a.cancelledDate ? new Date(a.cancelledDate).toISOString().slice(0,10) : ''}"></div>
+        <div class="field"><label>วันที่ยกเลิก</label><input type="date" id="archiveCancelledDate" value="${toDateInputValue(a.cancelledDate)}"></div>
         <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:14px;">วันที่เอกสารต้นทางถูกยกเลิกจริง (แยกจาก "วันที่เอกสาร" ด้านบนซึ่งใช้จัดกลุ่มเท่านั้น)</div>
         <div class="field"><label>Rev. ก่อนยกเลิก</label><input id="archiveCancelledRev" value="${a.cancelledRev || ''}" placeholder="เช่น 2"></div>
         <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:14px;">Rev. ล่าสุดของเอกสารต้นทาง ณ วันที่ถูกยกเลิก เพื่อการตรวจสอบย้อนหลัง</div>` : ''}
@@ -3572,7 +3572,7 @@ function renderPublishBox(d){
     <div class="field"><label>ลิงก์เอกสารที่ขึ้นระบบแล้ว</label>
       <input id="dcPublishLink" placeholder="https://mitrphol.sharepoint.com/..." value="${(state.dcPublishEditing ? d.publishedLink : (d.link || d.publishedLink)) || ''}" style="border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px; width:100%; box-sizing:border-box;"></div>
     <div class="field"><label>วันที่ประกาศใช้</label>
-      <input id="dcEffectiveDate" type="date" value="${new Date(Date.now()).toISOString().slice(0,10)}" style="border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px;"></div>
+      <input id="dcEffectiveDate" type="date" value="${toDateInputValue(Date.now())}" style="border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px;"></div>
     <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
       <div style="font-size:12px; color:var(--ink-500);">โดย ${currentActorName()}</div>
       <button class="btn success" id="btnDcPublish">${ic('link')} ${d.publishedLink ? 'บันทึกใหม่' : 'เผยแพร่ + เสร็จสิ้น'}</button>
