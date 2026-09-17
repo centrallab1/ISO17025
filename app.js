@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '4.0';
+const APP_VERSION = '3.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -6220,23 +6220,27 @@ function exportRevLogToWord(d){
 <head>
 <meta charset="utf-8">
 <title>${escapeHtml(title)}</title>
-<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->
+<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom><w:DoNotOptimizeForBrowser/></w:WordDocument></xml><![endif]-->
 <style>
   @page{ size:A4; margin:2cm; }
-  body{ font-family:'TH SarabunPSK','Angsana New',serif; font-size:16pt; }
-  h1{ text-align:center; font-size:18pt; margin-bottom:16pt; }
-  table{ border-collapse:collapse; width:100%; }
-  td, th{ border:1px solid #000; padding:6px 8px; font-size:15pt; vertical-align:top; }
+  body, table, td, th{ font-family:'DilleniaUPC','Angsana New','TH SarabunPSK',serif; }
+  body{ font-size:16pt; line-height:1.5; }
+  h1{ text-align:center; font-size:18pt; font-weight:bold; margin-bottom:16pt; line-height:1.3; }
+  table{ border-collapse:collapse; width:100%; table-layout:fixed; }
+  td, th{ border:1px solid #000; padding:6px 8px; font-size:16pt; line-height:1.5; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word; }
   th{ text-align:center; font-weight:bold; }
-  td:first-child, th:first-child{ width:9%; }
-  td:nth-child(2), th:nth-child(2){ width:13%; }
-  td:nth-child(3), th:nth-child(3){ width:13%; }
-  td:nth-child(5), th:nth-child(5){ width:20%; }
 </style>
 </head>
 <body>
   <h1>${escapeHtml(title)}</h1>
   <table>
+    <colgroup>
+      <col style="width:8%;">
+      <col style="width:13%;">
+      <col style="width:13%;">
+      <col style="width:46%;">
+      <col style="width:20%;">
+    </colgroup>
     <thead><tr><th>แก้ไขครั้งที่</th><th>วันที่แก้ไข</th><th>วันที่ประกาศใช้</th><th>รายละเอียดการแก้ไข</th><th>ผู้แก้ไข (ตำแหน่ง)</th></tr></thead>
     <tbody>${bodyRows}${blankRows}</tbody>
   </table>
