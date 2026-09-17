@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '3.9';
+const APP_VERSION = '1.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -5425,11 +5425,13 @@ function viewWatermarkTool(){
   <div class="panel">
     <div class="panel-head"><div class="panel-title">ลายน้ำเอกสาร (Watermark PDF)</div></div>
     <div style="font-size:12.5px; color:var(--ink-700); margin-bottom:14px;">
-      อัปโหลดไฟล์ PDF แล้วระบบจะติดลายน้ำพาดขวางกลางหน้าในทุกหน้า 2 บรรทัด: <b>"CONTROLLED DOCUMENT"</b> (ตัวหนา ขนาด 36) และ "Issued by ${currentUser ? (ROLE_LABEL[currentUser.role]||currentUser.role) : '[ตำแหน่งเต็ม]'} (${currentUser ? currentUser.name : '[ชื่อเต็ม]'}) | Issue date: ${fmtDate(Date.now())}" (ตัวปกติ ขนาด 32) แล้วดาวน์โหลดไฟล์ให้ทันที — <b>ไม่มีการเก็บไฟล์ไว้ในระบบ</b> เก็บแค่ทะเบียนสำเนาที่แจกจ่ายไป (ใคร วันที่ ให้ใคร) เพื่อให้เรียกคืนได้ในอนาคตหากจำเป็น
+      อัปโหลดไฟล์ PDF แล้วระบบจะติดลายน้ำพาดขวางกลางหน้าในทุกหน้า 2 บรรทัด: <b>"CONTROLLED DOCUMENT"</b> (ตัวหนา ขนาด 36) และ "Issued by ${currentUser ? (ROLE_LABEL[currentUser.role]||currentUser.role) : '[ตำแหน่งเต็ม]'} (${currentUser ? currentUser.name : '[ชื่อเต็ม]'}) | Issue date: ${fmtDate(Date.now())}" (ตัวปกติ ขนาด 32) พร้อมแนบ<b>ทะเบียนประวัติเอกสาร</b>ต่อท้ายไฟล์ให้อัตโนมัติ (ถ้ารหัสเอกสารตรงกับเอกสารในระบบและมีประวัติแล้ว) แล้วดาวน์โหลดไฟล์เดียวให้ทันที — <b>ไม่มีการเก็บไฟล์ไว้ในระบบ</b> เก็บแค่ทะเบียนสำเนาที่แจกจ่ายไป (ใคร วันที่ ให้ใคร) เพื่อให้เรียกคืนได้ในอนาคตหากจำเป็น
     </div>
     <div class="field"><label>รหัสเอกสาร</label>
-      <input id="wmDocId" list="wmDocIdList" placeholder="เช่น MPIR-LM-001-00 หรือพิมพ์เอง">
-      <datalist id="wmDocIdList">${DOCUMENTS.map(d=>`<option value="${d.id}">`).join('')}</datalist>
+      <select id="wmDocId">
+        <option value="">— เลือกเอกสาร —</option>
+        ${DOCUMENTS.slice().sort((a,b)=> (a.id||'').localeCompare(b.id||'')).map(d=>`<option value="${escapeHtml(d.id)}">${escapeHtml(d.id)}${d.name ? ' — ' + escapeHtml(d.name) : ''}</option>`).join('')}
+      </select>
     </div>
     <div class="field"><label>ไฟล์ PDF</label><input type="file" id="wmFile" accept="application/pdf"></div>
     <div class="field"><label>ประเภท</label>
@@ -5578,6 +5580,100 @@ function loadThaiFontBold(){
     .then(r=>{ if(!r.ok) throw new Error('โหลดฟอนต์ไทย (ตัวหนา) ไม่สำเร็จ'); return r.arrayBuffer(); });
   return THAI_FONT_BOLD_PROMISE;
 }
+// ตัดบรรทัดข้อความให้พอดีกับความกว้างคอลัมน์ (สำหรับวาดตารางลง PDF ด้วย pdf-lib
+// ซึ่งไม่มีระบบ text-wrap อัตโนมัติ) — เคารพการขึ้นบรรทัดใหม่ที่มีอยู่แล้วด้วย
+function wrapTextLines(text, font, size, maxWidth){
+  const paragraphs = String(text||'').split('\n');
+  const lines = [];
+  paragraphs.forEach(para=>{
+    const words = para.split(/\s+/).filter(Boolean);
+    if(!words.length){ lines.push(''); return; }
+    let current = '';
+    words.forEach(word=>{
+      const test = current ? current + ' ' + word : word;
+      if(!current || font.widthOfTextAtSize(test, size) <= maxWidth){
+        current = test;
+      } else {
+        lines.push(current);
+        current = word;
+      }
+    });
+    if(current) lines.push(current);
+  });
+  return lines.length ? lines : [''];
+}
+// วาดตาราง "ทะเบียนประวัติเอกสาร" ของเอกสาร d ต่อท้าย pdfDoc เป็นหน้าใหม่
+// (ขึ้นหน้าใหม่อัตโนมัติถ้าตารางยาวเกินหนึ่งหน้า) ใช้ฟอนต์ไทยเดียวกับลายน้ำ
+function appendRevLogPagesToPdf(pdfDoc, d, regularFont, boldFont, rgb){
+  const rows = sortRevLogRows(d.revisionLog||[]);
+  if(!rows.length) return; // ไม่มีประวัติให้แนบ
+  const PAGE_W = 595.28, PAGE_H = 841.89; // A4
+  const margin = 40;
+  const usableW = PAGE_W - margin*2;
+  const headers = [
+    { key:'no',      label:'แก้ไขครั้งที่',        frac:0.08, align:'center' },
+    { key:'reqDate', label:'วันที่แก้ไข',           frac:0.13, align:'center' },
+    { key:'date',    label:'วันที่ประกาศใช้',       frac:0.13, align:'center' },
+    { key:'detail',  label:'รายละเอียดการแก้ไข',   frac:0.46, align:'left'   },
+    { key:'by',      label:'ผู้แก้ไข (ตำแหน่ง)',    frac:0.20, align:'left'   },
+  ];
+  const colW = {}; headers.forEach(h=> colW[h.key] = usableW*h.frac);
+  const colX = {}; let cx = margin; headers.forEach(h=>{ colX[h.key] = cx; cx += colW[h.key]; });
+  const tableRight = margin + usableW;
+  const bodySize = 9, headSize = 10, titleSize = 14, lineH = 12, cellPad = 4;
+  let page = pdfDoc.addPage([PAGE_W, PAGE_H]);
+  let y = PAGE_H - margin;
+  page.drawText(`ประวัติการแก้ไขเอกสาร${d.id ? ' — ' + d.id : ''}`, { x: margin, y: y-titleSize, size: titleSize, font: boldFont, color: rgb(0,0,0) });
+  y -= titleSize + 16;
+  function drawGridAndBorder(rowH){
+    page.drawRectangle({ x: margin, y: y-rowH, width: usableW, height: rowH, borderColor: rgb(0,0,0), borderWidth:1 });
+    let vx = margin;
+    headers.forEach(h=>{ page.drawLine({ start:{x:vx,y}, end:{x:vx,y:y-rowH}, thickness:0.75, color: rgb(0,0,0) }); vx += colW[h.key]; });
+    page.drawLine({ start:{x:tableRight,y}, end:{x:tableRight,y:y-rowH}, thickness:0.75, color: rgb(0,0,0) });
+  }
+  function drawHeaderRow(){
+    const rowH = headSize + cellPad*2 + 4;
+    drawGridAndBorder(rowH);
+    headers.forEach(h=>{
+      const w = boldFont.widthOfTextAtSize(h.label, headSize);
+      const tx = colX[h.key] + Math.max(cellPad, (colW[h.key]-w)/2);
+      page.drawText(h.label, { x: tx, y: y-rowH+cellPad+4, size: headSize, font: boldFont, color: rgb(0,0,0) });
+    });
+    y -= rowH;
+  }
+  drawHeaderRow();
+  rows.forEach(r=>{
+    const cellText = {
+      no: r.no || '',
+      reqDate: r.reqDate ? fmtDateRevLog(r.reqDate) : '',
+      date: r.date ? fmtDateRevLog(r.date) : '',
+      detail: r.detail || '',
+      by: (r.byLabel!=null ? r.byLabel : revLogByLabel(r.by)) || '',
+    };
+    const wrapped = {}; let maxLines = 1;
+    headers.forEach(h=>{
+      const lines = wrapTextLines(cellText[h.key], regularFont, bodySize, colW[h.key]-cellPad*2);
+      wrapped[h.key] = lines;
+      if(lines.length > maxLines) maxLines = lines.length;
+    });
+    const rowH = maxLines*lineH + cellPad*2;
+    if(y - rowH < margin){
+      page = pdfDoc.addPage([PAGE_W, PAGE_H]);
+      y = PAGE_H - margin;
+      drawHeaderRow();
+    }
+    drawGridAndBorder(rowH);
+    headers.forEach(h=>{
+      wrapped[h.key].forEach((line, i)=>{
+        const w = regularFont.widthOfTextAtSize(line, bodySize);
+        const tx = h.align==='center' ? colX[h.key] + Math.max(cellPad,(colW[h.key]-w)/2) : colX[h.key] + cellPad;
+        const ty = y - cellPad - (i+1)*lineH + (lineH-bodySize)/2;
+        page.drawText(line, { x: tx, y: ty, size: bodySize, font: regularFont, color: rgb(0,0,0) });
+      });
+    });
+    y -= rowH;
+  });
+}
 async function watermarkAndDownload(file, docId){
   const [{ PDFDocument, rgb, degrees }, fontkitModule, regularBytes, boldBytes] = await Promise.all([
     loadPdfLib(), loadFontkit(), loadThaiFontRegular(), loadThaiFontBold(),
@@ -5638,6 +5734,8 @@ async function watermarkAndDownload(file, docId){
       });
     });
   });
+  const docObj = DOCUMENTS.find(x=>x.id===docId);
+  if(docObj) appendRevLogPagesToPdf(pdfDoc, docObj, regularFont, boldFont, rgb);
   const outBytes = await pdfDoc.save();
   const blob = new Blob([outBytes], { type:'application/pdf' });
   const url = URL.createObjectURL(blob);
@@ -5744,7 +5842,7 @@ function attachWatermarkHandlers(){
     const type = typeSelEl && typeSelEl.value === 'distribute' ? 'distribute' : 'download';
     const recipientInput = document.getElementById('wmRecipient');
     errEl.style.display = 'none';
-    if(!docId){ errEl.textContent = 'กรอกรหัสเอกสารก่อน'; errEl.style.display='block'; return; }
+    if(!docId){ errEl.textContent = 'เลือกรหัสเอกสารก่อน'; errEl.style.display='block'; return; }
     if(!file){ errEl.textContent = 'เลือกไฟล์ PDF ก่อน'; errEl.style.display='block'; return; }
     if(file.type !== 'application/pdf'){ errEl.textContent = 'รองรับเฉพาะไฟล์ PDF เท่านั้น'; errEl.style.display='block'; return; }
     if(type === 'distribute' && recipientInput && !recipientInput.value.trim()){ errEl.textContent = 'ระบุว่าแจกจ่ายให้ใคร เพื่อให้เรียกคืนได้ในภายหลัง'; errEl.style.display='block'; return; }
