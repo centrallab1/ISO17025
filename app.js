@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '3.0';
+const APP_VERSION = '4.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -6227,7 +6227,7 @@ function exportRevLogToWord(d){
   body{ font-size:16pt; line-height:1.5; }
   h1{ text-align:center; font-size:18pt; font-weight:bold; margin-bottom:16pt; line-height:1.3; }
   table{ border-collapse:collapse; width:100%; table-layout:fixed; }
-  td, th{ border:1px solid #000; padding:6px 8px; font-size:16pt; line-height:1.5; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word; }
+  td, th{ border:1px solid #000; padding:6px 8px; font-size:16pt; line-height:1.5; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word; word-break:break-all; }
   th{ text-align:center; font-weight:bold; }
 </style>
 </head>
