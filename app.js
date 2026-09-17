@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '4.0';
+const APP_VERSION = '1.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -6201,6 +6201,18 @@ function wireRevLogSection(d){
 // binary — no external library/CDN dependency needed, and Word opens/
 // renders it identically; the person can Save As .docx from within Word if
 // they specifically need the modern format.
+// MS Word's own HTML-import layout engine does NOT honor CSS word-break/
+// word-wrap for scripts without spaces — a long run of Thai text with no
+// space characters is treated as a single unbreakable "word" and is left
+// to overflow the table cell (visually overlapping the next column) rather
+// than wrapping. Real space characters are the only break opportunity Word
+// reliably respects, so we insert an invisible zero-width space (U+200B)
+// between consecutive Thai consonants (never between a consonant and a
+// following combining vowel/tone mark, so diacritics never get separated
+// from their base letter) to give Word real places to break the line.
+function withThaiBreakOpportunities(s){
+  return String(s==null?'':s).replace(/([\u0E01-\u0E2E])(?=[\u0E01-\u0E2E])/g, '$1\u200B');
+}
 function exportRevLogToWord(d){
   const rows = sortRevLogRows(d.revisionLog||[]);
   const MIN_ROWS = 20; // pad with blank rows so the printed table has room for future entries, same as the reference template
@@ -6211,8 +6223,8 @@ function exportRevLogToWord(d){
       <td style="text-align:center;">${escapeHtml(r.no||'')}</td>
       <td style="text-align:center;">${r.reqDate ? fmtDateRevLog(r.reqDate) : ''}</td>
       <td style="text-align:center;">${r.date ? fmtDateRevLog(r.date) : ''}</td>
-      <td>${escapeHtml(r.detail||'').replace(/\n/g,'<br>')}</td>
-      <td>${escapeHtml((r.byLabel!=null ? r.byLabel : revLogByLabel(r.by))||'')}</td>
+      <td>${escapeHtml(withThaiBreakOpportunities(r.detail||'')).replace(/\n/g,'<br>')}</td>
+      <td>${escapeHtml(withThaiBreakOpportunities((r.byLabel!=null ? r.byLabel : revLogByLabel(r.by))||''))}</td>
     </tr>`).join('');
   const blankRows = Array.from({length:blankNeeded}).map(()=>`
     <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>`).join('');
