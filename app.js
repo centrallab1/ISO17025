@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.0';
+const APP_VERSION = '4.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -903,7 +903,35 @@ async function persistDocs(silent){
   saving = true;
   if(!silent) updateSyncPill();
   try{
-    await setDoc(docRef, { docs: DOCUMENTS, updatedAt: Date.now() });
+    // ป้องกันแท็บ/เซสชันเก่าที่มีข้อมูลค้างอยู่ใน memory (เช่นเปิดทิ้งไว้นาน ไม่ได้
+    // รีเฟรช) เขียนทับข้อมูลของเอกสารอื่นที่เพิ่งถูกแก้จากแท็บ/เครื่องอื่นไปแล้วโดยไม่รู้ตัว
+    // — เดิมโค้ดนี้ setDoc ทับทั้งก้อน DOCUMENTS ของแท็บตัวเองตรงๆ ทุกครั้งที่บันทึกอะไรก็ตาม
+    // (แม้จะเป็นคนละเอกสารกับที่กำลังแก้) ทำให้ข้อมูลของเอกสารอื่นที่แท็บนี้ไม่รู้ว่ามีคน
+    // อัปเดตใหม่กว่าไปแล้วโดนย้อนกลับไปเป็นของเก่าทั้งชุด — นี่คือต้นเหตุที่ทะเบียนประวัติ
+    // เอกสารเคยหายไปทั้งที่เพิ่งมีคนแก้ไว้ครบในอีกแท็บหนึ่ง
+    // ตอนนี้ก่อนบันทึกทุกครั้ง จะดึงข้อมูลล่าสุดจาก Firestore มาก่อน แล้ว "รวม" กับของแท็บ
+    // นี้ทีละเอกสารด้วยกฎ: เอกสารไหน lastUpdated ใหม่กว่า (จะเป็นฝั่งเซิร์ฟเวอร์หรือฝั่งแท็บ
+    // นี้ก็ตาม) ให้ฝั่งนั้นชนะ แทนที่จะเขียนทับทั้งก้อนแบบเดิม
+    let merged = DOCUMENTS;
+    try{
+      const snap = await getDoc(docRef);
+      const freshDocs = (snap.exists() && Array.isArray(snap.data().docs)) ? snap.data().docs : [];
+      const byId = new Map(freshDocs.map(fd=>[fd.id, fd]));
+      merged = DOCUMENTS.map(localDoc=>{
+        const fresh = byId.get(localDoc.id);
+        if(!fresh) return localDoc; // เอกสารใหม่ที่แท็บนี้สร้าง ยังไม่เคยอยู่บนเซิร์ฟเวอร์
+        const localT = localDoc.lastUpdated || 0, freshT = fresh.lastUpdated || 0;
+        return freshT > localT ? fresh : localDoc;
+      });
+      // เอกสารที่มีอยู่บนเซิร์ฟเวอร์แต่แท็บนี้ไม่รู้จัก (ถูกสร้างจากที่อื่นหลังโหลดหน้านี้) เก็บไว้ด้วย ไม่ทิ้ง
+      const localIds = new Set(DOCUMENTS.map(d=>d.id));
+      freshDocs.forEach(fd=>{ if(!localIds.has(fd.id)) merged.push(fd); });
+      DOCUMENTS.length = 0; DOCUMENTS.push(...merged); // sync ให้แท็บนี้เห็นผลลัพธ์ที่ merge แล้วด้วย
+    } catch(mergeErr){
+      console.error('merge-before-save failed, saving local copy as-is', mergeErr);
+      merged = DOCUMENTS;
+    }
+    await setDoc(docRef, { docs: merged, updatedAt: Date.now() });
   } catch(e){
     console.error('save failed', e);
     alert('บันทึกไป Firebase ไม่สำเร็จ: ' + e.message);
@@ -6228,4 +6256,30 @@ function exportRevLogToWord(d){
 // ============================================================
 // GO
 // ============================================================
+// กู้คืนทะเบียนประวัติเอกสาร MPIR-LM-001-12 ที่เคยถูกแท็บเก่าเขียนทับข้อมูลหาย
+// (ดึงมาจาก DOCUMENTS ของแท็บที่ยังไม่ได้รีเฟรชตอนพบปัญหา — ข้อมูลถูกต้องครบ 12 แถว)
+// วิธีใช้ครั้งเดียว: เปิด Console (F12) แล้วพิมพ์ await __restoreRevLog001_12()
+const RECOVERED_REVLOG_MPIR_LM_001_12 = [
+  {"id":"rl_mu3ttn04orf0f","no":"00","date":"2018-06-22","detail":"เป็นการจัดทำเอกสารใหม่ เพื่อให้มีคู่มือคุณภาพสำหรับบริษัท มิตรผลวิจัย พัฒนาอ้อยและน้ำตาล จำกัด","source":"manual","byLabel":"Pimchanok Busayapongchai (Quality Manager)","by":"Pimchanok Busayapongchai","reqDate":"2018-06-22"},
+  {"by":"Pimchanok Busayapongchai","date":"2020-04-01","detail":"แก้ไขทั้งฉบับ  \n-ให้มีเนื้อหากระชับโดยจัดทำเฉพาะเนื้อหาที่มีความจำเป็นและตรงกับวัตถุประสงค์ของการจัดทำคู่มือคุณภาพอย่างแท้จริง \n-เพิ่มตารางอ้างอิงเอกสารคุณภาพ เพื่อให้ครอบคลุมถึงการทำงานและกระบวนการ ","byLabel":"Pimchanok Busayapongchai (Quality Manager)","source":"manual","id":"rl_mu3tuyr1p1o3n","no":"01","reqDate":"2020-04-01"},
+  {"detail":"เพิ่มเติมเนื้อหาให้สอดคล้องกับข้อกำหนดด้านการจัดการของระบบ ISO/IEC17025 (2017) หลังจากการ internal audit ประจำปี 2563","by":"Pimchanok Busayapongchai","byLabel":"Pimchanok Busayapongchai (Quality Manager)","reqDate":"2020-10-06","no":"02","date":"2020-10-20","id":"rl_mu3tuznzc4v29","source":"manual"},
+  {"id":"rl_mu3ukxu5y4p21","byLabel":"Pimchanok Busayapongchai (Quality Manager)","source":"manual","reqDate":"2020-11-16","no":"03","date":"2020-12-08","detail":"แก้ไขทั้งฉบับ เพื่อให้มีเนื้อหาสอดคล้องกับข้อกำหนดของระบบ ISO/IEC17025 (2017) หลังจากการตรวจประเมินฯ จากกรมวิทย์ ","by":"Pimchanok Busayapongchai"},
+  {"source":"manual","reqDate":"2021-03-02","byLabel":"Pimchanok Busayapongchai (Quality Manager)","no":"04","id":"rl_mu3zhl3er0hl8","detail":"- แก้ไข ชื่อเอกสารอ้างอิง หน้า 23/37: RDI-LP-07 การมั่นใจความใช้ได้ของผลทดสอบ \n\n- เพิ่มข้อมูล เอกสารอ้างอิง: RDI-LP-20 ความสอบกลับได้ทางมาตรวิทยา หน้า 15/38 ","date":"2021-03-03"},
+  {"detail":"- แก้ไขผังโครงสร้างที่เกี่ยวข้องกับห้องปฏิบัติการ หน้า 7/38 ","id":"rl_mu3zhlbuh7bcq","source":"manual","byLabel":"Pimchanok Busayapongchai (Quality Manager)","no":"05","date":"2021-03-08","reqDate":"2021-03-08"},
+  {"date":"2021-06-17","detail":"- เพิ่มตำแหน่งนักวิจัยอาวุโส ในผังหน่วยงานที่เกี่ยวข้องกับห้องปฏิบัติการ 7/38 ","source":"manual","no":"06","reqDate":"2021-06-17","id":"rl_mu3zhlg21acoc","byLabel":"Pimchanok Busayapongchai (Quality Manager)"},
+  {"source":"manual","id":"rl_mu3zhlmr4oezz","date":"2022-06-01","no":"07","reqDate":"2022-06-01","byLabel":"Pimchanok Busayapongchai (Quality Manager)","detail":"- เปลี่ยนแปลงผู้ลงนามในนโยบายคุณภาพ เนื่องจากมาการเปลี่ยนแปลง Head of IRDI หน้า 1/38 "},
+  {"detail":"หมายเหตุ: ตำแหน่งในผังหน่วยงานที่เกี่ยวข้องกับห้องปฏิบัติการ อาจเปลี่ยนแปลงตามผังโครงสร้างองค์ของบริษัทฯ หน้า 7/38 ","byLabel":"Pimchanok Busayapongchai (Quality Manager)","reqDate":"2022-06-30","no":"08","id":"rl_mu3zhlpu41llf","date":"2022-06-30","source":"manual"},
+  {"detail":"ปรับปรุงรายการเครื่องมือ ","id":"rl_mu3zhlu6zhbn9","byLabel":"Pimchanok Busayapongchai (Quality Manager)","no":"09","reqDate":"2022-11-30","date":"2022-11-30","source":"manual"},
+  {"source":"manual","no":"10","date":"2024-03-01","id":"rl_mu3zhlxvvhfju","reqDate":"2024-03-01","detail":"เพิ่มสาขา 00001 ตามข้อมูลการจัดตั้งบริษัทฯ หน้า 5/38 ","byLabel":"Pimchanok Busayapongchai (Quality Manager)"},
+  {"detail":"ทบทวนและแก้ไขเอกสารให้สอดคล้องกับขั้นตอนปฏิบัติงาน ","no":"11","id":"rl_mu3zhnc1rfphn","date":"2024-04-22","byLabel":"Pimchanok Busayapongchai (Quality Manager)","reqDate":"2024-04-17","source":"manual"},
+  {"id":"rl_mu3zhnghhhyah","date":"2026-01-28","no":"12","detail":"อัพเดตผังโครงสร้างองค์กร หน้า 6/38 \n\nแก้ไขผังหน่วยงานที่เกี่ยวข้องกับห้องปฏิบัติการ หน้า 7/38 ","byLabel":"Pimchanok Busayapongchai (Quality Manager)","source":"manual","reqDate":"2026-01-28"}
+];
+window.__restoreRevLog001_12 = async function(){
+  const d = DOCUMENTS.find(x=>x.id==='MPIR-LM-001-12');
+  if(!d){ console.error('ไม่พบเอกสาร MPIR-LM-001-12 — โหลดข้อมูลเอกสารให้เสร็จก่อน (รอ DOCS_LOADED) แล้วลองใหม่'); return; }
+  d.revisionLog = RECOVERED_REVLOG_MPIR_LM_001_12.map(r=>({...r}));
+  d.lastUpdated = Date.now();
+  await persistDocs();
+  console.log('กู้คืนทะเบียนประวัติ MPIR-LM-001-12 สำเร็จ —', d.revisionLog.length, 'แถว');
+};
 initApp();
