@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.0';
+const APP_VERSION = '4.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -5610,14 +5610,39 @@ function loadThaiFontBold(){
 }
 // ตัดบรรทัดข้อความให้พอดีกับความกว้างคอลัมน์ (สำหรับวาดตารางลง PDF ด้วย pdf-lib
 // ซึ่งไม่มีระบบ text-wrap อัตโนมัติ) — เคารพการขึ้นบรรทัดใหม่ที่มีอยู่แล้วด้วย
+// หมายเหตุ: เดิมฟังก์ชันนี้ตัดบรรทัดเฉพาะตรงช่องว่างเท่านั้น ข้อความไทยหลายช่วง
+// เขียนต่อกันยาวๆ โดยไม่มีช่องว่างเลย (เช่นทะเบียนประวัติเอกสาร) จึงกลายเป็น
+// "คำ" เดียวที่ยาวเกิน maxWidth แล้วถูกวาดยาวออกไปทับคอลัมน์ถัดไปโดยไม่ตัดเลย
+// ตอนนี้ถ้าคำเดียวกว้างเกิน maxWidth จะบังคับตัดเป็นช่วงๆ ตามความกว้างจริงที่วัด
+// จากฟอนต์ (font.widthOfTextAtSize) แทน จึงไม่มีทางล้นออกนอกคอลัมน์อีก
 function wrapTextLines(text, font, size, maxWidth){
   const paragraphs = String(text||'').split('\n');
   const lines = [];
+  function pushWordBrokenByWidth(word, current){
+    // word itself doesn't fit even alone on a line — split it into
+    // the largest chunks that still measure within maxWidth.
+    if(current){ lines.push(current); }
+    let chunk = '';
+    for(const ch of word){
+      const test = chunk + ch;
+      if(chunk && font.widthOfTextAtSize(test, size) > maxWidth){
+        lines.push(chunk);
+        chunk = ch;
+      } else {
+        chunk = test;
+      }
+    }
+    return chunk;
+  }
   paragraphs.forEach(para=>{
     const words = para.split(/\s+/).filter(Boolean);
     if(!words.length){ lines.push(''); return; }
     let current = '';
     words.forEach(word=>{
+      if(font.widthOfTextAtSize(word, size) > maxWidth){
+        current = pushWordBrokenByWidth(word, current);
+        return;
+      }
       const test = current ? current + ' ' + word : word;
       if(!current || font.widthOfTextAtSize(test, size) <= maxWidth){
         current = test;
