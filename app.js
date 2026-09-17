@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '2.0';
+const APP_VERSION = '1.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -5694,16 +5694,46 @@ function breakWordByWidth(word, font, size, maxWidth, lines){
   }
   return chunk;
 }
+// รวมอะตอมวงเล็บ/เครื่องหมายคำพูดเปิด-ปิดเข้ากับคำข้างเคียงที่ติดกันจริง (ไม่มี
+// ช่องว่างคั่น) เพื่อไม่ให้วงเล็บเปิด "(" ค้างอยู่ท้ายบรรทัดแยกจากเนื้อหาข้างใน
+// หรือวงเล็บปิด ")" ไปโผล่เดี่ยวๆ ต้นบรรทัดถัดไป — นี่คือ "การจัดบรรทัดแปลกๆ"
+// ที่พบในคอลัมน์ผู้แก้ไข เช่น "ชื่อ Busayapongchai (" ขึ้นบรรทัดใหม่แล้วเจอ
+// "Quality Manager)" วงเล็บเปิดเลยลอยค้างอยู่คนละบรรทัดกับข้อความข้างใน
+const OPEN_BRACKET_ATOM = /^[(\[{“‘]+$/;
+const CLOSE_BRACKET_ATOM = /^[)\]}”’]+$/;
+function glueBracketAtoms(atoms){
+  const step1 = [];
+  for(let i=0;i<atoms.length;i++){
+    const atom = atoms[i];
+    if(!atom.isSpace && OPEN_BRACKET_ATOM.test(atom.text) && i+1<atoms.length && !atoms[i+1].isSpace){
+      step1.push({ text: atom.text + atoms[i+1].text, isSpace:false });
+      i++;
+      continue;
+    }
+    step1.push(atom);
+  }
+  const step2 = [];
+  for(let i=0;i<step1.length;i++){
+    const atom = step1[i];
+    if(!atom.isSpace && CLOSE_BRACKET_ATOM.test(atom.text) && step2.length && !step2[step2.length-1].isSpace){
+      step2[step2.length-1] = { text: step2[step2.length-1].text + atom.text, isSpace:false };
+      continue;
+    }
+    step2.push(atom);
+  }
+  return step2;
+}
 // ตัดบรรทัดข้อความให้พอดีกับความกว้างคอลัมน์ (สำหรับวาดตารางลง PDF ด้วย pdf-lib
 // ซึ่งไม่มีระบบ text-wrap อัตโนมัติ) — เคารพการขึ้นบรรทัดใหม่ที่มีอยู่แล้วด้วย
-// ใช้ atomizeForWrap ด้านบนแบ่งเป็นคำๆ ก่อน แล้วค่อยแพ็คลงบรรทัดทีละคำ จึงตัด
-// บรรทัดได้เฉพาะระหว่างคำเท่านั้น (ไม่ตัดกลางคำจนความหมายเพี้ยนแบบก่อนหน้านี้)
+// ใช้ atomizeForWrap ด้านบนแบ่งเป็นคำๆ ก่อน (แล้วรวมวงเล็บที่ติดกันด้วย
+// glueBracketAtoms) แล้วค่อยแพ็คลงบรรทัดทีละคำ จึงตัดบรรทัดได้เฉพาะระหว่างคำ
+// เท่านั้น (ไม่ตัดกลางคำจนความหมายเพี้ยนแบบก่อนหน้านี้)
 // ยกเว้นกรณีคำเดียวกว้างเกินทั้งคอลัมน์จริงๆ ถึงจะจำเป็นต้องตัดกลางคำ
 function wrapTextLines(text, font, size, maxWidth){
   const paragraphs = String(text||'').split('\n');
   const lines = [];
   paragraphs.forEach(para=>{
-    const atoms = atomizeForWrap(para);
+    const atoms = glueBracketAtoms(atomizeForWrap(para));
     if(!atoms.length){ lines.push(''); return; }
     let current = '';
     atoms.forEach(atom=>{
@@ -5760,11 +5790,11 @@ function appendRevLogPagesToPdf(pdfDoc, d, regularFont, boldFont, rgb){
   const colW = {}; headers.forEach(h=> colW[h.key] = usableW*h.frac);
   const colX = {}; let cx = margin; headers.forEach(h=>{ colX[h.key] = cx; cx += colW[h.key]; });
   const tableRight = margin + usableW;
-  // ขนาด 15 สำหรับหัวตาราง/เนื้อหาในตารางทุกคอลัมน์ ส่วนหัวข้อเอกสาร (ชื่อเรื่อง
+  // ขนาด 14 สำหรับหัวตาราง/เนื้อหาในตารางทุกคอลัมน์ ส่วนหัวข้อเอกสาร (ชื่อเรื่อง
   // ด้านบนตาราง) แยกเป็นตัวหนา ขนาด 18 จัดกึ่งกลางหน้าต่างหาก — หัวตารางใช้ตัวหนา
   // จริง รายการในตารางตัวปกติ (regularFont/boldFont ที่รับเข้ามาคือฟอนต์ไทยที่ฝัง
   // อยู่แล้ว — ดูหมายเหตุเรื่อง DilleniaUPC ท้ายไฟล์นี้)
-  const bodySize = 15, headSize = 15, titleSize = 18, lineH = 22, cellPad = 6;
+  const bodySize = 14, headSize = 14, titleSize = 18, lineH = 22, cellPad = 6;
   const MIN_DATE_SIZE = 9; // ขนาดต่ำสุดที่ยอมลดลงไปเพื่อให้วันที่อยู่บรรทัดเดียว
   let page = pdfDoc.addPage([PAGE_W, PAGE_H]);
   let y = PAGE_H - margin;
@@ -5774,10 +5804,10 @@ function appendRevLogPagesToPdf(pdfDoc, d, regularFont, boldFont, rgb){
   page.drawText(titleText, { x: titleX, y: y-titleSize, size: titleSize, font: boldFont, color: rgb(0,0,0) });
   y -= titleSize + 16;
   function drawGridAndBorder(rowH){
-    page.drawRectangle({ x: margin, y: y-rowH, width: usableW, height: rowH, borderColor: rgb(0,0,0), borderWidth:1 });
+    page.drawRectangle({ x: margin, y: y-rowH, width: usableW, height: rowH, borderColor: rgb(0,0,0), borderWidth:0.75 });
     let vx = margin;
-    headers.forEach(h=>{ page.drawLine({ start:{x:vx,y}, end:{x:vx,y:y-rowH}, thickness:0.5, color: rgb(0,0,0) }); vx += colW[h.key]; });
-    page.drawLine({ start:{x:tableRight,y}, end:{x:tableRight,y:y-rowH}, thickness:0.5, color: rgb(0,0,0) });
+    headers.forEach(h=>{ page.drawLine({ start:{x:vx,y}, end:{x:vx,y:y-rowH}, thickness:0.35, color: rgb(0,0,0) }); vx += colW[h.key]; });
+    page.drawLine({ start:{x:tableRight,y}, end:{x:tableRight,y:y-rowH}, thickness:0.35, color: rgb(0,0,0) });
   }
   // วาดข้อความ (หลายบรรทัดได้) ของคอลัมน์หนึ่ง โดยจัดกึ่งกลางแนวตั้งในแถว —
   // ใช้ทั้งกับหัวตารางและแถวข้อมูล กันปัญหาข้อความยาวเกินคอลัมน์แล้วล้นทับคอลัมน์ข้างๆ
