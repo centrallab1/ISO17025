@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.0';
+const APP_VERSION = '2.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -5837,21 +5837,41 @@ function appendRevLogPagesToPdf(pdfDoc, d, regularFont, boldFont, rgb){
     y -= rowH;
   }
   drawHeaderRow();
-  rows.forEach(r=>{
-    const cellText = {
-      no: r.no || '',
-      reqDate: r.reqDate ? fmtDateRevLog(r.reqDate) : '',
-      date: r.date ? fmtDateRevLog(r.date) : '',
-      detail: r.detail || '',
-      by: (r.byLabel!=null ? r.byLabel : revLogByLabel(r.by)) || '',
-    };
+  // เตรียมข้อความของทุกแถวไว้ล่วงหน้าก่อนวาดจริง — จำเป็นสำหรับขั้นตอนถัดไปที่
+  // ต้องหาขนาดฟอนต์ "ค่าเดียว" ของคอลัมน์วันที่/ลำดับ โดยดูจากทุกแถวพร้อมกัน
+  const allCellText = rows.map(r=> ({
+    no: r.no || '',
+    reqDate: r.reqDate ? fmtDateRevLog(r.reqDate) : '',
+    date: r.date ? fmtDateRevLog(r.date) : '',
+    detail: r.detail || '',
+    by: (r.byLabel!=null ? r.byLabel : revLogByLabel(r.by)) || '',
+  }));
+  // คอลัมน์วันที่/ลำดับ (singleLine) ต้องใช้ "ขนาดฟอนต์เดียวกันทุกแถว" ไม่ใช่ลด
+  // ขนาดทีละเซลล์ตามความยาวของตัวมันเอง — ไม่งั้นวันที่ที่ชื่อเดือนยาว (เช่น
+  // "พฤศจิกายน") จะถูกย่อเล็กกว่าวันที่เดือนสั้น (เช่น "มีนาคม") ในคอลัมน์
+  // เดียวกัน ทำให้แต่ละแถวดูขนาดไม่เท่ากัน — จึงหาขนาดที่เล็กที่สุดที่จำเป็น
+  // ต่อการใส่ "ทุกแถว" ในคอลัมน์นั้นให้พอดีก่อน แล้วค่อยใช้ขนาดเดียวกันนี้กับ
+  // ทุกแถวในคอลัมน์นั้น
+  const uniformSize = {};
+  headers.forEach(h=>{
+    if(!h.singleLine) return;
+    const maxW = colW[h.key]-cellPad*2;
+    let size = bodySize;
+    allCellText.forEach(cellText=>{
+      const fit = fitSizeToWidth(cellText[h.key], regularFont, bodySize, maxW, MIN_DATE_SIZE);
+      if(fit < size) size = fit;
+    });
+    uniformSize[h.key] = size;
+  });
+  rows.forEach((r,i)=>{
+    const cellText = allCellText[i];
     const wrapped = {}; const sizes = {}; let maxLines = 1;
     headers.forEach(h=>{
       const maxW = colW[h.key]-cellPad*2;
       if(h.singleLine){
-        // คอลัมน์วันที่/ลำดับ: บังคับบรรทัดเดียวเสมอ โดยลดขนาดฟอนต์ของ
-        // "เซลล์นั้น" ลงเท่าที่จำเป็น แทนการปล่อยให้ตัดขึ้นบรรทัดใหม่
-        sizes[h.key] = fitSizeToWidth(cellText[h.key], regularFont, bodySize, maxW, MIN_DATE_SIZE);
+        // คอลัมน์วันที่/ลำดับ: บังคับบรรทัดเดียวเสมอ ใช้ขนาดฟอนต์เดียวกันทุก
+        // แถวที่คำนวณไว้แล้วข้างบน (uniformSize) แทนการลดขนาดทีละเซลล์
+        sizes[h.key] = uniformSize[h.key];
         wrapped[h.key] = [cellText[h.key]];
       } else {
         sizes[h.key] = bodySize;
