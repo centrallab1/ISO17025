@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '1.0';
+const APP_VERSION = '2.0';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -5781,11 +5781,11 @@ function appendRevLogPagesToPdf(pdfDoc, d, regularFont, boldFont, rgb){
   const margin = 40;
   const usableW = PAGE_W - margin*2;
   const headers = [
-    { key:'no',      label:'แก้ไขครั้งที่',        frac:0.08, align:'center', singleLine:true  },
-    { key:'reqDate', label:'วันที่แก้ไข',           frac:0.13, align:'center', singleLine:true  },
-    { key:'date',    label:'วันที่ประกาศใช้',       frac:0.13, align:'center', singleLine:true  },
-    { key:'detail',  label:'รายละเอียดการแก้ไข',   frac:0.46, align:'left'                     },
-    { key:'by',      label:'ผู้แก้ไข (ตำแหน่ง)',    frac:0.20, align:'left'                     },
+    { key:'no',      label:'แก้ไขครั้งที่',        frac:0.07, align:'center', singleLine:true  },
+    { key:'reqDate', label:'วันที่แก้ไข',           frac:0.19, align:'center', singleLine:true  },
+    { key:'date',    label:'วันที่ประกาศใช้',       frac:0.19, align:'center', singleLine:true  },
+    { key:'detail',  label:'รายละเอียดการแก้ไข',   frac:0.38, align:'left'                     },
+    { key:'by',      label:'ผู้แก้ไข (ตำแหน่ง)',    frac:0.17, align:'left'                     },
   ];
   const colW = {}; headers.forEach(h=> colW[h.key] = usableW*h.frac);
   const colX = {}; let cx = margin; headers.forEach(h=>{ colX[h.key] = cx; cx += colW[h.key]; });
@@ -5793,9 +5793,8 @@ function appendRevLogPagesToPdf(pdfDoc, d, regularFont, boldFont, rgb){
   // ขนาด 14 สำหรับหัวตาราง/เนื้อหาในตารางทุกคอลัมน์ ส่วนหัวข้อเอกสาร (ชื่อเรื่อง
   // ด้านบนตาราง) แยกเป็นตัวหนา ขนาด 18 จัดกึ่งกลางหน้าต่างหาก — หัวตารางใช้ตัวหนา
   // จริง รายการในตารางตัวปกติ (regularFont/boldFont ที่รับเข้ามาคือฟอนต์ไทยที่ฝัง
-  // อยู่แล้ว — ดูหมายเหตุเรื่อง DilleniaUPC ท้ายไฟล์นี้)
+  // อยู่แล้ว — ฟอนต์จริงคือ DilleniaUPC ที่ฝัง base64 ไว้ในไฟล์นี้)
   const bodySize = 14, headSize = 14, titleSize = 18, lineH = 22, cellPad = 6;
-  const MIN_DATE_SIZE = 9; // ขนาดต่ำสุดที่ยอมลดลงไปเพื่อให้วันที่อยู่บรรทัดเดียว
   let page = pdfDoc.addPage([PAGE_W, PAGE_H]);
   let y = PAGE_H - margin;
   const titleText = `ประวัติการแก้ไขเอกสาร${d.id ? ' — ' + d.id : ''}`;
@@ -5846,32 +5845,17 @@ function appendRevLogPagesToPdf(pdfDoc, d, regularFont, boldFont, rgb){
     detail: r.detail || '',
     by: (r.byLabel!=null ? r.byLabel : revLogByLabel(r.by)) || '',
   }));
-  // คอลัมน์วันที่/ลำดับ (singleLine) ต้องใช้ "ขนาดฟอนต์เดียวกันทุกแถว" ไม่ใช่ลด
-  // ขนาดทีละเซลล์ตามความยาวของตัวมันเอง — ไม่งั้นวันที่ที่ชื่อเดือนยาว (เช่น
-  // "พฤศจิกายน") จะถูกย่อเล็กกว่าวันที่เดือนสั้น (เช่น "มีนาคม") ในคอลัมน์
-  // เดียวกัน ทำให้แต่ละแถวดูขนาดไม่เท่ากัน — จึงหาขนาดที่เล็กที่สุดที่จำเป็น
-  // ต่อการใส่ "ทุกแถว" ในคอลัมน์นั้นให้พอดีก่อน แล้วค่อยใช้ขนาดเดียวกันนี้กับ
-  // ทุกแถวในคอลัมน์นั้น
-  const uniformSize = {};
-  headers.forEach(h=>{
-    if(!h.singleLine) return;
-    const maxW = colW[h.key]-cellPad*2;
-    let size = bodySize;
-    allCellText.forEach(cellText=>{
-      const fit = fitSizeToWidth(cellText[h.key], regularFont, bodySize, maxW, MIN_DATE_SIZE);
-      if(fit < size) size = fit;
-    });
-    uniformSize[h.key] = size;
-  });
+  // คอลัมน์วันที่/ลำดับ (singleLine) ใช้ขนาดตัวอักษรคงที่ (bodySize) เท่ากัน
+  // ทุกแถวเสมอ — ไม่มีการลดขนาดอัตโนมัติอีกต่อไป เพราะความกว้างคอลัมน์ด้านบน
+  // (frac 0.27) ถูกคำนวณให้พอกับวันที่ที่ยาวที่สุดที่ขนาด 14 อยู่แล้วในบรรทัดเดียว
   rows.forEach((r,i)=>{
     const cellText = allCellText[i];
     const wrapped = {}; const sizes = {}; let maxLines = 1;
     headers.forEach(h=>{
       const maxW = colW[h.key]-cellPad*2;
       if(h.singleLine){
-        // คอลัมน์วันที่/ลำดับ: บังคับบรรทัดเดียวเสมอ ใช้ขนาดฟอนต์เดียวกันทุก
-        // แถวที่คำนวณไว้แล้วข้างบน (uniformSize) แทนการลดขนาดทีละเซลล์
-        sizes[h.key] = uniformSize[h.key];
+        // คอลัมน์วันที่/ลำดับ: บังคับบรรทัดเดียวเสมอ ที่ขนาดตัวอักษรคงที่ (bodySize)
+        sizes[h.key] = bodySize;
         wrapped[h.key] = [cellText[h.key]];
       } else {
         sizes[h.key] = bodySize;
@@ -5891,11 +5875,11 @@ function appendRevLogPagesToPdf(pdfDoc, d, regularFont, boldFont, rgb){
   });
 }
 // หมายเหตุเรื่องฟอนต์ DilleniaUPC: ฟอนต์นี้เป็นฟอนต์ลิขสิทธิ์ที่แถมมากับ
-// ชุดภาษาไทยของ Windows ไม่ใช่ฟอนต์โอเพนซอร์สแบบ Sarabun (ที่ใช้อยู่ตอนนี้
-// และดึงมาจาก Google Fonts ได้ตรงๆ) เราจึงดึงไฟล์ฟอนต์นี้จากอินเทอร์เน็ตมาฝัง
-// ใน PDF ให้โดยอัตโนมัติไม่ได้ — ถ้าต้องการให้ตารางนี้ใช้ DilleniaUPC จริงๆ
-// ต้องแนบไฟล์ .ttf ของ DilleniaUPC (ตัวปกติและตัวหนา) ที่มีลิขสิทธิ์ใช้งานอยู่แล้ว
-// มาให้ แล้วจะฝังไฟล์นั้นแทน Sarabun ในโค้ดนี้ให้
+// ชุดภาษาไทยของ Windows ไม่ใช่ฟอนต์โอเพนซอร์สที่ดึงจากอินเทอร์เน็ตได้ตรงๆ
+// ผู้ใช้จึงส่งไฟล์ .ttf ของ DilleniaUPC ทั้งตัวปกติและตัวหนา (มีสิทธิ์ใช้งาน
+// อยู่แล้ว) มาให้ฝัง base64 ไว้ในโค้ดนี้โดยตรง (ดู DILLENIA_UPC_REGULAR_B64 /
+// DILLENIA_UPC_BOLD_B64 ด้านบน) — ตารางนี้จึงใช้ DilleniaUPC ของจริงอยู่แล้ว
+// ไม่ใช่ฟอนต์อื่นทดแทน
 
 async function watermarkAndDownload(file, docId){
   const [{ PDFDocument, rgb, degrees }, fontkitModule, regularBytes, boldBytes] = await Promise.all([
