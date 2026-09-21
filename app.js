@@ -738,6 +738,7 @@ async function loadDocs(){
     const snap = await getDoc(docRef);
     if(snap.exists() && Array.isArray(snap.data().docs)){
       DOCUMENTS = snap.data().docs;
+      REMOVED_DOCS = mergeRemovedLists([], snap.data().removed);
     } else {
       DOCUMENTS = [];
     }
@@ -898,40 +899,71 @@ async function loadDocs(){
   }
 }
 
+// ------------------------------------------------------------------
+// REMOVED_DOCS — "หลุมฝังศพ" (tombstones) ของเอกสารที่ถูกลบ หรือถูกเปลี่ยนรหัสไปแล้ว
+// เก็บเป็น [{ id, at }] แล้วบันทึกลง Firestore คู่กับ docs
+// ทำไมต้องมี: persistDocs() ด้านล่างจะ "รวม" กับข้อมูลบนเซิร์ฟเวอร์ก่อนบันทึก และเดิมมี
+// กฎว่า "เอกสารที่อยู่บนเซิร์ฟเวอร์แต่แท็บนี้ไม่มี = ของใหม่จากที่อื่น ให้เก็บไว้"
+// ผลคือเอกสารที่เพิ่งลบ / เพิ่งเปลี่ยนรหัส (id เก่าหายไปจากแท็บนี้) ถูกดึงกลับมาทุกครั้ง
+// → ลบไม่ได้ และเกิดคำขอซ้ำ (รหัสเก่า + รหัสใหม่). ตอนนี้ทุกจุดที่ลบ/เปลี่ยน id จะเรียก
+// markDocRemoved(oldId) แล้ว merge จะไม่เอาสำเนาเก่ากลับมา (ยกเว้นสำเนานั้นถูกแก้ไขหลังลบ)
+// ------------------------------------------------------------------
+let REMOVED_DOCS = [];
+const REMOVED_DOCS_KEEP_MS = 60 * 24 * 3600 * 1000; // เก็บ 60 วันพอ
+function markDocRemoved(id){
+  if(!id) return;
+  REMOVED_DOCS.push({ id, at: Date.now() });
+}
+function isDocRemoved(doc, removed){
+  const t = doc.lastUpdated || 0;
+  return removed.some(r => r && r.id === doc.id && (r.at || 0) >= t);
+}
+function mergeRemovedLists(a, b){
+  const cutoff = Date.now() - REMOVED_DOCS_KEEP_MS;
+  const seen = new Set(), out = [];
+  [...(a||[]), ...(b||[])].forEach(r=>{
+    if(!r || !r.id || !(r.at > cutoff)) return;
+    const k = r.id + '|' + r.at;
+    if(seen.has(k)) return;
+    seen.add(k); out.push({ id:r.id, at:r.at });
+  });
+  return out;
+}
+
 let saving = false;
 async function persistDocs(silent){
   saving = true;
   if(!silent) updateSyncPill();
   try{
-    // ป้องกันแท็บ/เซสชันเก่าที่มีข้อมูลค้างอยู่ใน memory (เช่นเปิดทิ้งไว้นาน ไม่ได้
-    // รีเฟรช) เขียนทับข้อมูลของเอกสารอื่นที่เพิ่งถูกแก้จากแท็บ/เครื่องอื่นไปแล้วโดยไม่รู้ตัว
-    // — เดิมโค้ดนี้ setDoc ทับทั้งก้อน DOCUMENTS ของแท็บตัวเองตรงๆ ทุกครั้งที่บันทึกอะไรก็ตาม
-    // (แม้จะเป็นคนละเอกสารกับที่กำลังแก้) ทำให้ข้อมูลของเอกสารอื่นที่แท็บนี้ไม่รู้ว่ามีคน
-    // อัปเดตใหม่กว่าไปแล้วโดนย้อนกลับไปเป็นของเก่าทั้งชุด — นี่คือต้นเหตุที่ทะเบียนประวัติ
-    // เอกสารเคยหายไปทั้งที่เพิ่งมีคนแก้ไว้ครบในอีกแท็บหนึ่ง
-    // ตอนนี้ก่อนบันทึกทุกครั้ง จะดึงข้อมูลล่าสุดจาก Firestore มาก่อน แล้ว "รวม" กับของแท็บ
-    // นี้ทีละเอกสารด้วยกฎ: เอกสารไหน lastUpdated ใหม่กว่า (จะเป็นฝั่งเซิร์ฟเวอร์หรือฝั่งแท็บ
-    // นี้ก็ตาม) ให้ฝั่งนั้นชนะ แทนที่จะเขียนทับทั้งก้อนแบบเดิม
+    // ป้องกันแท็บ/เซสชันเก่าเขียนทับข้อมูลใหม่กว่า — ก่อนบันทึกจะดึงข้อมูลล่าสุดจาก Firestore
+    // มา "รวม" ทีละเอกสาร (lastUpdated ใหม่กว่าชนะ) แทนการเขียนทับทั้งก้อน
+    // เอกสารที่ลบ/เปลี่ยนรหัสแล้ว (อยู่ใน REMOVED_DOCS) จะไม่ถูกดึงกลับมาอีก
     let merged = DOCUMENTS;
     try{
       const snap = await getDoc(docRef);
-      const freshDocs = (snap.exists() && Array.isArray(snap.data().docs)) ? snap.data().docs : [];
+      const data = snap.exists() ? snap.data() : {};
+      const freshDocs = Array.isArray(data.docs) ? data.docs : [];
+      REMOVED_DOCS = mergeRemovedLists(REMOVED_DOCS, data.removed);
+      const localAlive = DOCUMENTS.filter(l=>!isDocRemoved(l, REMOVED_DOCS));
       const byId = new Map(freshDocs.map(fd=>[fd.id, fd]));
-      merged = DOCUMENTS.map(localDoc=>{
+      merged = localAlive.map(localDoc=>{
         const fresh = byId.get(localDoc.id);
         if(!fresh) return localDoc; // เอกสารใหม่ที่แท็บนี้สร้าง ยังไม่เคยอยู่บนเซิร์ฟเวอร์
         const localT = localDoc.lastUpdated || 0, freshT = fresh.lastUpdated || 0;
         return freshT > localT ? fresh : localDoc;
       });
-      // เอกสารที่มีอยู่บนเซิร์ฟเวอร์แต่แท็บนี้ไม่รู้จัก (ถูกสร้างจากที่อื่นหลังโหลดหน้านี้) เก็บไว้ด้วย ไม่ทิ้ง
-      const localIds = new Set(DOCUMENTS.map(d=>d.id));
-      freshDocs.forEach(fd=>{ if(!localIds.has(fd.id)) merged.push(fd); });
+      // เอกสารที่อยู่บนเซิร์ฟเวอร์แต่แท็บนี้ไม่รู้จัก (สร้างจากที่อื่นหลังโหลดหน้านี้) เก็บไว้
+      // — ยกเว้นตัวที่ถูกลบ/เปลี่ยนรหัสไปแล้ว
+      const localIds = new Set(localAlive.map(d=>d.id));
+      freshDocs.forEach(fd=>{
+        if(!localIds.has(fd.id) && !isDocRemoved(fd, REMOVED_DOCS)) merged.push(fd);
+      });
       DOCUMENTS.length = 0; DOCUMENTS.push(...merged); // sync ให้แท็บนี้เห็นผลลัพธ์ที่ merge แล้วด้วย
     } catch(mergeErr){
       console.error('merge-before-save failed, saving local copy as-is', mergeErr);
       merged = DOCUMENTS;
     }
-    await setDoc(docRef, { docs: merged, updatedAt: Date.now() });
+    await setDoc(docRef, { docs: merged, removed: REMOVED_DOCS, updatedAt: Date.now() });
   } catch(e){
     console.error('save failed', e);
     alert('บันทึกไป Firebase ไม่สำเร็จ: ' + e.message);
@@ -2143,7 +2175,7 @@ function wireDocControls(){
     const d = DOCUMENTS.find(x=>x.id===b.dataset.del);
     if(!d) return;
     if(!confirm(`ลบเอกสาร "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
-    DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
+    markDocRemoved(d.id); DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
     await persistDocs();
     renderDocumentsInto(); wireDocControls(); wireHubTabs();
   }));
@@ -2449,6 +2481,7 @@ function wireModalControls(){
     const d = DOCUMENTS.find(x=>x.id===state.modal.id);
     if(id !== d.id && docNumberTaken(id, d.id)){ errEl.textContent = 'รหัสเอกสารนี้ซ้ำกับเลขที่มีอยู่แล้ว (เลขเดียวกัน คนละ Rev. หรือเลขที่เคยใช้กับเอกสารที่ยกเลิกไปแล้ว ก็ถือว่าซ้ำ)'; errEl.style.display='block'; return; }
     const oldId = d.id;
+    if(id !== oldId) markDocRemoved(oldId); // กัน id เก่ากลับมาเป็นคำขอซ้ำ
     d.id = id;
     d.name = name; d.clause = clause; d.link = link; d.note = note; d.rev = rev || d.rev;
     // keep publishedLink in sync for documents outside the formal
@@ -3112,7 +3145,7 @@ function attachDetailActionHandlers(){
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
     if(!d) return;
     if(!confirm(`ลบเอกสาร "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
-    DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
+    markDocRemoved(d.id); DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
     await persistDocs();
     if(state.docDetailModal){ closeDocDetailModal(); render(); } else { goBack(); }
   });
@@ -4316,7 +4349,7 @@ function attachRevisionDashboardHandlers(){
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
     if(!d) return;
     if(!confirm(`ลบเอกสาร "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
-    DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
+    markDocRemoved(d.id); DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
     state.selectedDoc = null;
     state.revisionDetailOpen = false;
     await persistDocs();
@@ -4727,7 +4760,7 @@ function attachApprovalHandlers(){
         : `ยกเลิก${withdrawLabel}ของ "${d.id} ${cleanName(d)}" ใช่หรือไม่? เอกสารจะกลับไปเป็นสถานะเผยแพร่ล่าสุดตามเดิม การยกเลิกไม่สามารถย้อนกลับได้`;
       if(!confirm(confirmMsg)) return;
       if(isNewDocRequest){
-        DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
+        markDocRemoved(d.id); DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
         if(state.selectedDoc===d.id) state.selectedDoc = null;
       } else {
         const actor = currentActorName();
@@ -4874,7 +4907,7 @@ function attachApprovalHandlers(){
       // still exists).
       if(d.lastRequestType==='cancel'){
         cancelDocumentToArchive(d, actor);
-        DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
+        markDocRemoved(d.id); DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
         docCancelledToArchive = true;
         state.selectedDoc = null;
         state.approvalDetailOpen = false;
@@ -4905,6 +4938,7 @@ function attachApprovalHandlers(){
         const newId = mpirShape ? `${mpirShape[1]}-${revStr}` : toMpirId(oldId, docTypeCode(d), d.rev);
         if(newId && newId !== oldId){
           const migratingFormat = !mpirShape;
+          markDocRemoved(oldId); // กัน id เก่ากลับมาเป็นเอกสารซ้ำ
           d.id = newId;
           d.comments.push({ by:actor, text: migratingFormat
             ? `เปลี่ยนรหัสเอกสารจาก ${oldId} เป็น ${newId} ตามรูปแบบใหม่`
@@ -5321,7 +5355,7 @@ async function runMasterListImport(){
     if(row.note === 'ยกเลิก'){
       archiveCancelledRow(row, d);
       archived++;
-      if(d) DOCUMENTS = DOCUMENTS.filter(x=>x.id!==row.id); // move out of the doc register
+      if(d){ markDocRemoved(row.id); DOCUMENTS = DOCUMENTS.filter(x=>x.id!==row.id); } // move out of the doc register
       return;
     }
     if(d){
