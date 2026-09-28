@@ -39,7 +39,7 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 
 // App version shown on the login screen and in the settings panel — bump
 // this by hand whenever a meaningful set of changes is deployed.
-const APP_VERSION = '2.0';
+const APP_VERSION = '2.0.1';
 
 const USERS = [
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
@@ -733,17 +733,78 @@ function updateUserBadge(){
   });
 }
 
+// ------------------------------------------------------------------
+// dedupeDocsById — รวมเอกสารที่ id ซ้ำกันให้เหลือรายการเดียว
+// ทำไมต้องมี: ทั้งแอปใช้ id เป็นตัวระบุเอกสาร (find/filter ตาม id ทุกจุด) เอกสาร 2 รายการที่ id
+// เดียวกันจึงเป็นสถานะที่ไม่ควรเกิด — ตารางแสดงซ้ำ, ปุ่มลบจะลบทั้งคู่ และ persistDocs() เดิม
+// จับคู่ local/server ตาม id แต่ "ไม่เคยตัดตัวซ้ำ" จึงเก็บทั้งสองรายการไว้ตลอดและหายเองไม่ได้
+// กติกาเลือกตัวหลัก: lastUpdated ใหม่สุด → (เท่ากัน) comments มากกว่า → (เท่ากัน) ตัวหลังสุดในลิสต์
+// ก่อนทิ้งตัวรอง จะรวม comments ที่ตัวหลักยังไม่มีเข้าไปด้วย เพื่อไม่ให้ประวัติ/audit trail หาย
+// prefer = (ไม่บังคับ) รายการที่ต้องเป็นตัวหลักเสมอถ้าอยู่ในกลุ่มซ้ำ (เช่น เอกสารที่เพิ่งอนุมัติแล้วเปลี่ยนรหัส)
+// ถ้าไม่มี id ซ้ำเลยจะคืน array เดิมกลับไปเลย
+// ------------------------------------------------------------------
+function dedupeDocsById(list, prefer){
+  if(!Array.isArray(list)) return [];
+  const groups = new Map();
+  let withId = 0;
+  list.forEach(d=>{
+    if(!d || d.id === undefined || d.id === null || d.id === '') return;
+    withId++;
+    if(!groups.has(d.id)) groups.set(d.id, []);
+    groups.get(d.id).push(d);
+  });
+  if(withId === groups.size) return list; // ไม่มีซ้ำ
+  const ckey = c => (c && c.time) + '|' + (c && c.by) + '|' + (c && c.text);
+  const seen = new Set();
+  const result = [];
+  const collapsed = [];
+  list.forEach(d=>{
+    if(!d || d.id === undefined || d.id === null || d.id === ''){ result.push(d); return; }
+    if(seen.has(d.id)) return;
+    seen.add(d.id);
+    const g = groups.get(d.id);
+    if(g.length === 1){ result.push(d); return; }
+    const winner = (prefer && g.includes(prefer)) ? prefer : g.reduce((best, x)=>{
+      const bt = best.lastUpdated || 0, xt = x.lastUpdated || 0;
+      if(xt !== bt) return xt > bt ? x : best;
+      const bc = Array.isArray(best.comments) ? best.comments.length : 0;
+      const xc = Array.isArray(x.comments) ? x.comments.length : 0;
+      return xc >= bc ? x : best;
+    });
+    const winnerComments = Array.isArray(winner.comments) ? winner.comments : [];
+    const have = new Set(winnerComments.map(ckey));
+    const extra = [];
+    g.forEach(x=>{
+      if(x === winner || !Array.isArray(x.comments)) return;
+      x.comments.forEach(c=>{
+        const k = ckey(c);
+        if(!have.has(k)){ have.add(k); extra.push(c); }
+      });
+    });
+    if(extra.length){
+      winner.comments = winnerComments.concat(extra).sort((a,b)=>((a&&a.time)||0)-((b&&b.time)||0));
+    }
+    collapsed.push(d.id + ' ×' + g.length);
+    result.push(winner);
+  });
+  console.warn('[dedupeDocsById] รวมรายการที่ id ซ้ำ:', collapsed.join(', '));
+  return result;
+}
+
 async function loadDocs(){
   try{
     const snap = await getDoc(docRef);
+    let dupRemovedOnLoad = 0;
     if(snap.exists() && Array.isArray(snap.data().docs)){
-      DOCUMENTS = snap.data().docs;
+      const rawDocs = snap.data().docs;
+      DOCUMENTS = dedupeDocsById(rawDocs); // เอกสารที่ id ซ้ำ (เช่น สำเนาค้างจากแท็บเก่า) รวมเหลือรายการเดียว
+      dupRemovedOnLoad = rawDocs.length - DOCUMENTS.length;
       REMOVED_DOCS = mergeRemovedLists([], snap.data().removed);
     } else {
       DOCUMENTS = [];
     }
     // backfill fields for records saved before the approval workflow existed
-    let needsMigration = false;
+    let needsMigration = dupRemovedOnLoad > 0; // เจอ id ซ้ำ → บันทึกฉบับที่รวมแล้วกลับขึ้น Firestore ด้วย
     DOCUMENTS.forEach(d=>{
       if(d.approvalStatus===undefined){ d.approvalStatus = (d.note==='ควบคุม'||d.note==='แจกจ่าย') ? 'อนุมัติแล้ว' : 'ร่าง'; needsMigration = true; }
       if(d.reviewerName===undefined){ d.reviewerName=''; needsMigration = true; }
@@ -942,7 +1003,7 @@ async function persistDocs(silent){
     try{
       const snap = await getDoc(docRef);
       const data = snap.exists() ? snap.data() : {};
-      const freshDocs = Array.isArray(data.docs) ? data.docs : [];
+      const freshDocs = dedupeDocsById(Array.isArray(data.docs) ? data.docs : []);
       REMOVED_DOCS = mergeRemovedLists(REMOVED_DOCS, data.removed);
       const localAlive = DOCUMENTS.filter(l=>!isDocRemoved(l, REMOVED_DOCS));
       const byId = new Map(freshDocs.map(fd=>[fd.id, fd]));
@@ -958,10 +1019,13 @@ async function persistDocs(silent){
       freshDocs.forEach(fd=>{
         if(!localIds.has(fd.id) && !isDocRemoved(fd, REMOVED_DOCS)) merged.push(fd);
       });
+      // merge จับคู่ตาม id แต่ไม่ตัดตัวซ้ำเอง — ถ้า local หรือ server มี id ซ้ำอยู่ก่อนแล้วจะถูกเก็บทั้งคู่
+      // ต่อไปเรื่อย ๆ จึงต้องรวมให้เหลือ 1 รายการต่อ id ก่อนบันทึกทุกครั้ง
+      merged = dedupeDocsById(merged);
       DOCUMENTS.length = 0; DOCUMENTS.push(...merged); // sync ให้แท็บนี้เห็นผลลัพธ์ที่ merge แล้วด้วย
     } catch(mergeErr){
       console.error('merge-before-save failed, saving local copy as-is', mergeErr);
-      merged = DOCUMENTS;
+      merged = dedupeDocsById(DOCUMENTS);
     }
     await setDoc(docRef, { docs: merged, removed: REMOVED_DOCS, updatedAt: Date.now() });
   } catch(e){
@@ -4944,6 +5008,10 @@ function attachApprovalHandlers(){
             ? `เปลี่ยนรหัสเอกสารจาก ${oldId} เป็น ${newId} ตามรูปแบบใหม่`
             : `อัปเดตรหัสเอกสารจาก ${oldId} เป็น ${newId} ให้ตรงกับ Rev.${d.rev} ที่อนุมัติ`, time: now });
           state.selectedDoc = newId;
+          // กันรหัสชน: ถ้ามีเอกสารอื่นถือรหัสใหม่นี้อยู่แล้ว (เช่น สำเนาค้างจากแท็บเก่า หรือแถวที่นำเข้าจาก
+          // Master List) ให้รวมเป็นรายการเดียวทันที โดยให้รายการที่เพิ่งอนุมัตินี้เป็นตัวหลัก —
+          // เดิมตรงนี้เปลี่ยน id โดยไม่เช็กว่าซ้ำ ทำให้เกิดเอกสาร id เดียวกัน 2 รายการ
+          DOCUMENTS = dedupeDocsById(DOCUMENTS, d);
         }
       }
     }
