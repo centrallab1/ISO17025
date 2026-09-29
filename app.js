@@ -2545,6 +2545,7 @@ function wireModalControls(){
     const d = DOCUMENTS.find(x=>x.id===state.modal.id);
     if(id !== d.id && docNumberTaken(id, d.id)){ errEl.textContent = 'รหัสเอกสารนี้ซ้ำกับเลขที่มีอยู่แล้ว (เลขเดียวกัน คนละ Rev. หรือเลขที่เคยใช้กับเอกสารที่ยกเลิกไปแล้ว ก็ถือว่าซ้ำ)'; errEl.style.display='block'; return; }
     const oldId = d.id;
+    const latestGroup = groupHistoryByRequest(d)[0]; // newest first
     if(id !== oldId) markDocRemoved(oldId); // กัน id เก่ากลับมาเป็นคำขอซ้ำ
     d.id = id;
     d.name = name; d.clause = clause; d.link = link; d.note = note; d.rev = rev || d.rev;
@@ -2556,6 +2557,17 @@ function wireModalControls(){
     if(d.lastRequestType!=='new' && d.lastRequestType!=='revision'){ d.publishedLink = link; }
     const lastReqFrom = document.getElementById('mfLastRequestFrom');
     if(lastReqFrom) d.lastRequestFrom = lastReqFrom.value.trim() || null;
+    // ถ้า DC แก้เลข Rev. ของคำขอปรับปรุงล่าสุด (เช่นจาก Rev.1 → 2 เป็น Rev.0 → 1)
+    // ให้บันทึกการแก้ไขลงประวัติ — ประวัติเดิมไม่ถูกลบ (audit trail) แต่ไทม์ไลน์,
+    // Activity Log และทะเบียนประวัติจะแสดงเลขที่แก้แล้ว
+    if(d.lastRequestType==='revision' && latestGroup && latestGroup.type==='revision'){
+      const newFrom = d.lastRequestFrom || '0';
+      const newTo = d.rev || '-';
+      if(String(latestGroup.fromRev)!==String(newFrom) || String(latestGroup.toRev)!==String(newTo)){
+        d.comments = d.comments || [];
+        d.comments.push({ by: currentActorName(), text:`แก้ไขเลข Rev. ของคำขอปรับปรุง: Rev.${latestGroup.fromRev} → Rev.${latestGroup.toRev} เป็น Rev.${newFrom} → Rev.${newTo}`, time: Date.now() });
+      }
+    }
     const created = document.getElementById('mfCreated');
     const effective = document.getElementById('mfEffective');
     if(created) d.createdDate = created.value ? new Date(created.value+'T00:00:00').getTime() : null;
@@ -3330,15 +3342,23 @@ function wireCancelRequestModal(){
 // Groups a document's flat comment history into cards, one per revision/
 // approval request cycle, detected from the "ขอปรับปรุงจาก Rev.X เป็น Rev.Y"
 // marker comment written by the revise-request flow.
+const REV_FIX_RE = /^แก้ไขเลข Rev\. ของคำขอปรับปรุง: .*? เป็น Rev\.(\S+) → Rev\.(\S+)/;
 function groupHistoryByRequest(d){
   const comments = (d.comments||[]).slice(); // stored oldest → newest
   const groups = [];
   let current = null;
   comments.forEach(c=>{
     const m = c.text.match(/ขอปรับปรุงจาก Rev\.(.*?) เป็น Rev\.([^\s—]+)/);
+    // DC correction of a revision request's Rev. numbers (written by the
+    // edit-document modal). The original marker comment is left untouched
+    // for the audit trail; this just overrides what the card/log displays.
+    const fix = c.text.match(REV_FIX_RE);
     if(m){
       current = { type:'revision', fromRev:m[1], toRev:m[2], requestedBy:c.by, requestedAt:c.time, events:[] };
       groups.push(current);
+    } else if(fix && current && current.type==='revision'){
+      current.fromRev = fix[1]; current.toRev = fix[2]; current.corrected = true;
+      current.events.push(c);
     } else {
       if(!current){
         current = { type:'initial', toRev: d.rev || null, requestedBy: d.preparedBy || c.by, requestedAt: d.createdDate || c.time, events:[] };
@@ -3356,6 +3376,9 @@ function groupHistoryByRequest(d){
 // classifies a comment/event into an icon + color + short Thai title for
 // the colored-icon timeline (revision history detail page + activity feed)
 function classifyEvent(text){
+  if(REV_FIX_RE.test(text)){
+    return { icon:'edit', bg:'--blue-600', title:'DC แก้ไขเลข Rev. ของคำขอ' };
+  }
   if(/ขั้นที่ 1: จองเลขเอกสาร/.test(text)){
     return { icon:'plus', bg:'--blue-600', title:'ขั้นที่ 1: จองเลขเอกสาร' };
   }
@@ -6295,7 +6318,10 @@ function buildAutoRevLogRows(d){
       rows.push(currentRow);
     } else if((m = c.text.match(/^ขั้นที่ 1: ขอปรับปรุงจาก Rev\.(.*?) เป็น Rev\.([^\s—]+)\s*—\s*(.*)$/))){
       currentRow = { reqDate:c.time, date:c.time, detail: m[3] || `ขอปรับปรุงจาก Rev.${m[1]} เป็น Rev.${m[2]}`, byLabel: revLogByLabel(c.by) };
+      if(!m[3]) Object.defineProperty(currentRow, '_auto', { value:true, enumerable:false });
       rows.push(currentRow);
+    } else if((m = c.text.match(REV_FIX_RE)) && currentRow && currentRow._auto){
+      currentRow.detail = `ขอปรับปรุงจาก Rev.${m[1]} เป็น Rev.${m[2]}`;
     } else if(/^ขั้นที่ 6: DC เผยแพร่เอกสาร/.test(c.text) && currentRow){
       currentRow.date = c.time; // publish/effective date supersedes the request date
     }
