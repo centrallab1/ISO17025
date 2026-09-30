@@ -5597,8 +5597,25 @@ async function repairCorruptedRevNumbers(){
   await persistDocs();
   return { ok:true, fixed: targets.length, ids: targets.map(d=>d.id) };
 }
+// ซ่อนฟีเจอร์นำเข้ารายการเอกสารหลัก — เปลี่ยนเป็น true ถ้าต้องการเปิดใช้อีกครั้ง
+// (โค้ดนำเข้ายังอยู่ครบ แค่ไม่แสดงปุ่ม)
+const SHOW_MASTER_LIST_IMPORT = false;
 function viewImportMasterListPanel(){
   if(!isDC()) return '';
+  if(!SHOW_MASTER_LIST_IMPORT){
+    // แสดงเฉพาะส่วนซ่อมแซมเลข Rev. และเฉพาะเมื่อพบเอกสารที่ผิดพลาดเท่านั้น
+    const corruptedOnly = findCorruptedRevDocs();
+    if(!corruptedOnly.length) return '';
+    return `
+  <div class="panel" style="margin-top:20px;">
+    <div class="panel-head"><div class="panel-title">ซ่อมแซมเลข Rev.</div></div>
+    <div style="font-size:12.5px; color:var(--red-700,#b42318); margin-bottom:10px;">
+      พบเอกสาร <b>${corruptedOnly.length} รายการ</b> ที่เลข Rev. อาจผิดพลาด (เช่น "Rev.1 → 1" แทนที่จะเป็น "Rev.1 → 2"): ${corruptedOnly.map(d=>d.id).join(', ')} — กรุณาตรวจสอบทีละฉบับก่อนกดซ่อมแซม
+    </div>
+    <button class="btn danger" id="btnRepairRevNumbers">${ic('history')} ซ่อมแซมเลข Rev. ที่ผิดพลาด (${corruptedOnly.length} รายการ)</button>
+    <span id="repairRevStatus" style="font-size:12px; color:var(--ink-500); margin-left:10px;"></span>
+  </div>`;
+  }
   const hasList = typeof MASTER_LIST !== 'undefined';
   const total = hasList ? MASTER_LIST.length : 0;
   const cancelledCount = hasList ? MASTER_LIST.filter(r=>r.note==='ยกเลิก').length : 0;
