@@ -1027,7 +1027,13 @@ async function persistDocs(silent){
       console.error('merge-before-save failed, saving local copy as-is', mergeErr);
       merged = dedupeDocsById(DOCUMENTS);
     }
-    await setDoc(docRef, { docs: merged, removed: REMOVED_DOCS, updatedAt: Date.now() });
+    const payload = { docs: merged, removed: REMOVED_DOCS, updatedAt: Date.now() };
+    const payloadBytes = estimateFirestoreBytes(payload);
+    if(payloadBytes > FIRESTORE_DOC_LIMIT){
+      throw new Error(`ข้อมูลทะเบียนเอกสารมีขนาด ${fmtBytes(payloadBytes)} เกินเพดาน 1 MB ของ Firestore — ต้องย้ายโครงสร้างการจัดเก็บก่อนจึงจะบันทึกได้`);
+    }
+    await setDoc(docRef, payload);
+    maybeWarnStorage();
   } catch(e){
     console.error('save failed', e);
     alert('บันทึกไป Firebase ไม่สำเร็จ: ' + e.message);
@@ -5473,7 +5479,87 @@ async function runMasterListImport(){
 // ADMINISTRATION
 // ============================================================
 function viewAdmin(){
-  return viewWatermarkTool() + viewImportMasterListPanel();
+  return viewWatermarkTool() + viewImportMasterListPanel() + viewStorageUsagePanel();
+}
+
+// ============================================================
+// STORAGE USAGE METER — Firestore จำกัดขนาด 1 MiB ต่อ 1 document และแอปนี้
+// เก็บเอกสารทั้งหมดไว้ใน document เดียว (iso17025/documents) ถ้าเกินเพดาน
+// การบันทึกจะล้มเหลวทั้งระบบ แผงนี้ประเมินขนาดจาก JSON (UTF-8) ของข้อมูล
+// ที่จะถูกบันทึกจริง — ค่าจริงใน Firestore ต่างไปเล็กน้อย จึงเผื่อ 3% และเตือน
+// ตั้งแต่ 70% เพื่อให้มีเวลาย้ายโครงสร้างก่อนถึงเพดาน
+// ============================================================
+const FIRESTORE_DOC_LIMIT = 1048576; // 1 MiB
+const STORAGE_WARN_PCT = 70;
+const STORAGE_DANGER_PCT = 90;
+function estimateFirestoreBytes(obj){
+  try{
+    const json = JSON.stringify(obj);
+    const bytes = new TextEncoder().encode(json).length;
+    return Math.ceil(bytes * 1.03);
+  }catch(e){ return 0; }
+}
+function storageUsageItems(){
+  return [
+    { label:'ทะเบียนเอกสาร', path:'iso17025/documents', count: DOCUMENTS.length, unit:'ฉบับ',
+      bytes: estimateFirestoreBytes({ docs: DOCUMENTS, removed: REMOVED_DOCS, updatedAt: Date.now() }) },
+    { label:'คลังเอกสาร', path:'iso17025/archive', count: (typeof ARCHIVE_ITEMS!=='undefined' ? ARCHIVE_ITEMS.length : 0), unit:'รายการ',
+      bytes: estimateFirestoreBytes({ items: (typeof ARCHIVE_ITEMS!=='undefined' ? ARCHIVE_ITEMS : []), updatedAt: Date.now() }) },
+    { label:'ทะเบียนลายน้ำ/สำเนา', path:'iso17025/watermarklog', count: (typeof WATERMARK_LOG!=='undefined' ? WATERMARK_LOG.length : 0), unit:'รายการ',
+      bytes: estimateFirestoreBytes({ items: (typeof WATERMARK_LOG!=='undefined' ? WATERMARK_LOG : []), updatedAt: Date.now() }) },
+  ].map(it=>({ ...it, pct: it.bytes / FIRESTORE_DOC_LIMIT * 100 }));
+}
+function fmtBytes(b){
+  return b >= 1048576 ? (b/1048576).toFixed(2)+' MB' : (b/1024).toFixed(1)+' KB';
+}
+// ขนาดเฉลี่ยต่อเอกสาร → ประมาณว่าเพิ่มได้อีกกี่ฉบับก่อนถึงเพดาน
+function docsHeadroom(item){
+  if(!item.count) return null;
+  const perDoc = item.bytes / item.count;
+  return Math.max(0, Math.floor((FIRESTORE_DOC_LIMIT - item.bytes) / perDoc));
+}
+function viewStorageUsagePanel(){
+  if(!isDC()) return '';
+  const items = storageUsageItems();
+  const worst = Math.max(...items.map(i=>i.pct));
+  const rows = items.map(it=>{
+    const pct = Math.min(100, it.pct);
+    const color = it.pct >= STORAGE_DANGER_PCT ? 'var(--red-600,#d92d20)' : it.pct >= STORAGE_WARN_PCT ? 'var(--amber-600,#dc6803)' : 'var(--green-600,#079455)';
+    const head = it.path==='iso17025/documents' ? docsHeadroom(it) : null;
+    return `
+      <div style="margin-bottom:14px;">
+        <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:5px; gap:10px; flex-wrap:wrap;">
+          <span><b>${it.label}</b> <span style="color:var(--ink-500);">(${it.count} ${it.unit} · <code>${it.path}</code>)</span></span>
+          <span style="font-weight:700; color:${color};">${fmtBytes(it.bytes)} / 1 MB · ${it.pct.toFixed(1)}%</span>
+        </div>
+        <div style="height:8px; background:var(--ink-100,#f2f4f7); border-radius:99px; overflow:hidden;">
+          <div style="width:${pct}%; height:100%; background:${color}; border-radius:99px;"></div>
+        </div>
+        ${head!==null ? `<div style="font-size:11px; color:var(--ink-500); margin-top:4px;">เฉลี่ย ${fmtBytes(it.bytes/it.count)} ต่อฉบับ — เพิ่มได้อีกประมาณ ${head.toLocaleString()} ฉบับ (ถ้าขนาดเฉลี่ยคงเดิม ประวัติที่เพิ่มขึ้นจะทำให้ลดลง)</div>` : ''}
+      </div>`;
+  }).join('');
+  const msg = worst >= STORAGE_DANGER_PCT
+    ? `<div style="font-size:12.5px; color:var(--red-700,#b42318); margin-bottom:12px;"><b>ใกล้เต็มแล้ว</b> — ถ้าเกิน 100% การบันทึกจะล้มเหลวทั้งระบบ ควรย้ายไปเก็บแบบ 1 เอกสารต่อ 1 Firestore document โดยเร็ว</div>`
+    : worst >= STORAGE_WARN_PCT
+    ? `<div style="font-size:12.5px; color:var(--amber-700,#b54708); margin-bottom:12px;"><b>เกิน ${STORAGE_WARN_PCT}% แล้ว</b> — ควรวางแผนย้ายโครงสร้างการจัดเก็บก่อนถึงเพดาน</div>`
+    : `<div style="font-size:12.5px; color:var(--ink-700); margin-bottom:12px;">Firestore จำกัด 1 MB ต่อ document — ตอนนี้ยังอยู่ในระดับปลอดภัย (เตือนเมื่อเกิน ${STORAGE_WARN_PCT}%)</div>`;
+  return `
+  <div class="panel" style="margin-top:20px;">
+    <div class="panel-head"><div class="panel-title">พื้นที่จัดเก็บข้อมูล (Firestore)</div></div>
+    ${msg}
+    ${rows}
+    <div style="font-size:11px; color:var(--ink-500);">ค่าประมาณจากข้อมูลที่โหลดอยู่ในหน้านี้ ไม่รวมไฟล์เอกสาร (ตัวไฟล์อยู่ที่ SharePoint ไม่ได้เก็บในแอป)</div>
+  </div>`;
+}
+// แจ้งเตือน DC ครั้งเดียวต่อการเปิดหน้า เมื่อทะเบียนเอกสารเกินเกณฑ์เตือน
+let storageWarnShown = false;
+function maybeWarnStorage(){
+  if(storageWarnShown || typeof isDC!=='function' || !isDC()) return;
+  const docsItem = storageUsageItems()[0];
+  if(docsItem.pct >= STORAGE_WARN_PCT){
+    storageWarnShown = true;
+    alert(`แจ้งเตือนพื้นที่จัดเก็บ: ทะเบียนเอกสารใช้ไป ${docsItem.pct.toFixed(0)}% ของเพดาน 1 MB ของ Firestore แล้ว\n\nดูรายละเอียดได้ที่หน้า Administration → พื้นที่จัดเก็บข้อมูล`);
+  }
 }
 
 // ============================================================
