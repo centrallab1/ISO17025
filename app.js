@@ -1146,6 +1146,8 @@ const state = {
   docDetailModal: null, // { docId } — document detail popup, opened instead of navigating to a new page
   revLogEditing: false, // true while the ทะเบียนประวัติเอกสาร table (inside the History modal) is in edit mode
   revLogDraftRows: null, // working copy of rows while revLogEditing is true
+  darModal: null, // { darNo } — popup แก้ไขข้อมูลใบ DAR
+  darFilter: { q:'', status:'All', year:'All' },
 };
 
 const ICONS = {
@@ -1489,6 +1491,9 @@ function renderModalLayer(){
   if(state.modal){
     layer.innerHTML = docModal();
     wireModalControls();
+  } else if(state.darModal){
+    layer.innerHTML = darModalView();
+    wireDarModal();
   } else if(state.archiveModal){
     layer.innerHTML = archiveModal();
     wireArchiveModalControls();
@@ -1601,6 +1606,7 @@ async function startApp(){
   }
   loadArchive().then(()=>{ if(state.view==='archive' || state.view==='records') render(); }); // best-effort, non-blocking — Archive is a separate store; 'records' also needs it now that Evidence/Support is entirely archive-sourced
   loadWatermarkLog().then(()=>{ if(state.view==='admin') render(); }); // best-effort, non-blocking
+  loadDarLog().then(()=>{ if(state.view==='approval' || state.view==='darlog') render(); }); // ทะเบียน DAR — best-effort, non-blocking
   removeBootScreen();
   wireNav();
   wireGlobalSearch();
@@ -1668,7 +1674,7 @@ function syncNavActive(){
 const NAV_GROUP_MAP = {
   documents:'documents', iso:'documents', records:'documents',
   audit:'audit', audittrail:'audit',
-  approval:'approval', revision:'approval',
+  approval:'approval', revision:'approval', darlog:'approval',
 };
 // shared tab bars for the three merged sections — the underlying pages/state
 // (docFilter, selectedClause, isoTab, approvalTab, revFilter, etc.) are all
@@ -1683,7 +1689,7 @@ function renderAuditHubTabs(){
   return `<div class="tabs">${tabs.map(([k,l])=>`<button class="tab ${state.view===k?'active':''}" data-hub-nav="${k}">${l}</button>`).join('')}</div>`;
 }
 function renderWorkflowHubTabs(){
-  const tabs = [ ['approval','คำขออนุมัติ'], ['revision','ภาพรวมการปรับปรุง'] ];
+  const tabs = [ ['approval','คำขออนุมัติ'], ['revision','ภาพรวมการปรับปรุง'], ['darlog','ทะเบียน DAR'] ];
   return `<div class="tabs">${tabs.map(([k,l])=>`<button class="tab ${state.view===k?'active':''}" data-hub-nav="${k}">${l}</button>`).join('')}</div>`;
 }
 function wireHubTabs(){
@@ -1786,6 +1792,7 @@ function render(){
     case 'archive': el.innerHTML = viewArchive(); attachArchiveHandlers(); break;
     case 'revision': el.innerHTML = renderWorkflowHubTabs() + viewRevisionDashboard(); attachRevisionDashboardHandlers(); break;
     case 'approval': el.innerHTML = renderWorkflowHubTabs() + viewApproval(); attachApprovalHandlers(); break;
+    case 'darlog': el.innerHTML = renderWorkflowHubTabs() + viewDarRegister(); attachDarRegisterHandlers(); break;
     case 'audit': el.innerHTML = renderAuditHubTabs() + viewAudit(); attachAuditHandlers(); break;
     case 'calendar': el.innerHTML = viewCalendar(); attachCalHandlers(); break;
     case 'audittrail': el.innerHTML = renderAuditHubTabs() + viewAuditTrail(); break;
@@ -2350,16 +2357,22 @@ function docModal(){
           <div style="font-size:11px; color:var(--ink-500); margin-top:5px;">เลือกประเภทด้านบนเพื่อออกเลขอัตโนมัติ — ระบบจะเติมเลขที่ยังว่างอยู่ก่อนเสมอ</div>
         </div>
         <input type="hidden" id="mfPresetClause" value="">
-        <div class="field"><label>หมายเหตุ</label>
-          <textarea id="mfRequestNote" rows="2" placeholder="เช่น เหตุผลที่ขอขึ้นทะเบียนเอกสารนี้"></textarea>
+        <div class="field"><label>เหตุผลที่ขอดำเนินการ (สำหรับใบ DAR)</label>
+          <textarea id="mfDarReason" rows="2" placeholder="เช่น จัดทำแบบฟอร์มใหม่ตามข้อกำหนด 7.7 / ตามข้อบกพร่อง CAR No.69-xxx"></textarea>
+        </div>
+        <div class="field"><label>รายละเอียด (สิ่งที่จะจัดทำ)</label>
+          <textarea id="mfRequestNote" rows="2" placeholder="เช่น แบบฟอร์มบันทึกผล QC ประจำวันของเครื่อง Polarimeter"></textarea>
         </div>
         <div class="field-error" id="mfError" style="display:none;"></div>`;
   } else {
     // revising: target document already chosen — just confirm
     bodyFields = `
         <div style="font-size:12.5px; color:var(--ink-700); margin-bottom:14px;">กำลังขอปรับปรุง <b>${d.id} ${cleanName(d)}</b> (Rev.${d.rev||'0'} ปัจจุบัน) — ขั้นตอนถัดไป (กรอกฟอร์ม, วางลิงก์, ทบทวน, อนุมัติ, เผยแพร่) จะดำเนินการที่หน้ารายละเอียดคำขอ</div>
-        <div class="field"><label>หมายเหตุ</label>
-          <textarea id="mfRequestNote" rows="2" placeholder="เช่น เหตุผลที่ขอปรับปรุงเอกสารนี้"></textarea>
+        <div class="field"><label>เหตุผลที่ขอดำเนินการ (สำหรับใบ DAR)</label>
+          <textarea id="mfDarReason" rows="2" placeholder="เช่น ตามข้อสังเกตที่พบใน Internal Audit 2569 (CAR No.69-xxx)"></textarea>
+        </div>
+        <div class="field"><label>รายละเอียดการแก้ไข</label>
+          <textarea id="mfRequestNote" rows="3" placeholder="เช่น แก้ไขข้อ 5.2 เพิ่มขั้นตอน Daily Check เครื่องชั่ง, ปรับรายการเอกสารอ้างอิง"></textarea>
         </div>
         <div class="field-error" id="mfError" style="display:none;"></div>`;
   }
@@ -2477,8 +2490,11 @@ function wireModalControls(){
       const name = document.getElementById('mfName').value.trim();
       const noteInput = document.getElementById('mfRequestNote');
       const requestNote = noteInput ? noteInput.value.trim() : '';
+      const darReasonEl = document.getElementById('mfDarReason');
+      const darReason = darReasonEl ? darReasonEl.value.trim() : '';
       if(!id || !name){ errEl.textContent = 'กรอกรหัสเอกสารและชื่อเอกสารให้ครบ'; errEl.style.display='block'; return; }
-      if(!requestNote){ errEl.textContent = 'กรอกหมายเหตุก่อนบันทึก'; errEl.style.display='block'; return; }
+      if(!darReason){ errEl.textContent = 'กรอกเหตุผลที่ขอดำเนินการ (ใช้ในใบ DAR)'; errEl.style.display='block'; return; }
+      if(!requestNote){ errEl.textContent = 'กรอกรายละเอียดก่อนบันทึก'; errEl.style.display='block'; return; }
       if(docNumberTaken(id, null)){ errEl.textContent = 'รหัสเอกสารนี้มีอยู่แล้ว (หรือเคยใช้กับเอกสารที่ยกเลิกไปแล้ว)'; errEl.style.display='block'; return; }
       const actor = currentActorName();
       const now = Date.now();
@@ -2494,6 +2510,8 @@ function wireModalControls(){
         formConfirmedAt:null, formConfirmedBy:null, linkSetAt:null, linkSetBy:null, reviewedAt:null,
       });
       closeModal();
+      const newDoc = DOCUMENTS.find(x=>x.id===id);
+      if(!(await darCreateForRequest(newDoc, { reason: darReason, detail: requestNote, requestedAt: now }))) alert('บันทึกคำขอแล้ว แต่ออกใบ DAR ไม่สำเร็จ — กด "ออกใบ DAR ให้คำขอนี้" ในหน้าคำขอเพื่อลองใหม่');
       await persistDocs();
       goTo('approval', { selectedDoc: id, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false, approvalStepView:null });
       return;
@@ -2502,7 +2520,10 @@ function wireModalControls(){
     if(mode==='revise'){
       const noteInput = document.getElementById('mfRequestNote');
       const requestNote = noteInput ? noteInput.value.trim() : '';
-      if(!requestNote){ errEl.textContent = 'กรอกหมายเหตุก่อนส่งคำขอ'; errEl.style.display='block'; return; }
+      const darReasonEl = document.getElementById('mfDarReason');
+      const darReason = darReasonEl ? darReasonEl.value.trim() : '';
+      if(!darReason){ errEl.textContent = 'กรอกเหตุผลที่ขอดำเนินการ (ใช้ในใบ DAR)'; errEl.style.display='block'; return; }
+      if(!requestNote){ errEl.textContent = 'กรอกรายละเอียดการแก้ไขก่อนส่งคำขอ'; errEl.style.display='block'; return; }
       const actor = currentActorName();
       const d = DOCUMENTS.find(x=>x.id===state.modal.id);
       // defense in depth — the step-1 picker already filters these out, but
@@ -2535,6 +2556,7 @@ function wireModalControls(){
       d.comments.push({ by:actor, text:`ขั้นที่ 1: ขอปรับปรุงจาก Rev.${oldRev||'-'} เป็น Rev.${d.rev} — ${requestNote}`, time: Date.now() });
       d.lastUpdated = Date.now();
       closeModal();
+      if(!(await darCreateForRequest(d, { reason: darReason, detail: requestNote, requestedAt: d.preparedAt }))) alert('ส่งคำขอแล้ว แต่ออกใบ DAR ไม่สำเร็จ — กด "ออกใบ DAR ให้คำขอนี้" ในหน้าคำขอเพื่อลองใหม่');
       await persistDocs();
       goTo('approval', { selectedDoc: d.id, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false, approvalStepView:null });
       return;
@@ -3335,6 +3357,7 @@ function wireCancelRequestModal(){
     d.comments.push({ by:actor, text:`ขอยกเลิกเอกสาร — ${note}`, time: now });
     d.lastUpdated = now;
     state.cancelRequestModal = null;
+    await darCreateForRequest(d, { reason: note, detail: `ขอยกเลิกเอกสาร ${d.id} ${cleanName(d)} (Rev.${d.rev||'0'}) และเรียกคืนฉบับที่แจกจ่ายทั้งหมด`, requestedAt: now });
     await persistDocs();
     goTo('approval', { selectedDoc: d.id, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false, approvalStepView:null });
   });
@@ -4753,6 +4776,8 @@ function viewApprovalDetail(){
       </div>`}
     </div>
 
+    ${renderDarBox(d)}
+
     <div class="action-center">
       ${(()=>{
         const pastBoxes = [renderFormConfirmBox(d), renderDcRegisterBox(d), renderReviewBox(d), renderApprovedBox(d), renderPublishBox(d)];
@@ -4852,6 +4877,7 @@ function attachApprovalHandlers(){
         ? `ลบคำขอ "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`
         : `ยกเลิก${withdrawLabel}ของ "${d.id} ${cleanName(d)}" ใช่หรือไม่? เอกสารจะกลับไปเป็นสถานะเผยแพร่ล่าสุดตามเดิม การยกเลิกไม่สามารถย้อนกลับได้`;
       if(!confirm(confirmMsg)) return;
+      const darWithdrawn = darOnWithdrawn(d, currentActorName());
       if(isNewDocRequest){
         markDocRemoved(d.id); DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
         if(state.selectedDoc===d.id) state.selectedDoc = null;
@@ -4877,6 +4903,7 @@ function attachApprovalHandlers(){
         if(state.selectedDoc===d.id) state.approvalDetailOpen = false;
       }
       await persistDocs();
+      if(darWithdrawn) await persistDarLog();
       render();
     });
   });
@@ -4892,6 +4919,7 @@ function attachApprovalHandlers(){
   wireDcRegister();
   wireDcPublish();
   wireDcLinkEdit();
+  wireDarButtons(document.getElementById('content'));
 
   const approveBtn = document.getElementById('btnApprove');
   if(approveBtn) approveBtn.addEventListener('click', async ()=>{
@@ -5044,6 +5072,10 @@ function attachApprovalHandlers(){
         }
       }
     }
+    // ใบ DAR: บันทึกผู้ทบทวน / ผู้อนุมัติ ตามขั้นตอนจริง (หลังเปลี่ยนรหัสตาม Rev. แล้ว)
+    let darChanged = false;
+    if(d.approvalStatus==='รออนุมัติ') darChanged = darOnReviewed(d, actor, comment);
+    if(d.approvalStatus==='อนุมัติแล้ว') darChanged = darOnApproved(d, actor, comment);
     // Land on whichever tab will actually still show this document. An
     // approved formal (new/revision) request that's still waiting on DC to
     // publish belongs in "รอ DC เผยแพร่", not "ประวัติ" (isPendingPublishDoc
@@ -5058,6 +5090,7 @@ function attachApprovalHandlers(){
     render();
     await persistDocs();
     if(docCancelledToArchive) await persistArchive();
+    if(darChanged) await persistDarLog();
   });
   const rejectBtn = document.getElementById('btnReject');
   if(rejectBtn) rejectBtn.addEventListener('click', async ()=>{
@@ -5095,10 +5128,12 @@ function attachApprovalHandlers(){
     // (non-formal request types) actually belongs in history. Previously
     // this always jumped to 'history', where a just-rejected-to-draft
     // formal request wouldn't show up — looking like it had vanished.
+    const darRejectChanged = darOnRejected(d, actor, comment, d.approvalStatus==='ไม่อนุมัติ');
     state.approvalTab = d.approvalStatus==='ไม่อนุมัติ' ? 'history' : 'active';
     state.approvalPage = 1;
     render();
     await persistDocs();
+    if(darRejectChanged) await persistDarLog();
   });
 }
 
@@ -6677,6 +6712,539 @@ function exportRevLogToWord(d){
   a.click();
   document.body.removeChild(a);
   setTimeout(()=> URL.revokeObjectURL(url), 3000);
+}
+
+// ============================================================
+// DAR — ใบคำร้องขอดำเนินการด้านเอกสาร (Document Action Request)
+// ทุกคำขอที่เปลี่ยนแปลงเอกสาร (เอกสารใหม่ / ปรับปรุง / ยกเลิก) จะได้ใบ DAR
+// ของตัวเองอัตโนมัติ: ออกเลขตอนส่งคำขอ, บันทึกผู้ทบทวน/ผู้อนุมัติตามขั้นตอน
+// จริง และดาวน์โหลดเป็น PDF ตามแบบฟอร์ม RDI-LF-006-02 ได้ทุกเมื่อ
+// ทะเบียน DAR เก็บแยกใน Firestore doc iso17025/darlog (เหมือน watermarklog)
+// เพื่อให้ใบ DAR ยังอยู่ครบแม้เอกสารถูกยกเลิก/ย้ายไปคลัง หรือเปลี่ยนรหัสตาม Rev.
+// ============================================================
+const darLogRef = doc(dbFirestore, "iso17025", "darlog");
+var DAR_LOG = [];
+var DAR_LOG_LOADED = false;
+const DAR_FORM_CODE_FALLBACK = 'RDI-LF-006-02';
+const DAR_ACTIONS = ['new','revision','cancel'];
+const DAR_ACTION_LABEL = { new:'จัดทำเอกสารใหม่', revision:'แก้ไขเอกสาร', cancel:'ยกเลิกเอกสาร' };
+const DAR_STATUS_LABEL = { pending:'กำลังดำเนินการ', approved:'อนุมัติ', rejected:'ไม่อนุมัติ', withdrawn:'ถอนคำขอ' };
+const DAR_INTERNAL_RECIPIENTS = [
+  'Head of IRDI','Lab manager','ผู้จัดการคุณภาพ','ผู้จัดการวิชาการ','งานทรัพยากรบุคคล','งานบัญชีการเงิน',
+  'ผู้ควบคุมงานทดสอบ','พนักงานวิเคราะห์-1','พนักงานวิเคราะห์-2','งานจัดซื้อ/พัสดุ','จป.วิชาชีพ',
+];
+const DAR_ROLE_POSITION = { DC:'DC', QM:'QM', LM:'Lab Manager' };
+const DAR_LOGO_JPG_B64 = "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";
+
+async function loadDarLog(){
+  try{
+    const snap = await getDoc(darLogRef);
+    DAR_LOG = (snap.exists() && Array.isArray(snap.data().items)) ? snap.data().items : [];
+    DAR_LOG_LOADED = true;
+  } catch(e){
+    console.error('DAR log load failed', e);
+    DAR_LOG_LOADED = false;
+  }
+}
+async function persistDarLog(){
+  try{
+    await setDoc(darLogRef, { items: DAR_LOG, updatedAt: Date.now() });
+  } catch(e){
+    console.error('DAR log save failed', e);
+    alert('บันทึกทะเบียน DAR ไม่สำเร็จ: ' + e.message);
+  }
+}
+function darPositionOf(name){
+  const u = USERS.find(x=>x.name===name);
+  return u ? (DAR_ROLE_POSITION[u.role] || u.role) : '';
+}
+function darDocTypeOf(docId, d){
+  try{ if(d && typeof docTypeCode==='function'){ const c = docTypeCode(d); if(c) return c; } }catch(e){}
+  const m = String(docId||'').match(/-(LM|LP|WI|LF|LS)-/i);
+  return m ? m[1].toUpperCase() : '';
+}
+function darFind(darNo){ return DAR_LOG.find(r=>r.darNo===darNo) || null; }
+function darForDoc(d){ return d && d.darNo ? darFind(d.darNo) : null; }
+// เลข DAR: ปี พ.ศ. 2 หลัก-ลำดับ 3 หลัก (เช่น 69-001) รันใหม่ทุกปี — รูปแบบเดียวกับ CAR No.
+function darNextNumber(ts){
+  const yy = String((new Date(ts||Date.now()).getFullYear()+543) % 100).padStart(2,'0');
+  let max = 0;
+  DAR_LOG.forEach(r=>{
+    const m = String(r.darNo||'').match(/^(\d{2})-(\d+)$/);
+    if(m && m[1]===yy) max = Math.max(max, parseInt(m[2],10));
+  });
+  return `${yy}-${String(max+1).padStart(3,'0')}`;
+}
+function darFormCode(){
+  const f = DOCUMENTS.find(x=>/\(DAR\)|Document Action Request|ดำเนินการด้านเอกสาร/i.test(x.name||''));
+  return f ? f.id : DAR_FORM_CODE_FALLBACK;
+}
+// สร้างใบ DAR สำหรับคำขอที่เพิ่งส่ง — เรียกหลังตั้งค่า d.lastRequestType แล้ว
+// โหลดทะเบียนล่าสุดก่อนออกเลขเสมอ กันเลขซ้ำเมื่อเปิดหลายแท็บ/หลายเครื่อง
+async function darCreateForRequest(d, opts){
+  if(!d || !DAR_ACTIONS.includes(d.lastRequestType)) return null;
+  await loadDarLog();
+  if(!DAR_LOG_LOADED) return null;
+  const now = (opts && opts.requestedAt) || Date.now();
+  const actor = d.requestedBy || currentActorName();
+  const rec = {
+    darNo: darNextNumber(now),
+    docId: d.id, requestDocId: d.id, docName: cleanName(d), docType: darDocTypeOf(d.id, d),
+    action: d.lastRequestType,
+    fromRev: d.lastRequestType==='new' ? null : (d.lastRequestFrom || d.rev || null),
+    toRev: d.lastRequestType==='cancel' ? (d.rev || null) : (d.rev || '0'),
+    reason: (opts && opts.reason) || '',
+    detail: (opts && opts.detail) || '',
+    attachments: { doc:false, file: d.lastRequestType!=='cancel', other:'' },
+    requestedBy: actor, requestedPosition: darPositionOf(actor), requestedAt: now,
+    reviewerName: d.reviewerName || '', reviewerPosition: darPositionOf(d.reviewerName), reviewedAt: null, reviewerComment: '',
+    approverName: d.approverName || lmAccountName(), approverPosition: 'Lab Manager', decidedAt: null, decision: 'pending', decisionNote: '',
+    distribution: { internal: [], external: '' },
+    history: [{ by: actor, text: 'ออกใบ DAR', time: now }],
+    createdAt: now, updatedAt: now,
+  };
+  DAR_LOG.push(rec);
+  d.darNo = rec.darNo;
+  d.comments = d.comments || [];
+  d.comments.push({ by: actor, text: `ออกใบ DAR No.${rec.darNo}`, time: now });
+  await persistDarLog();
+  return rec;
+}
+function darTouch(rec, actor, text){
+  const now = Date.now();
+  rec.updatedAt = now;
+  rec.history = rec.history || [];
+  if(text) rec.history.push({ by: actor || currentActorName(), text, time: now });
+}
+// ขั้นทบทวนผ่าน (→ รออนุมัติ)
+function darOnReviewed(d, actor, comment){
+  const rec = darForDoc(d); if(!rec || rec.decision!=='pending') return false;
+  rec.reviewerName = actor; rec.reviewerPosition = darPositionOf(actor);
+  rec.reviewedAt = Date.now(); rec.reviewerComment = comment || '';
+  darTouch(rec, actor, 'ทบทวนแล้ว' + (comment ? ` — ${comment}` : ''));
+  return true;
+}
+// อนุมัติขั้นสุดท้าย — เรียกหลังเปลี่ยนรหัสเอกสารตาม Rev. แล้ว (d.id เป็นรหัสใหม่)
+function darOnApproved(d, actor, comment){
+  const rec = darForDoc(d); if(!rec || rec.decision!=='pending') return false;
+  rec.decision = 'approved'; rec.decidedAt = Date.now(); rec.decisionNote = comment || '';
+  rec.approverName = actor; rec.approverPosition = darPositionOf(actor) || 'Lab Manager';
+  rec.docId = d.id;
+  darTouch(rec, actor, 'อนุมัติ' + (comment ? ` — ${comment}` : ''));
+  return true;
+}
+// ไม่อนุมัติ — คำขอแบบ new/revision ถูกส่งกลับไปแก้ (ยังเป็นคำขอเดิม ใบ DAR เดิม)
+// ส่วนคำขอยกเลิกที่ถูกปฏิเสธถือว่าจบ (ไม่อนุมัติ)
+function darOnRejected(d, actor, comment, final){
+  const rec = darForDoc(d); if(!rec || rec.decision!=='pending') return false;
+  if(final){
+    rec.decision = 'rejected'; rec.decidedAt = Date.now(); rec.decisionNote = comment || '';
+    rec.approverName = actor; rec.approverPosition = darPositionOf(actor);
+    darTouch(rec, actor, `ไม่อนุมัติ — ${comment||''}`);
+  } else {
+    rec.reviewedAt = null;
+    darTouch(rec, actor, `ส่งกลับแก้ไข — ${comment||''}`);
+  }
+  return true;
+}
+function darOnWithdrawn(d, actor){
+  const rec = darForDoc(d); if(!rec || rec.decision!=='pending') return false;
+  rec.decision = 'withdrawn'; rec.decidedAt = Date.now();
+  darTouch(rec, actor, 'ถอนคำขอ');
+  return true;
+}
+function darCanEdit(rec){
+  if(!rec || !currentUser) return false;
+  if(isDC()) return true; // DC แก้ได้ทุกช่องเสมอ (รวมรายละเอียดแจกจ่ายหลังอนุมัติ)
+  return rec.decision==='pending' && rec.requestedBy===currentUser.name;
+}
+function darStatusBadge(rec){
+  const cls = { pending:'pending', approved:'active', rejected:'overdue', withdrawn:'draft' }[rec.decision] || 'draft';
+  const color = { pending:'--blue-600', approved:'--green-600', rejected:'--red-600', withdrawn:'--ink-500' }[rec.decision] || '--ink-500';
+  return `<span class="badge ${cls}" style="color:var(${color}); font-weight:700; font-size:11.5px;">${DAR_STATUS_LABEL[rec.decision]||'-'}</span>`;
+}
+function darRevText(rec){
+  if(rec.action==='revision') return `Rev.${rec.fromRev||'-'} → Rev.${rec.toRev||'-'}`;
+  return `Rev.${rec.toRev||'0'}`;
+}
+
+// ---------- กล่อง DAR ในหน้ารายละเอียดคำขอ ----------
+function renderDarBox(d){
+  if(!d || !DAR_ACTIONS.includes(d.lastRequestType)) return '';
+  const rec = darForDoc(d);
+  if(!rec){
+    if(!DAR_LOG_LOADED) return `<div class="side-box" style="margin-bottom:18px;"><div class="side-box-title">ใบ DAR</div><div style="font-size:12.5px; color:var(--ink-500); margin-top:6px;">กำลังโหลดทะเบียน DAR…</div></div>`;
+    return `
+    <div class="side-box" style="margin-bottom:18px;">
+      <div class="side-box-title">ใบ DAR</div>
+      <div style="font-size:12.5px; color:var(--ink-500); margin-top:6px;">คำขอนี้ยังไม่มีใบ DAR (ส่งคำขอก่อนเปิดใช้ฟีเจอร์นี้)</div>
+      ${(isDC() || (currentUser && d.requestedBy===currentUser.name)) ? `<button class="btn primary" id="btnDarIssue" style="margin-top:8px;">${ic('plus')} ออกใบ DAR ให้คำขอนี้</button>` : ''}
+    </div>`;
+  }
+  const dist = rec.distribution || { internal:[], external:'' };
+  const distText = [...(dist.internal||[]), dist.external ? `ภายนอก: ${dist.external}` : ''].filter(Boolean).join(', ');
+  const missing = !rec.reason || !rec.detail;
+  return `
+  <div class="side-box" style="margin-bottom:18px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+      <div class="side-box-title" style="margin:0;">ใบ DAR No.${escapeHtml(rec.darNo)} ${darStatusBadge(rec)}</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        ${darCanEdit(rec) ? `<button class="btn ghost" data-dar-edit="${escapeHtml(rec.darNo)}">${ic('edit')} แก้ไขข้อมูล DAR</button>` : ''}
+        <button class="btn primary" data-dar-pdf="${escapeHtml(rec.darNo)}">${ic('download')} ดาวน์โหลด DAR (PDF)</button>
+      </div>
+    </div>
+    <div style="display:grid; grid-template-columns:140px 1fr; gap:4px 10px; font-size:12.5px; margin-top:10px;">
+      <div style="color:var(--ink-500);">ขอดำเนินการ</div><div style="font-weight:700;">${DAR_ACTION_LABEL[rec.action]||'-'} · ${darRevText(rec)}</div>
+      <div style="color:var(--ink-500);">เหตุผล</div><div style="white-space:pre-wrap;">${rec.reason ? escapeHtml(rec.reason) : '<span style="color:var(--red-600);">ยังไม่ระบุ</span>'}</div>
+      <div style="color:var(--ink-500);">รายละเอียด</div><div style="white-space:pre-wrap;">${rec.detail ? escapeHtml(rec.detail) : '<span style="color:var(--red-600);">ยังไม่ระบุ</span>'}</div>
+      <div style="color:var(--ink-500);">แจกจ่ายให้กับ</div><div>${distText ? escapeHtml(distText) : '<span style="color:var(--ink-400);">ยังไม่ระบุ</span>'}</div>
+    </div>
+    ${missing ? `<div style="font-size:11.5px; color:var(--amber-600); margin-top:8px;">${ic('alert','sm-icon')} กรอกเหตุผลและรายละเอียดให้ครบก่อนส่งทบทวน เพื่อให้ใบ DAR สมบูรณ์</div>` : ''}
+  </div>`;
+}
+function wireDarButtons(scope){
+  const root = scope || document;
+  root.querySelectorAll('[data-dar-pdf]').forEach(b=>b.addEventListener('click', async (e)=>{
+    e.stopPropagation();
+    const rec = darFind(b.dataset.darPdf); if(!rec) return;
+    const label = b.innerHTML; b.disabled = true; b.textContent = 'กำลังสร้าง PDF…';
+    try{ await downloadDarPdf(rec); }
+    catch(err){ console.error(err); alert('สร้าง PDF ไม่สำเร็จ: ' + (err && err.message ? err.message : err)); }
+    finally{ b.disabled = false; b.innerHTML = label; }
+  }));
+  root.querySelectorAll('[data-dar-edit]').forEach(b=>b.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    state.darModal = { darNo: b.dataset.darEdit };
+    renderModalLayer();
+  }));
+  const issueBtn = root.querySelector ? root.querySelector('#btnDarIssue') : null;
+  if(issueBtn) issueBtn.addEventListener('click', async ()=>{
+    const d = DOCUMENTS.find(x=>x.id===state.selectedDoc); if(!d) return;
+    issueBtn.disabled = true;
+    const note = d.lastRequestType==='cancel' ? (d.cancelRequestNote||'') : (d.requestNote||'');
+    const rec = await darCreateForRequest(d, { detail: note, requestedAt: d.preparedAt || d.lastUpdated || Date.now() });
+    if(!rec){ issueBtn.disabled = false; alert('ออกใบ DAR ไม่สำเร็จ — โหลดทะเบียน DAR ไม่ได้'); return; }
+    await persistDocs();
+    state.darModal = { darNo: rec.darNo };
+    render();
+  });
+}
+
+// ---------- ป๊อปอัปแก้ไขข้อมูล DAR ----------
+function darModalView(){
+  const rec = darFind(state.darModal && state.darModal.darNo);
+  if(!rec) return `<div class="modal-backdrop" id="darModalBackdrop"><div class="modal"><div class="modal-body">${emptyState('ไม่พบใบ DAR','')}</div><div class="modal-actions"><button class="btn ghost" id="darModalClose">ปิด</button></div></div></div>`;
+  const pendingOnly = !isDC() && rec.decision!=='pending';
+  const dist = rec.distribution || { internal:[], external:'' };
+  const att = rec.attachments || {};
+  const ck = (id, on, label)=>`<label style="display:flex; align-items:center; gap:7px; font-size:12.5px; cursor:pointer;"><input type="checkbox" id="${id}" ${on?'checked':''}> ${label}</label>`;
+  return `
+  <div class="modal-backdrop" id="darModalBackdrop">
+    <div class="modal" style="max-width:640px;">
+      <div class="modal-head"><div class="modal-title">ข้อมูลใบ DAR No.${escapeHtml(rec.darNo)}</div><button class="modal-close" id="darModalClose">✕</button></div>
+      <div class="modal-body">
+        <div style="font-size:12.5px; color:var(--ink-700); margin-bottom:12px;"><b>${escapeHtml(rec.docId)}</b> ${escapeHtml(rec.docName)} · ${DAR_ACTION_LABEL[rec.action]} · ${darRevText(rec)}</div>
+        <div class="field"><label>เหตุผลที่ขอดำเนินการ</label>
+          <textarea id="darReason" rows="2" ${pendingOnly?'disabled':''} placeholder="เช่น ตามข้อบกพร่องจาก Internal Audit 2568 (CAR No.68-009)">${escapeHtml(rec.reason||'')}</textarea></div>
+        <div class="field"><label>รายละเอียด</label>
+          <textarea id="darDetail" rows="4" ${pendingOnly?'disabled':''} placeholder="สิ่งที่แก้ไข/เพิ่ม/ยกเลิก ระบุหัวข้อหรือหน้าที่เกี่ยวข้อง">${escapeHtml(rec.detail||'')}</textarea></div>
+        <div class="field"><label>สิ่งที่แนบมาด้วย</label>
+          <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
+            ${ck('darAttDoc', att.doc, 'เอกสาร')}${ck('darAttFile', att.file, 'ไฟล์เอกสาร')}
+            <input id="darAttOther" value="${escapeHtml(att.other||'')}" placeholder="อื่นๆ (ระบุ)" style="flex:1; min-width:160px;">
+          </div></div>
+        <div class="field"><label>รายละเอียดแจกจ่าย — หน่วยงานภายใน</label>
+          <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:6px 12px;">
+            ${DAR_INTERNAL_RECIPIENTS.map((r,i)=>ck(`darDist${i}`, (dist.internal||[]).includes(r), escapeHtml(r))).join('')}
+          </div></div>
+        <div class="field"><label>หน่วยงานภายนอก (ถ้ามี)</label>
+          <input id="darDistExternal" value="${escapeHtml(dist.external||'')}" placeholder="ระบุชื่อหน่วยงาน"></div>
+        <div class="field-error" id="darModalError" style="display:none;"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="darModalCancel">ปิด</button>
+        <button class="btn primary" id="darModalSave">${ic('check')} บันทึก</button>
+      </div>
+    </div>
+  </div>`;
+}
+function wireDarModal(){
+  const backdrop = document.getElementById('darModalBackdrop'); if(!backdrop) return;
+  const close = ()=>{ state.darModal = null; renderModalLayer(); };
+  ['darModalClose','darModalCancel'].forEach(id=>{ const b = document.getElementById(id); if(b) b.addEventListener('click', close); });
+  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) close(); });
+  const save = document.getElementById('darModalSave'); if(!save) return;
+  save.addEventListener('click', async ()=>{
+    const rec = darFind(state.darModal.darNo); if(!rec) return close();
+    if(!darCanEdit(rec)){ const err = document.getElementById('darModalError'); err.textContent = 'ไม่มีสิทธิ์แก้ไขใบ DAR นี้'; err.style.display='block'; return; }
+    const val = id=>{ const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+    const on = id=>{ const el = document.getElementById(id); return !!(el && el.checked); };
+    const before = JSON.stringify([rec.reason, rec.detail, rec.attachments, rec.distribution]);
+    const reasonEl = document.getElementById('darReason');
+    if(reasonEl && !reasonEl.disabled){ rec.reason = val('darReason'); rec.detail = val('darDetail'); }
+    rec.attachments = { doc: on('darAttDoc'), file: on('darAttFile'), other: val('darAttOther') };
+    rec.distribution = { internal: DAR_INTERNAL_RECIPIENTS.filter((r,i)=>on(`darDist${i}`)), external: val('darDistExternal') };
+    if(JSON.stringify([rec.reason, rec.detail, rec.attachments, rec.distribution]) !== before){
+      darTouch(rec, currentActorName(), 'แก้ไขข้อมูลใบ DAR');
+      save.disabled = true;
+      await persistDarLog();
+    }
+    state.darModal = null;
+    render();
+  });
+}
+
+// ---------- ทะเบียน DAR (แท็บใน คำขออนุมัติ) ----------
+function viewDarRegister(){
+  const f = state.darFilter || (state.darFilter = { q:'', status:'All', year:'All' });
+  const years = [...new Set(DAR_LOG.map(r=>String(r.darNo||'').slice(0,2)))].filter(Boolean).sort().reverse();
+  const q = f.q.toLowerCase();
+  const list = DAR_LOG.slice()
+    .filter(r=> f.status==='All' || r.decision===f.status)
+    .filter(r=> f.year==='All' || String(r.darNo).startsWith(f.year+'-'))
+    .filter(r=> !q || [r.darNo, r.docId, r.requestDocId, r.docName, r.requestedBy, r.reason, r.detail].join(' ').toLowerCase().includes(q))
+    .sort((a,b)=> String(b.darNo).localeCompare(String(a.darNo)));
+  const count = st=> DAR_LOG.filter(r=>r.decision===st).length;
+  return `
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">ทะเบียนใบ DAR</div>
+      <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">ใบคำร้องขอดำเนินการด้านเอกสารทุกฉบับ — ใช้เป็นหลักฐานการควบคุมเอกสาร (ISO/IEC 17025 ข้อ 8.3)</div></div>
+      <button class="btn ghost" id="btnDarExportCsv">${ic('download')} ส่งออก CSV</button>
+    </div>
+    ${!DAR_LOG_LOADED ? `<div style="font-size:12.5px; color:var(--red-600); margin-bottom:10px;">โหลดทะเบียน DAR ไม่สำเร็จ — ลองรีเฟรชหน้า</div>` : ''}
+    <div style="display:flex; gap:16px; flex-wrap:wrap; font-size:12.5px; margin-bottom:12px;">
+      <span>ทั้งหมด <b>${DAR_LOG.length}</b></span><span style="color:var(--blue-600);">กำลังดำเนินการ <b>${count('pending')}</b></span>
+      <span style="color:var(--green-600);">อนุมัติ <b>${count('approved')}</b></span><span style="color:var(--red-600);">ไม่อนุมัติ <b>${count('rejected')}</b></span>
+      <span style="color:var(--ink-500);">ถอนคำขอ <b>${count('withdrawn')}</b></span>
+    </div>
+    <div class="toolbar">
+      <div class="search"><span>${ic('search')}</span><input id="darSearch" placeholder="ค้นหาเลข DAR, รหัส, ชื่อเอกสาร, เหตุผล..." value="${escapeHtml(f.q)}"></div>
+      <select class="select" id="darFYear"><option value="All">ทุกปี</option>${years.map(y=>`<option value="${y}" ${y===f.year?'selected':''}>ปี 25${y}</option>`).join('')}</select>
+      <select class="select" id="darFStatus">${[['All','ทุกสถานะ'],...Object.entries(DAR_STATUS_LABEL)].map(([v,l])=>`<option value="${v}" ${v===f.status?'selected':''}>${l}</option>`).join('')}</select>
+    </div>
+    <div class="table-wrap" style="overflow-x:auto;"><table class="dtable">
+      <thead><tr><th>DAR No.</th><th>วันที่ขอ</th><th>เอกสาร</th><th>ขอดำเนินการ</th><th>Rev.</th><th>ผู้ขอ</th><th>สถานะ</th><th>วันที่อนุมัติ</th><th></th></tr></thead>
+      <tbody>
+      ${list.length ? list.map(r=>`
+        <tr>
+          <td class="mono" style="white-space:nowrap; font-weight:700;">${escapeHtml(r.darNo)}</td>
+          <td style="white-space:nowrap;">${fmtDate(r.requestedAt)}</td>
+          <td class="mono" style="white-space:nowrap;">${escapeHtml(r.docId)}<div class="name" style="max-width:240px;" title="${escapeHtml(r.docName)}">${escapeHtml(r.docName)}</div></td>
+          <td>${DAR_ACTION_LABEL[r.action]||'-'}</td>
+          <td style="white-space:nowrap;">${darRevText(r)}</td>
+          <td>${escapeHtml(r.requestedBy||'')}</td>
+          <td>${darStatusBadge(r)}</td>
+          <td style="white-space:nowrap;">${r.decision==='approved' ? fmtDate(r.decidedAt) : '—'}</td>
+          <td style="white-space:nowrap;">
+            ${darCanEdit(r) ? `<button class="btn ghost" data-dar-edit="${escapeHtml(r.darNo)}" title="แก้ไขข้อมูล DAR">${ic('edit')}</button>` : ''}
+            <button class="btn ghost" data-dar-pdf="${escapeHtml(r.darNo)}" title="ดาวน์โหลด PDF">${ic('pdf')} PDF</button>
+          </td>
+        </tr>`).join('') : `<tr><td colspan="9" style="text-align:center; padding:40px 0; color:var(--ink-500);">${DAR_LOG.length ? 'ไม่มีใบ DAR ตรงตามเงื่อนไข' : 'ยังไม่มีใบ DAR — ใบ DAR จะถูกออกอัตโนมัติเมื่อส่งคำขอเอกสารใหม่ / ปรับปรุง / ยกเลิก'}</td></tr>`}
+      </tbody>
+    </table></div>
+  </div>`;
+}
+function attachDarRegisterHandlers(){
+  const f = state.darFilter;
+  const s = document.getElementById('darSearch');
+  if(s) s.addEventListener('input', e=>{ f.q = e.target.value; const pos = e.target.selectionStart; render(); const n = document.getElementById('darSearch'); if(n){ n.focus(); n.setSelectionRange(pos,pos); } });
+  const y = document.getElementById('darFYear'); if(y) y.addEventListener('change', e=>{ f.year = e.target.value; render(); });
+  const st = document.getElementById('darFStatus'); if(st) st.addEventListener('change', e=>{ f.status = e.target.value; render(); });
+  const csv = document.getElementById('btnDarExportCsv'); if(csv) csv.addEventListener('click', exportDarCsv);
+  wireDarButtons(document.getElementById('content'));
+}
+function exportDarCsv(){
+  const head = ['DAR No.','วันที่ขอ','รหัสเอกสาร','ชื่อเอกสาร','ประเภท','ขอดำเนินการ','Rev. เดิม','Rev. ใหม่','เหตุผล','รายละเอียด','ผู้ขอ','ผู้ทบทวน','วันที่ทบทวน','ผู้อนุมัติ','สถานะ','วันที่อนุมัติ/ตัดสิน','แจกจ่ายให้กับ'];
+  const q = v=> `"${String(v==null?'':v).replace(/"/g,'""')}"`;
+  const rows = DAR_LOG.slice().sort((a,b)=>String(a.darNo).localeCompare(String(b.darNo))).map(r=>[
+    r.darNo, fmtDate(r.requestedAt), r.docId, r.docName, r.docType, DAR_ACTION_LABEL[r.action]||'', r.fromRev||'', r.toRev||'',
+    r.reason, r.detail, r.requestedBy, r.reviewerName, fmtDate(r.reviewedAt), r.decision==='pending' ? '' : r.approverName,
+    DAR_STATUS_LABEL[r.decision]||'', fmtDate(r.decidedAt),
+    [...((r.distribution||{}).internal||[]), (r.distribution||{}).external||''].filter(Boolean).join(', '),
+  ].map(q).join(','));
+  const blob = new Blob(['﻿' + [head.map(q).join(','), ...rows].join('\r\n')], { type:'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = `ทะเบียน_DAR_${fmtDate(Date.now()).replace(/\//g,'-')}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 3000);
+}
+
+// ---------- สร้าง PDF ตามต้นฉบับ RDI-LF-006-02 ----------
+// ตำแหน่งเส้นตาราง ข้อความ ช่องติ๊ก และโลโก้ ถอดมาจากไฟล์ Excel ต้นฉบับ
+// (ความกว้างคอลัมน์ A–N, ความสูงแถว 1–47, เส้นขอบ, ตำแหน่ง Check Box/Rectangle)
+// แล้วย่อให้พอดี A4 หนึ่งหน้าแบบเดียวกับการสั่งพิมพ์ Excel (Fit to page,
+// ขอบซ้าย 0.25" ขวา 0.19" บน/ล่าง 0.75") ฟอนต์ DilleniaUPC 16pt ตามต้นฉบับ
+const DAR_FORM_SPEC = {"cx":[0,16.5,122.25,180.75,226.5,294.75,363.0,431.25,492.0,537.75,606.0,674.25,742.5,813.75,845.25],"ry":[0,23.25,39.0,78.0,102.0,125.45,148.9,160.9,184.9,208.9,226.35,239.1,257.1,289.2,313.2,337.2,340.95,364.95,456.45,480.45,640.2,685.95,709.2,733.2,757.2,781.2,805.2,810.65,834.65,858.1,864.7,888.7,908.8,928.3,952.3,976.3,1000.3,1018.3,1042.3,1066.3,1090.3,1114.3,1138.3,1162.3,1186.3,1210.3,1234.3,1258.3],"segs":[[16.5,78.0,813.75,78.0],[16.5,148.9,813.75,148.9],[16.5,160.9,813.75,160.9],[16.5,226.35,813.75,226.35],[16.5,239.1,813.75,239.1],[16.5,257.1,813.75,257.1],[16.5,340.95,813.75,340.95],[16.5,709.2,813.75,709.2],[16.5,733.2,813.75,733.2],[16.5,805.2,813.75,805.2],[16.5,810.65,813.75,810.65],[16.5,864.7,813.75,864.7],[16.5,1000.3,813.75,1000.3],[16.5,1018.3,813.75,1018.3],[16.5,1258.3,813.75,1258.3],[16.5,78.0,16.5,148.9],[16.5,160.9,16.5,226.35],[16.5,239.1,16.5,805.2],[16.5,810.65,16.5,1258.3],[431.25,733.2,431.25,805.2],[813.75,78.0,813.75,148.9],[813.75,160.9,813.75,226.35],[813.75,239.1,813.75,805.2],[813.75,810.65,813.75,1258.3]],"texts":[[3,3,11,"ใบคำร้องขอดำเนินการด้านเอกสาร (Document Action Request :DAR)",1,"c"],[4,2,13,"1.ประเภทเอกสาร",1,"l"],[5,3,3,"คู่มือคุณภาพ (LM)",0,"l"],[5,5,5,"ขั้นตอนการปฏิบัติงาน (LP)",0,"l"],[5,8,8,"วิธีปฏิบัติงาน (WI)",0,"l"],[6,3,3,"ฟอร์ม (LF)",0,"l"],[6,5,5,"เอกสารสนับสนุน (LS)",0,"l"],[8,2,2,"2.ขอดำเนินการ:",1,"l"],[8,4,4,"ขึ้นทะเบียนเอกสาร",0,"l"],[8,6,6,"จัดทำเอกสารใหม่",0,"l"],[8,8,8,"ขอใช้เอกสารภายนอก",0,"l"],[8,10,10,"แก้ไขเอกสาร",0,"l"],[8,12,12,"แจกจ่าย",0,"l"],[9,4,4,"สำเนา",0,"l"],[9,6,6,"ยกเลิก",0,"l"],[9,8,8,"ทำลาย",0,"l"],[9,10,10,"อื่นๆ",0,"l"],[12,2,13,"3.รายละเอียดเอกสารที่ขอแก้ไข",1,"l"],[13,2,2,"ชื่อเอกสาร:",1,"l"],[14,2,2,"รหัสเอกสาร:",1,"l"],[14,8,8,"ครั้งที่แก้ไข (Rev.No.):",1,"l"],[15,8,8,"วันที่อนุมัติ:",1,"l"],[17,2,2,"เหตุผลที่ขอดำเนินการ:",1,"l"],[19,2,2,"รายละเอียด:",1,"l"],[23,2,2,"สิ่งที่แนบมาด้วย",1,"l"],[23,5,5,"เอกสาร",0,"l"],[23,7,7,"ไฟล์เอกสาร",0,"l"],[23,9,9,"อื่นๆ",0,"l"],[24,2,2,"ผู้ขอดำเนินการ:",1,"l"],[24,9,9,"ผู้ทบทวน:",1,"l"],[25,2,2,"ตำแหน่ง:",1,"l"],[25,9,9,"ตำแหน่ง:",1,"l"],[26,2,2,"วันที่:",1,"l"],[26,9,9,"วันที่:",1,"l"],[28,2,2,"ข้อเสนอแนะเพิ่มเติมจากผู้ทบทวน/ตรวจสอบ:",1,"l"],[31,2,2,"ความคิดเห็นของผู้อนุมัติ:",1,"l"],[32,3,3,"อนุมัติ",0,"l"],[34,7,7,"ผู้อนุมัติ:",1,"l"],[35,7,7,"ตำแหน่ง:",1,"l"],[36,7,7,"วันที่:",1,"l"],[37,2,13,"4.รายละเอียดแจกจ่าย",1,"c"],[38,2,2,"ชื่อเอกสาร:",1,"l"],[39,2,2,"รหัสเอกสาร:",1,"l"],[39,8,8,"ครั้งที่แก้ไข (Rev.No.):",1,"l"],[40,2,2,"แจกจ่ายให้กับ",1,"l"],[40,4,4,"หน่วยงานภายใน",1,"l"],[40,10,10,"หน่วยงานภายนอก",1,"l"],[41,4,4,"Head of IRDI",0,"l"],[42,4,4,"Lab manager",0,"l"],[42,7,7,"ผู้ควบคุมงานทดสอบ",0,"l"],[43,4,4,"ผู้จัดการคณภาพ",0,"l"],[43,7,7,"พนักงานวิเคราะห์-1",0,"l"],[44,4,4,"ผู้จัดการวิชาการ",0,"l"],[44,7,7,"พนักงานวิเคราะห์-2",0,"l"],[45,4,4,"งานทรัพยากรบุคคล",0,"l"],[45,7,7,"งานจัดซื้อ/พัสดุ",0,"l"],[46,4,4,"งานบัญชีการเงิน",0,"l"],[46,7,7,"จป.วิชาชีพ",0,"l"],[47,2,2,"*หมายเหตุ :เมื่อได้รับเอกสารฉบับแก้ไขที่แจกจ่ายโดย DC  ให้ผู้ถือครองศึกษาทำความเข้าใจโดยรับการฝึกอบรมได้จากผู้จัดทำเอกสาร  และยกเลิกใช้ฉบับเดิม**",0,"l"]],"items":[["Picture 15",[16.85,11.25],[122.25,71.18]],["Check Box 1",[42.9,106.2],[63.9,122.4]],["Check Box 2",[213.15,106.2],[230.1,122.4]],["Check Box 3",[394.2,106.2],[434.25,122.4]],["Check Box 4",[42.9,128.45],[66.9,145.85]],["Check Box 5",[212.55,130.25],[230.1,147.65]],["Check Box 6",[148.05,163.3],[170.25,180.7]],["Check Box 7",[255.9,163.9],[296.55,181.3]],["Check Box 8",[389.4,163.3],[431.25,180.7]],["Check Box 9",[518.4,163.9],[537.75,181.3]],["Check Box 10",[634.8,163.9],[676.05,181.3]],["Check Box 11",[207.15,712.2],[226.5,729.6]],["Check Box 12",[321.15,712.2],[363.0,729.6]],["Check Box 13",[457.65,712.2],[479.25,729.6]],["Check Box 14",[42.9,891.7],[66.9,909.4]],["Check Box 15",[42.9,911.8],[66.9,929.5]],["Check Box 16",[148.05,187.3],[173.85,204.7]],["Check Box 17",[255.9,187.9],[301.95,205.3]],["Check Box 18",[389.4,187.3],[435.45,204.7]],["Check Box 19",[518.4,187.9],[541.95,205.3]],["Check Box 20",[634.8,187.9],[680.85,205.3]],["Rectangle 2",[146.75,1073.3],[161.75,1086.8]],["Rectangle 3",[146.75,1097.8],[161.75,1111.3]],["Rectangle 4",[526.5,1072.3],[539.25,1085.8]],["Rectangle 5",[147.75,1122.8],[162.75,1136.3]],["Rectangle 6",[146.75,1145.8],[161.75,1159.3]],["Rectangle 7",[147.75,1170.8],[162.75,1184.3]],["Rectangle 8",[319.25,1121.8],[334.25,1135.3]],["Rectangle 9",[320.25,1146.8],[335.25,1160.3]],["Rectangle 10",[320.25,1170.8],[335.25,1184.3]],["Rectangle 11",[147.75,1194.8],[162.75,1208.3]],["Rectangle 12",[320.25,1194.8],[335.25,1208.3]],["Rectangle 13",[147.75,1218.8],[162.75,1232.3]],["Rectangle 14",[320.25,1218.8],[335.25,1232.3]],["Picture 15",[438.25,924.3],[468.75,955.2]]]};
+async function buildDarPdfBytes(rec){
+  const [{ PDFDocument, rgb }, fontkitModule, regularBytes, boldBytes] = await Promise.all([
+    loadPdfLib(), loadFontkit(), loadThaiFontRegular(), loadThaiFontBold(),
+  ]);
+  const fontkit = fontkitModule.default || fontkitModule;
+  const pdfDoc = await PDFDocument.create();
+  pdfDoc.registerFontkit(fontkit);
+  const R = await pdfDoc.embedFont(regularBytes, { subset:true });
+  const B = await pdfDoc.embedFont(boldBytes, { subset:true });
+  let logo = null;
+  try{ logo = await pdfDoc.embedJpg(base64ToArrayBuffer(DAR_LOGO_JPG_B64)); }catch(e){ logo = null; }
+  pdfDoc.setTitle(`DAR No.${rec.darNo} ${rec.docId}`);
+
+  const SP = DAR_FORM_SPEC;
+  const PW = 595.28, PH = 841.89;
+  const ML = 18, MR = 13.68, MT = 54, MB = 54;
+  const k = Math.min((PW-ML-MR)/SP.cx[SP.cx.length-1], (PH-MT-MB)/SP.ry[SP.ry.length-1]);
+  const X = v=> ML + v*k;               // พิกัดฟอร์ม → พิกัดหน้า
+  const Y = v=> PH - MT - v*k;
+  const FS = 16*k;                      // 16pt ของต้นฉบับ หลังย่อ
+  const PAD = 2.2*k;
+  const ink = rgb(0,0,0), grey = rgb(0.45,0.45,0.45), blue = rgb(0.05,0.25,0.65);
+  const page = pdfDoc.addPage([PW, PH]);
+
+  const colL = c=> SP.cx[c-1], colR = c=> SP.cx[c];
+  const rowT = r=> SP.ry[r-1], rowB = r=> SP.ry[r];
+  const fontOf = b=> b ? B : R;
+  const width = (s, b, size)=> fontOf(b).widthOfTextAtSize(String(s), size||FS);
+  const baseline = (r1, r2, size)=> Y((rowT(r1)+rowB(r2||r1))/2) - (size||FS)*0.2; // จัดกึ่งกลางแนวตั้งแบบ Excel
+  function text(s, x, y, o={}){
+    if(s===null || s===undefined || s==='') return;
+    page.drawText(String(s), { x, y, size:o.size||FS, font:fontOf(o.bold), color:o.color||ink });
+  }
+  // ข้อความในเซลล์ (r,c) แบบเดียวกับ Excel: ชิดซ้าย/ขวา/กลาง ภายในช่วงคอลัมน์ c..ec
+  function cell(r, c, s, o={}){
+    const ec = o.ec || c, size = o.size || FS;
+    let str = String(s==null?'':s);
+    const maxW = o.maxW;
+    if(maxW && width(str, o.bold, size) > maxW*k){
+      while(str.length > 1 && width(str+'…', o.bold, size) > maxW*k) str = str.slice(0,-1);
+      str += '…';
+    }
+    const w = width(str, o.bold, size);
+    let x;
+    if(o.al==='r') x = X(colR(ec)) - PAD - w;
+    else if(o.al==='c') x = (X(colL(c)) + X(colR(ec)))/2 - w/2;
+    else x = X(colL(c)) + PAD + (o.dx||0)*k;
+    text(str, x, baseline(r, o.r2, size), { ...o, size });
+    return x + w;
+  }
+  // ข้อความยาวหลายบรรทัดในกรอบ (แถว r1..r2, คอลัมน์ B..L) ย่อฟอนต์ถ้ายาวเกินกรอบ
+  function block(r1, r2, s, indent){
+    const left = colL(2) + 2.2 + (indent||0), right = colR(13) - 6;
+    const boxH = (rowB(r2) - rowT(r1)) * k;
+    let size = FS, lines = [];
+    for(; size >= FS*0.6; size -= FS*0.05){
+      lines = wrapTextLines(s, R, size, (right-left)*k);
+      if(lines.length * size*1.25 <= boxH - 4*k) break;
+    }
+    const lh = size*1.25;
+    const total = lines.length*lh;
+    let y = Y((rowT(r1)+rowB(r2))/2) + total/2 - lh*0.8; // จัดกลางแนวตั้งในกรอบเหมือน Excel
+    lines.forEach(l=>{ text(l, X(left), y, { size }); y -= lh; });
+  }
+  function tick(cxv, cyv, s){ // เครื่องหมายถูก
+    page.drawLine({ start:{x:cxv-s*0.32, y:cyv+s*0.02}, end:{x:cxv-s*0.08, y:cyv-s*0.26}, thickness:Math.max(0.9, s*0.12), color:blue });
+    page.drawLine({ start:{x:cxv-s*0.08, y:cyv-s*0.26}, end:{x:cxv+s*0.36, y:cyv+s*0.34}, thickness:Math.max(0.9, s*0.12), color:blue });
+  }
+
+  // ----- เส้นตาราง -----
+  SP.segs.forEach(([x1,y1,x2,y2])=> page.drawLine({ start:{x:X(x1), y:Y(y1)}, end:{x:X(x2), y:Y(y2)}, thickness:0.5, color:ink }));
+
+  // ----- ข้อความคงที่ของแบบฟอร์ม -----
+  SP.texts.forEach(([r, c, ec, s, b, al])=>{
+    if(r===47){ // หมายเหตุท้ายฟอร์ม — ต้นฉบับวางยาวทั้งบรรทัด ย่อถ้าเกินกรอบ
+      let size = FS; while(size > FS*0.6 && width(s, false, size) > (colR(13)-colL(2)-4)*k) size -= FS*0.03;
+      return cell(r, c, s, { size });
+    }
+    cell(r, c, s, { bold:!!b, al, ec });
+  });
+
+  // ----- ช่องติ๊กและรูป -----
+  const dist = rec.distribution || { internal:[], external:'' };
+  const att = rec.attachments || {};
+  const typ = rec.docType || darDocTypeOf(rec.docId);
+  const act = rec.action;
+  const internal = dist.internal || [];
+  const has = n=> internal.includes(n);
+  const checked = {
+    'Check Box 1': typ==='LM', 'Check Box 2': typ==='LP', 'Check Box 3': typ==='WI', 'Check Box 4': typ==='LF', 'Check Box 5': typ==='LS',
+    'Check Box 6': act==='new', 'Check Box 7': act==='new', 'Check Box 8': false, 'Check Box 9': act==='revision',
+    'Check Box 10': act!=='cancel' && (internal.length>0 || !!dist.external),
+    'Check Box 16': false, 'Check Box 17': act==='cancel', 'Check Box 18': false, 'Check Box 19': false, 'Check Box 20': false,
+    'Check Box 11': !!att.doc, 'Check Box 12': !!att.file, 'Check Box 13': !!att.other,
+    'Check Box 14': rec.decision==='approved', 'Check Box 15': rec.decision==='rejected',
+    'Rectangle 2': internal.length>0, 'Rectangle 4': !!dist.external,
+    'Rectangle 3': has('Head of IRDI'), 'Rectangle 5': has('Lab manager'), 'Rectangle 6': has('ผู้จัดการคุณภาพ'),
+    'Rectangle 7': has('ผู้จัดการวิชาการ'), 'Rectangle 11': has('งานทรัพยากรบุคคล'), 'Rectangle 13': has('งานบัญชีการเงิน'),
+    'Rectangle 8': has('ผู้ควบคุมงานทดสอบ'), 'Rectangle 9': has('พนักงานวิเคราะห์-1'), 'Rectangle 10': has('พนักงานวิเคราะห์-2'),
+    'Rectangle 12': has('งานจัดซื้อ/พัสดุ'), 'Rectangle 14': has('จป.วิชาชีพ'),
+  };
+  let logoDone = false;
+  SP.items.forEach(([name, [x1,y1], [x2,y2]])=>{
+    if(name.startsWith('Picture')){
+      // รูปแรก = โลโก้; รูปที่สอง (ลายเซ็นในไฟล์ต้นฉบับ) ไม่นำมาใช้ — ใบ DAR ในระบบยืนยันด้วยชื่อและเวลาในระบบ
+      if(!logoDone && logo){ page.drawImage(logo, { x:X(x1), y:Y(y2), width:(x2-x1)*k, height:(y2-y1)*k }); }
+      logoDone = true;
+      return;
+    }
+    let bx, by, bs, bw, bh;
+    if(name.startsWith('Check Box')){
+      bs = 13*0.75*k; bx = X(x1) + 1*k; by = (Y(y1)+Y(y2))/2 - bs/2; bw = bh = bs;
+    } else { bx = X(x1); by = Y(y2); bw = (x2-x1)*k; bh = (y2-y1)*k; bs = Math.min(bw,bh); }
+    page.drawRectangle({ x:bx, y:by, width:bw, height:bh, borderColor:ink, borderWidth:0.6 });
+    if(checked[name]) tick(bx+bw/2, by+bh/2, bs);
+  });
+
+  // ----- ข้อมูลของคำขอนี้ -----
+  const code = `${darFormCode()} หน้าที่ 1/1`;
+  cell(1, 3, code, { ec:13, al:'r' });
+  cell(3, 12, `DAR no. ${rec.darNo}`, { ec:13, al:'r', bold:true });
+  cell(13, 3, rec.docName, { maxW: colR(13)-colL(3)-6 });
+  cell(14, 3, rec.docId);
+  cell(14, 10, act==='revision' ? `${rec.toRev||'-'} (จาก Rev.${rec.fromRev||'-'})` : (rec.toRev||'0'));
+  cell(15, 10, rec.decision==='approved' ? fmtDateRevLog(rec.decidedAt) : '….................');
+  block(18, 18, rec.reason || '-', 0);
+  block(20, 21, rec.detail || '-', 0);
+  const sysTime = (endX, row, ts)=>{ if(ts) text(`(ในระบบ ${fmtDateTime(ts).slice(-5)})`, endX + 4*k, baseline(row), { size:FS*0.72, color:grey }); };
+  cell(24, 4, rec.requestedBy || '-');
+  cell(25, 4, rec.requestedPosition || '-');
+  sysTime(cell(26, 4, fmtDateRevLog(rec.requestedAt)), 26, rec.requestedAt);
+  cell(24, 10, rec.reviewerName || '');
+  cell(25, 10, rec.reviewerPosition || '');
+  if(rec.reviewedAt) sysTime(cell(26, 10, fmtDateRevLog(rec.reviewedAt)), 26, rec.reviewedAt);
+  else cell(26, 10, '….................');
+  if(rec.reviewerComment) block(29, 29, rec.reviewerComment, 0);
+  else cell(29, 2, '…....-....................................................................................................................................', { maxW: colR(13)-colL(2)-6 });
+  if(rec.decision==='rejected') cell(33, 3, `ไม่อนุมัติ เนื่องจาก ${rec.decisionNote||'-'}`, { maxW: colR(13)-colL(3)-6 });
+  else cell(33, 3, 'ไม่อนุมัติ เนื่องจาก…..................................................................................................................................', { maxW: colR(13)-colL(3)-6 });
+  if(rec.decision==='approved' && rec.decisionNote) cell(32, 4, `ความเห็น: ${rec.decisionNote}`, { maxW: colR(13)-colL(4)-6, size:FS*0.85, color:grey });
+  const decided = rec.decision==='approved' || rec.decision==='rejected';
+  cell(34, 8, `(${rec.approverName || '…...........................'})`, { dx:40 });
+  cell(35, 8, rec.approverPosition || 'Lab Manager');
+  if(decided) sysTime(cell(36, 8, fmtDateRevLog(rec.decidedAt)), 36, rec.decidedAt);
+  else cell(36, 8, '….................');
+  cell(38, 3, rec.docName, { bold:true, maxW: colR(13)-colL(3)-6 });
+  cell(39, 3, rec.docId, { bold:true });
+  cell(39, 10, rec.toRev || '0', { bold:true });
+  if(dist.external){
+    const extL = wrapTextLines(dist.external, B, FS, (colR(13)-colL(10)-30)*k);
+    cell(41, 10, `ระบุ ${extL[0]||''}`, { bold:true });
+    if(extL[1]) cell(42, 10, extL.slice(1).join(' '), { bold:true, maxW: colR(13)-colL(10)-6 });
+  } else {
+    cell(41, 10, 'ระบุ…..............................................', { bold:true });
+    cell(42, 10, '….............................', { bold:true });
+  }
+  // บันทึกที่มาของเอกสาร (นอกกรอบฟอร์ม ใต้ขอบล่าง)
+  text(`ออกจากระบบควบคุมเอกสาร ISO/IEC 17025 · ${fmtDateTime(Date.now())} · สถานะคำขอ: ${DAR_STATUS_LABEL[rec.decision]||'-'}`,
+       ML, Y(SP.ry[SP.ry.length-1]) - FS*1.3, { size:FS*0.7, color:grey });
+  return pdfDoc.save();
+}
+async function downloadDarPdf(rec){
+  const bytes = await buildDarPdfBytes(rec);
+  const blob = new Blob([bytes], { type:'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `DAR_${rec.darNo}_${rec.docId}.pdf`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 3000);
 }
 
 // ============================================================
