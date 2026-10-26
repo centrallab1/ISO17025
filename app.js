@@ -42,9 +42,10 @@ const ARCHIVE_REQUEST_FORM_LINK = 'https://mitrphol.sharepoint.com/:l:/s/Service
 const APP_VERSION = '2.0.1';
 
 const USERS = [
-  { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC' },
-  { id:'thidarati', password:'ISO123',       name:'Thitarat Intakham',  role:'QM' },
-  { id:'pimchanok', password:'mpir1234',     name:'Pimchanok Busayapongchai', role:'LM' },
+  // thName = ชื่อที่ใช้ลงในแบบฟอร์ม DAR (ตำแหน่งงานเอกสาร: TM ญาราภรณ์ / QM ธิดารัตน์ / LM พิมพ์ชนก)
+  { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC', thName:'ญาราภรณ์' },
+  { id:'thidarati', password:'ISO123',       name:'Thitarat Intakham',  role:'QM', thName:'ธิดารัตน์' },
+  { id:'pimchanok', password:'mpir1234',     name:'Pimchanok Busayapongchai', role:'LM', thName:'พิมพ์ชนก' },
 ];
 const ROLE_LABEL = { DC:'Document Control', QM:'Quality Manager', LM:'Lab Manager' };
 // บัญชี DC ทำ 2 หน้าที่: DC (จัดเก็บเอกสาร/ควบคุมระบบ) และ TM (Technical Manager)
@@ -6834,6 +6835,16 @@ async function persistDarLog(){
     alert('บันทึกทะเบียน DAR ไม่สำเร็จ: ' + e.message);
   }
 }
+// ชื่อ/ตำแหน่งสำหรับแสดงในใบ DAR — อ้างอิงบัญชีปัจจุบันเสมอ (ชื่อไทย + ตำแหน่งล่าสุด)
+// ข้อมูลที่บันทึกในทะเบียนยังเก็บชื่อบัญชีเดิมไว้ เพื่อให้สอบกลับได้ว่าใครกด
+function darNameTH(name){
+  const u = USERS.find(x=>x.name===name);
+  return (u && u.thName) || name || '';
+}
+function darPosNow(name, stored){
+  const u = USERS.find(x=>x.name===name);
+  return u ? darPositionOf(name) : (stored || '');
+}
 function darPositionOf(name){
   const u = USERS.find(x=>x.name===name);
   return u ? (DAR_ROLE_POSITION[u.role] || u.role) : '';
@@ -7496,7 +7507,7 @@ function darCardModalView(){
   const ph = darPhase(r);
   const tone = ph==='registered' ? 'var(--green-600)' : ['docrejected','inprogress'].includes(ph) ? 'var(--red-600)' : ph==='withdrawn' ? 'var(--line)' : 'var(--amber-600)';
   const line = (k,v)=>`<div style="color:var(--ink-500);">${k}</div><div>${v}</div>`;
-  const who = (n,p,t)=> n ? `${escapeHtml(n)}${p ? ` (${escapeHtml(p)})` : ''} · ${fmtDateTime(t)}` : '<span style="color:var(--ink-400);">—</span>';
+  const who = (n,p,t)=> n ? `${escapeHtml(darNameTH(n))}${p ? ` (${escapeHtml(p)})` : ''} · ${fmtDateTime(t)}` : '<span style="color:var(--ink-400);">—</span>';
   const hist = (r.history||[]).slice().reverse();
   // ปุ่มไปทำขั้นถัดไปในหน้า Approval (ผู้ทบทวน/LM/ผู้จัดทำ/DC เผยแพร่)
   const goLabel = !d ? '' : ph==='approval' ? 'ไปอนุมัติเอกสาร' : ph==='review' ? 'ไปทบทวนเอกสาร' : ph==='draft' ? 'ไปกรอกฟอร์ม/วางลิงก์' : ph==='topublish' ? 'ไปเผยแพร่เอกสาร' : 'เปิดคำขอในหน้า Approval';
@@ -7514,9 +7525,9 @@ function darCardModalView(){
           ${line('เอกสาร', `<b>${escapeHtml(r.docId)}</b> ${escapeHtml(r.docName)}`)}
           ${line('เหตุผล', `<div style="white-space:pre-wrap;">${r.reason ? escapeHtml(r.reason) : '-'}</div>`)}
           ${line('รายละเอียด', `<div style="white-space:pre-wrap;">${r.detail ? escapeHtml(r.detail) : '-'}</div>`)}
-          ${line('ผู้ขอดำเนินการ', who(r.requestedBy, r.requestedPosition, r.requestedAt))}
-          ${line('ผู้ทบทวน', who(r.reviewedAt ? r.reviewerName : '', r.reviewerPosition, r.reviewedAt) + (r.reviewedAt && r.reviewerComment ? `<div style="color:var(--ink-500);">ข้อเสนอแนะ: ${escapeHtml(r.reviewerComment)}</div>` : ''))}
-          ${line(r.decision==='rejected' ? 'ไม่อนุมัติโดย' : 'ผู้อนุมัติ (LM)', who(r.decidedAt && r.decision!=='withdrawn' ? r.approverName : '', r.approverPosition, r.decidedAt) + (r.decisionNote ? `<div style="color:var(--ink-500);">${escapeHtml(r.decisionNote)}</div>` : ''))}
+          ${line('ผู้ขอดำเนินการ', who(r.requestedBy, darPosNow(r.requestedBy, r.requestedPosition), r.requestedAt))}
+          ${line('ผู้ทบทวน', who(r.reviewedAt ? r.reviewerName : '', darPosNow(r.reviewerName, r.reviewerPosition), r.reviewedAt) + (r.reviewedAt && r.reviewerComment ? `<div style="color:var(--ink-500);">ข้อเสนอแนะ: ${escapeHtml(r.reviewerComment)}</div>` : ''))}
+          ${line(r.decision==='rejected' ? 'ไม่อนุมัติโดย' : 'ผู้อนุมัติ (LM)', who(r.decidedAt && r.decision!=='withdrawn' ? r.approverName : '', darPosNow(r.approverName, r.approverPosition), r.decidedAt) + (r.decisionNote ? `<div style="color:var(--ink-500);">${escapeHtml(r.decisionNote)}</div>` : ''))}
           ${darPublishable(r) ? line('วันที่เริ่มบังคับใช้', r.effectiveDate ? fmtDateRevLog(r.effectiveDate) : '<span style="color:var(--ink-400);">—</span>') : ''}
           ${line('ผู้ลงทะเบียน DAR', who(r.registeredBy, r.registeredPosition, r.registeredAt))}
           ${d ? line('คำขอในหน้า Approval', `<a href="javascript:void(0)" data-dar-open="${escapeHtml(d.id)}" style="color:var(--blue-600); text-decoration:underline; font-weight:700;">${escapeHtml(d.id)}</a> · ${escapeHtml(d.approvalStatus||'')}`) : ''}
@@ -7565,10 +7576,10 @@ function exportDarCsv(){
   const q = v=> `"${String(v==null?'':v).replace(/"/g,'""')}"`;
   const rows = DAR_LOG.slice().sort((a,b)=>String(a.darNo).localeCompare(String(b.darNo), undefined, { numeric:true })).map(r=>[
     r.darNo, fmtDate(r.requestedAt), r.docId, r.docName, r.docType, DAR_ACTION_LABEL[r.action]||'', r.fromRev||'', r.toRev||'',
-    r.reason, r.detail, r.requestedBy, r.requestedPosition,
-    r.reviewedAt ? r.reviewerName : '', fmtDate(r.reviewedAt), r.reviewerComment||'',
-    r.decision==='approved' ? r.approverName : '', r.decision==='approved' ? fmtDate(r.decidedAt) : '', fmtDate(r.effectiveDate),
-    r.registeredBy||'', fmtDate(r.registeredAt), DAR_PHASE_LABEL[darPhase(r)]||'',
+    r.reason, r.detail, darNameTH(r.requestedBy), darPosNow(r.requestedBy, r.requestedPosition),
+    r.reviewedAt ? darNameTH(r.reviewerName) : '', fmtDate(r.reviewedAt), r.reviewerComment||'',
+    r.decision==='approved' ? darNameTH(r.approverName) : '', r.decision==='approved' ? fmtDate(r.decidedAt) : '', fmtDate(r.effectiveDate),
+    r.registeredBy ? darNameTH(r.registeredBy) : '', fmtDate(r.registeredAt), DAR_PHASE_LABEL[darPhase(r)]||'',
   ].map(q).join(','));
   const blob = new Blob(['﻿' + [head.map(q).join(','), ...rows].join('\r\n')], { type:'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -7690,24 +7701,24 @@ async function buildDarPdfBytes(rec){
   cell(11, 10, darPublishable(rec) ? date(rec.effectiveDate) : '', { ec:11, al:'c' });
   block(14, 15, 3, 11, rec.reason || '-', 'c');
   block(17, 18, 3, 12, rec.detail || '-', 'l');
-  cell(20, 3, rec.requestedBy || '', { maxW: colR(7)-colL(3) });
-  cell(21, 3, rec.requestedPosition || '');
+  cell(20, 3, darNameTH(rec.requestedBy), { maxW: colR(7)-colL(3) });
+  cell(21, 3, darPosNow(rec.requestedBy, rec.requestedPosition));
   cell(22, 3, date(rec.requestedAt));
   if(rec.reviewedAt || rec.decision==='approved'){
-    cell(20, 10, rec.reviewerName || '', { maxW: colR(13)-colL(10) });
-    cell(21, 10, rec.reviewerPosition || '');
+    cell(20, 10, darNameTH(rec.reviewerName), { maxW: colR(13)-colL(10) });
+    cell(21, 10, darPosNow(rec.reviewerName, rec.reviewerPosition));
     cell(22, 10, date(rec.reviewedAt), { ec:11 });
     if(rec.reviewerComment) block(25, 26, 2, 13, rec.reviewerComment, 'l');
   }
   cell(30, 3, rec.decision==='rejected' ? `ไม่อนุมัติ เนื่องจาก ${rec.decisionNote||'-'}` : 'ไม่อนุมัติ เนื่องจาก…......................................................................................................................',
        { maxW: colR(13)-colL(3)-4 });
   if(rec.decision==='approved' || rec.decision==='rejected'){
-    cell(31, 8, rec.approverName || '', { maxW: colR(10)-colL(8) });
-    cell(32, 8, rec.approverPosition || '');
+    cell(31, 8, darNameTH(rec.approverName), { maxW: colR(10)-colL(8) });
+    cell(32, 8, darPosNow(rec.approverName, rec.approverPosition));
     cell(33, 8, date(rec.decidedAt), { ec:9 });
   }
   if(rec.registeredAt){
-    cell(35, 3, rec.registeredBy || '', { maxW: colR(7)-colL(3) });
+    cell(35, 3, darNameTH(rec.registeredBy), { maxW: colR(7)-colL(3) });
     cell(35, 9, date(rec.registeredAt));
   }
   text(`ออกจากระบบควบคุมเอกสาร ISO/IEC 17025 · ${fmtDateTime(Date.now())} · สถานะ: ${DAR_PHASE_LABEL[darPhase(rec)]||'-'}`,
