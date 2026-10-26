@@ -2215,7 +2215,14 @@ function filteredDocs(){
       if(!d.id.toLowerCase().includes(q) && !displayName(d).toLowerCase().includes(q)) return false;
     }
     return true;
-  });
+  }).sort(compareDocIds);
+}
+// เรียงตามเลขเอกสาร: ประเภท (ลำดับตาม DOC_TYPE_MAP: LM → LP → WI → LF …) แล้วตามเลขลำดับ
+function compareDocIds(a, b){
+  const order = Object.keys(DOC_TYPE_MAP);
+  const ti = d=>{ const i = order.indexOf(docTypeCode(d)); return i<0 ? 99 : i; };
+  const num = d=>{ const m = String(d.id).match(/-(?:LM|LP|WI|LF|LR|LS)-(\d+)/i) || String(d.id).match(/(\d+)/); return m ? parseInt(m[1],10) : 9999; };
+  return ti(a)-ti(b) || num(a)-num(b) || String(a.id).localeCompare(String(b.id), undefined, { numeric:true });
 }
 function renderDocumentsInto(){
   const el = document.getElementById('content');
