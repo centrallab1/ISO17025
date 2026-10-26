@@ -21,6 +21,7 @@ const dbFirestore = getFirestore(firebaseApp);
 const docRef = doc(dbFirestore, "iso17025", "documents");
 const archiveDocRef = doc(dbFirestore, "iso17025", "archive");
 const watermarkLogRef = doc(dbFirestore, "iso17025", "watermarklog");
+const trashDocRef = doc(dbFirestore, "iso17025", "trash"); // สำเนาเอกสารที่ถูกลบ — กู้คืนได้ที่ Administration
 
 // ============================================================
 // AUTH — soft, client-side login for identity + role-based UI gating.
@@ -1859,7 +1860,7 @@ function render(){
     case 'audit': el.innerHTML = renderAuditHubTabs() + viewAudit(); attachAuditHandlers(); break;
     case 'calendar': el.innerHTML = viewCalendar(); attachCalHandlers(); break;
     case 'audittrail': el.innerHTML = renderAuditHubTabs() + viewAuditTrail(); break;
-    case 'admin': el.innerHTML = viewAdmin(); attachWatermarkHandlers(); break;
+    case 'admin': el.innerHTML = viewAdmin(); attachWatermarkHandlers(); attachTrashHandlers(); if(isDC() && !TRASH_LOADED) loadTrash().then(()=>{ if(state.view==='admin') render(); }); break;
     case 'docdetail': el.innerHTML = viewDocDetail(state.selectedDoc); attachDetailActionHandlers(); break;
     default: el.innerHTML = viewDashboard();
   }
@@ -2316,7 +2317,7 @@ function wireDocControls(){
     const d = DOCUMENTS.find(x=>x.id===b.dataset.del);
     if(!d) return;
     if(!confirm(`ลบเอกสาร "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
-    markDocRemoved(d.id); DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
+    await trashDoc(d, 'ลบเอกสาร'); markDocRemoved(d.id); DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
     await persistDocs();
     renderDocumentsInto(); wireDocControls(); wireHubTabs();
   }));
@@ -3315,7 +3316,7 @@ function attachDetailActionHandlers(){
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
     if(!d) return;
     if(!confirm(`ลบเอกสาร "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
-    markDocRemoved(d.id); DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
+    await trashDoc(d, 'ลบเอกสาร'); markDocRemoved(d.id); DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
     await persistDocs();
     if(state.docDetailModal){ closeDocDetailModal(); render(); } else { goBack(); }
   });
@@ -4086,6 +4087,20 @@ function historyPersonCell(label, name, time){
       </div>
     </div>`;
 }
+function histPersonTile(label, name, time){
+  return `
+    <div class="hd-person">
+      <div class="hd-person-l">${label}</div>
+      ${avatarNodeHTML(name, 'hist-avatar', (name||'?').trim().charAt(0).toUpperCase(), 40)}
+      <div class="hd-person-n">${name || '—'}</div>
+      ${time ? `<div class="hd-person-t">${fmtDateTime(time)}</div>` : ''}
+    </div>`;
+}
+// เติมพารามิเตอร์ให้ลิงก์ SharePoint (download=1 → ดาวน์โหลดไฟล์, web=1 → เปิดดูในเบราว์เซอร์)
+function histLinkParam(url, k, v){
+  try{ const u = new URL(url); u.searchParams.set(k, v); return u.toString(); }
+  catch(e){ return url + (url.includes('?') ? '&' : '?') + `${k}=${v}`; }
+}
 function historyModalView(){
   const { docId } = state.historyModal;
   const d = DOCUMENTS.find(x=>x.id===docId);
@@ -4101,6 +4116,59 @@ function historyModalView(){
   return `
   <style>
     .hist-modal{ width:min(980px, 94vw); max-width:980px; }
+    .hd-card{ background:var(--card, #fff); border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin-bottom:14px; }
+    .hd-top{ display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; background:var(--blue-50, #f2f6ff); }
+    .hd-title-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .hd-code{ font-size:20px; font-weight:800; color:var(--ink-900); }
+    .hd-name{ font-size:18px; font-weight:800; color:var(--ink-900); margin-top:2px; }
+    .hd-type{ font-size:12px; color:var(--ink-500); margin-top:2px; }
+    .hd-rev{ display:inline-block; margin-top:8px; font-size:11.5px; font-weight:700; color:var(--blue-600); background:#fff; border:1px solid var(--line); border-radius:999px; padding:2px 10px; }
+    .hd-people{ display:flex; flex-wrap:wrap; }
+    .hd-person{ display:flex; flex-direction:column; align-items:center; text-align:center; gap:4px; padding:0 18px; min-width:120px; }
+    .hd-person + .hd-person{ border-left:1px solid var(--line); }
+    .hd-person-l{ font-size:11px; color:var(--ink-500); font-weight:700; }
+    .hd-person-n{ font-size:12.5px; font-weight:800; color:var(--ink-900); }
+    .hd-person-t{ font-size:10.5px; color:var(--ink-500); }
+    .hd-grid{ display:grid; grid-template-columns:1.1fr 1fr; gap:14px; align-items:start; margin-bottom:14px; }
+    .hd-top .hist-avatar{ background:#fff !important; border:1px solid var(--line); }
+    .hd-grid > .hd-card{ margin-bottom:0; }
+    .hd-col .hd-card:last-child{ margin-bottom:0; }
+    .hd-sec-title{ display:flex; align-items:center; gap:8px; font-size:13.5px; font-weight:800; color:var(--ink-900); margin-bottom:10px; }
+    .hd-sec-title svg{ width:18px; height:18px; stroke:var(--blue-600); stroke-width:2; fill:none; }
+    .hd-info-row{ display:grid; grid-template-columns:22px 120px 1fr; gap:8px; align-items:start; padding:9px 0; border-bottom:1px solid var(--line); font-size:12.5px; }
+    .hd-info-row:last-child{ border-bottom:none; }
+    .hd-i{ color:var(--ink-500); font-weight:800; display:flex; justify-content:center; }
+    .hd-i svg{ width:15px; height:15px; stroke:var(--ink-500); stroke-width:2; fill:none; }
+    .hd-k{ color:var(--ink-500); }
+    .hd-v{ color:var(--ink-900); font-weight:600; word-break:break-word; }
+    .hd-sub{ font-size:11px; color:var(--ink-500); font-weight:500; }
+    .hd-status{ display:flex; align-items:center; gap:12px; border-radius:12px; padding:12px; border:1px solid; }
+    .hd-status-ic{ width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; flex-shrink:0; }
+    .hd-status-ic svg{ width:18px; height:18px; stroke:#fff; stroke-width:2.6; fill:none; }
+    .hd-status-t{ font-size:14px; font-weight:800; }
+    .hd-status-s{ font-size:11.5px; color:var(--ink-500); }
+    .hd-green{ background:var(--green-50); border-color:var(--green-600); } .hd-green .hd-status-ic{ background:var(--green-600); } .hd-green .hd-status-t{ color:var(--green-600); }
+    .hd-amber{ background:var(--amber-50); border-color:var(--amber-600); } .hd-amber .hd-status-ic{ background:var(--amber-600); } .hd-amber .hd-status-t{ color:var(--amber-600); }
+    .hd-red{ background:var(--red-50, #fdecec); border-color:var(--red-600); } .hd-red .hd-status-ic{ background:var(--red-600); } .hd-red .hd-status-t{ color:var(--red-600); }
+    .hd-dates{ display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; }
+    .hd-date{ background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:10px; }
+    .hd-date-l{ font-size:11px; color:var(--ink-500); display:flex; align-items:center; gap:4px; }
+    .hd-date-v{ font-size:15px; font-weight:800; color:var(--ink-900); margin-top:3px; }
+    .hd-date-v.sm{ font-size:12.5px; }
+    .hd-date-s{ font-size:11px; color:var(--ink-500); }
+    .hd-date-red{ background:var(--red-50, #fdecec); border-color:var(--red-600); }
+    .hd-date-red .hd-date-v, .hd-date-red .hd-date-s, .hd-date-red .hd-date-l{ color:var(--red-600); }
+    .hd-files{ display:flex; gap:10px; flex-wrap:wrap; }
+    .hd-files .btn{ justify-content:center; }
+    .hd-open{ flex:1 1 280px; }
+    @media (max-width:760px){
+      .hd-grid{ grid-template-columns:1fr; }
+      .hd-dates{ grid-template-columns:1fr 1fr; }
+      .hd-people{ display:grid; grid-template-columns:repeat(3, 1fr); width:100%; }
+      .hd-person{ padding:0 4px; min-width:0; }
+      .hd-person-t{ font-size:9.5px; }
+      .hd-info-row{ grid-template-columns:22px 100px 1fr; }
+    }
     .hist-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; padding-bottom:16px; border-bottom:1px solid var(--line); margin-bottom:16px; }
     .hist-head-title{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .hist-people{ display:flex; gap:22px; flex-wrap:wrap; }
@@ -4140,38 +4208,80 @@ function historyModalView(){
   </style>
   <div class="modal-backdrop" id="historyModalBackdrop">
     <div class="modal hist-modal" data-scroll-id="historyModalRoot">
-      <div class="modal-head"><div class="modal-title">ประวัติเอกสาร</div><button class="modal-close" id="historyModalCloseBtn">✕</button></div>
+      <div class="modal-head"><div style="display:flex; align-items:center; gap:12px;"><div style="width:42px; height:42px; border-radius:50%; background:var(--blue-50); display:flex; align-items:center; justify-content:center;">${ic('doc')}</div><div><div class="modal-title">รายละเอียดเอกสาร</div><div style="font-size:11.5px; color:var(--ink-500);">Document Details</div></div></div><button class="modal-close" id="historyModalCloseBtn">✕</button></div>
       <div class="modal-body" data-scroll-id="historyModalBody">
-        <div class="hist-head">
-          <div>
-            <div class="hist-head-title"><div class="detail-title">${d.id}</div>${statusBadge(d.note)}${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, false)}</div>
-            <div class="detail-sub" style="margin-bottom:6px;">${cleanName(d)}${d.rev ? ` <span style="color:var(--ink-500); font-weight:600;">· Rev.${d.rev}</span>` : ''}</div>
-            <div style="font-size:11px; color:${isOverdue?'var(--red-600)':'var(--ink-500)'};">${ic('clock','sm-icon')} ทบทวนครั้งถัดไป: ${fmtDate(nrd)} (${isOverdue?`เกินกำหนด ${Math.abs(days)} วัน`:`อีก ${days} วัน`})</div>
+        <div class="hd-card hd-top">
+          <div class="hd-top-left">
+            <div class="hd-title-row">
+              <div class="hd-code">${d.id}</div>
+              ${statusBadge(d.note)}${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, false)}
+            </div>
+            <div class="hd-name">${cleanName(d)}</div>
+            <div class="hd-type">${docTypeLabel(d)}</div>
+            ${d.rev ? `<span class="hd-rev">Rev.${d.rev}</span>` : ''}
           </div>
-          <div class="hist-people">
-            ${historyPersonCell('ผู้จัดทำ', d.publishedPreparedBy || d.preparedBy, d.publishedPreparedAt||d.preparedAt||d.createdDate)}
-            ${historyPersonCell('ผู้ทบทวน', d.publishedReviewerName || d.reviewerName, d.reviewedAt)}
-            ${historyPersonCell('ผู้อนุมัติ', d.publishedApproverName || d.approverName || d.approvedBy, d.approvedAt)}
+          <div class="hd-people">
+            ${histPersonTile('ผู้จัดทำ', d.publishedPreparedBy || d.preparedBy, d.publishedPreparedAt||d.preparedAt||d.createdDate)}
+            ${histPersonTile('ผู้ทบทวน', d.publishedReviewerName || d.reviewerName, d.reviewedAt)}
+            ${histPersonTile('ผู้อนุมัติ', d.publishedApproverName || d.approverName || d.approvedBy, d.approvedAt)}
           </div>
         </div>
 
-        <div class="hist-grid" style="grid-template-columns:1fr;">
-          <div class="hist-summary">
-            <div class="side-box-title" style="margin-bottom:8px;">สรุปข้อมูลเอกสาร</div>
-            <div class="kv-row"><div class="k">รหัสเอกสาร</div><div class="v">${d.id}</div></div>
-            <div class="kv-row"><div class="k">ชื่อเอกสาร</div><div class="v">${cleanName(d)}</div></div>
-            <div class="kv-row"><div class="k">ประเภทเอกสาร</div><div class="v">${docTypeLabel(d)}</div></div>
-            <div class="kv-row"><div class="k">Revision</div><div class="v">${d.rev || '—'}</div></div>
-            <div class="kv-row"><div class="k">ข้อกำหนด ISO</div><div class="v">${displayClause(d) ? clauseLabel(displayClause(d)) : 'ไม่ระบุ'}</div></div>
-            <div class="kv-row"><div class="k">สถานะ</div><div class="v">${d.note}</div></div>
-            <div class="kv-row"><div class="k">สร้างเมื่อ</div><div class="v">${d.createdDate ? fmtDateTime(d.createdDate) : '—'}</div></div>
-            <div class="kv-row"><div class="k">อัปเดตล่าสุด</div><div class="v">${fmtDateTime(d.lastUpdated)}</div></div>
-
-            <div class="hist-summary-actions">
-              ${displayLink(d) ? `<a class="btn primary" href="${displayLink(d)}" target="_blank" rel="noopener">${ic('link')} เปิดใน SharePoint</a>` : `<button class="btn ghost" disabled>${ic('link')} ยังไม่มีลิงก์</button>`}
-              ${(d.linkHistory && d.linkHistory.length) ? `<button class="btn ghost" id="historyModalToggleLinks">${ic('folder')} ${state.historyModalLinksOpen ? 'ซ่อน' : 'ดู'}ลิงก์ทั้งหมด (${d.linkHistory.length + (displayLink(d)?1:0)})</button>` : ''}
+        <div class="hd-grid">
+          <div class="hd-card">
+            <div class="hd-sec-title">${ic('doc')} ข้อมูลเอกสาร</div>
+            <div class="hd-info">
+              <div class="hd-info-row"><span class="hd-i">#</span><span class="hd-k">รหัสเอกสาร</span><span class="hd-v">${d.id}</span></div>
+              <div class="hd-info-row"><span class="hd-i">${ic('file')}</span><span class="hd-k">ชื่อเอกสาร</span><span class="hd-v">${cleanName(d)}</span></div>
+              <div class="hd-info-row"><span class="hd-i">${ic('folder')}</span><span class="hd-k">ประเภทเอกสาร</span><span class="hd-v">${docTypeLabel(d)}</span></div>
+              <div class="hd-info-row"><span class="hd-i">${ic('history')}</span><span class="hd-k">Revision</span><span class="hd-v">${d.rev || '—'}</span></div>
+              <div class="hd-info-row"><span class="hd-i">${ic('check')}</span><span class="hd-k">ข้อกำหนด ISO</span><span class="hd-v">${(()=>{ const c = displayClause(d); if(!c) return 'ไม่ระบุ'; const lab = clauseLabel(c); const m = String(lab).match(/^(.*?)\s*\(([^)]*)\)\s*$/); return m ? `${m[1]}<div class="hd-sub">(${m[2]})</div>` : lab; })()}</span></div>
             </div>
           </div>
+          <div class="hd-col">
+            <div class="hd-card">
+              <div class="hd-sec-title">${ic('alert')} สถานะเอกสาร</div>
+              ${(()=>{
+                const st = d.approvalStatus || '';
+                const tone = st==='อนุมัติแล้ว' ? 'green' : st==='ไม่อนุมัติ' ? 'red' : 'amber';
+                const sub = st==='อนุมัติแล้ว' ? 'เอกสารถูกควบคุมตามระบบ Document Control' : st==='ไม่อนุมัติ' ? 'คำขอล่าสุดไม่ได้รับการอนุมัติ' : (st ? `อยู่ระหว่างดำเนินการ — ${requestTypeLabel(d)||''}` : '');
+                return `<div class="hd-status hd-${tone}">
+                  <div class="hd-status-ic">${ic(tone==='green'?'check':tone==='red'?'alert':'clock')}</div>
+                  <div style="flex:1; min-width:0;"><div class="hd-status-t">${st || '—'}</div><div class="hd-status-s">${sub}</div></div>
+                  ${d.note ? statusBadge(d.note) : ''}
+                </div>`;
+              })()}
+            </div>
+            <div class="hd-card">
+              <div class="hd-sec-title">${ic('clock')} วันที่สำคัญ</div>
+              <div class="hd-dates">
+                <div class="hd-date ${isOverdue ? 'hd-date-red' : ''}">
+                  <div class="hd-date-l">${ic('clock','sm-icon')} ทบทวนครั้งถัดไป</div>
+                  <div class="hd-date-v">${fmtDate(nrd) || '—'}</div>
+                  ${nrd ? `<div class="hd-date-s">(${isOverdue ? `เกินกำหนด ${Math.abs(days)} วัน` : `เหลืออีก ${days} วัน`})</div>` : ''}
+                </div>
+                <div class="hd-date">
+                  <div class="hd-date-l">${ic('doc','sm-icon')} สร้างเมื่อ</div>
+                  <div class="hd-date-v sm">${d.createdDate ? fmtDateTime(d.createdDate) : '—'}</div>
+                </div>
+                <div class="hd-date">
+                  <div class="hd-date-l">${ic('history','sm-icon')} อัปเดตล่าสุด</div>
+                  <div class="hd-date-v sm">${fmtDateTime(d.lastUpdated) || '—'}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hd-card">
+          <div class="hd-sec-title">${ic('link')} ไฟล์เอกสาร</div>
+          ${displayLink(d) ? `
+          <div class="hd-files">
+            <a class="btn primary hd-open" href="${displayLink(d)}" target="_blank" rel="noopener">${ic('link')} เปิดใน SharePoint</a>
+            <a class="btn ghost" href="${histLinkParam(displayLink(d),'download','1')}" target="_blank" rel="noopener">${ic('download')} ดาวน์โหลด</a>
+            <a class="btn ghost" href="${histLinkParam(displayLink(d),'web','1')}" target="_blank" rel="noopener">${ic('eye')} ดูตัวอย่าง</a>
+            ${(d.linkHistory && d.linkHistory.length) ? `<button class="btn ghost" id="historyModalToggleLinks">${ic('folder')} ${state.historyModalLinksOpen ? 'ซ่อน' : 'ดู'}ลิงก์ทั้งหมด (${d.linkHistory.length + 1})</button>` : ''}
+          </div>` : `<div style="font-size:12.5px; color:var(--ink-500);">ยังไม่มีลิงก์เอกสาร</div>`}
         </div>
 
         <div class="panel" style="margin-top:20px; box-shadow:none; border:1px solid var(--line); padding:16px;">
@@ -4513,7 +4623,7 @@ function attachRevisionDashboardHandlers(){
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
     if(!d) return;
     if(!confirm(`ลบเอกสาร "${d.id} ${cleanName(d)}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`)) return;
-    markDocRemoved(d.id); DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
+    await trashDoc(d, 'ลบเอกสาร'); markDocRemoved(d.id); DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
     state.selectedDoc = null;
     state.revisionDetailOpen = false;
     await persistDocs();
@@ -4605,7 +4715,7 @@ function viewApproval(){
   // request types like review/cancel) + rejected. Anything approved but
   // still awaiting DC's link moves to its own tab instead of hiding inside
   // "history", since it still has an outstanding action.
-  const historyCount = (countApproved - countPendingPublish) + countRejected;
+  const historyCount = DOCUMENTS.filter(x=> !x.hiddenFromApprovalHistory && ((x.approvalStatus==='อนุมัติแล้ว' && !isPendingPublishDoc(x)) || x.approvalStatus==='ไม่อนุมัติ')).length;
 
   const tabs = [
     { key:'active', label:'คำขอที่กำลังดำเนินการ', n: activeCount },
@@ -4617,7 +4727,7 @@ function viewApproval(){
   if(state.approvalTab==='pendingpublish'){
     filtered = DOCUMENTS.filter(isPendingPublishDoc);
   } else if(state.approvalTab==='history'){
-    filtered = DOCUMENTS.filter(x=> (x.approvalStatus==='อนุมัติแล้ว' && !isPendingPublishDoc(x)) || x.approvalStatus==='ไม่อนุมัติ');
+    filtered = DOCUMENTS.filter(x=> !x.hiddenFromApprovalHistory && ((x.approvalStatus==='อนุมัติแล้ว' && !isPendingPublishDoc(x)) || x.approvalStatus==='ไม่อนุมัติ'));
   } else {
     filtered = DOCUMENTS.filter(x=> !x.approvalStatus || x.approvalStatus==='ร่าง' || x.approvalStatus==='รอทบทวน' || x.approvalStatus==='รออนุมัติ');
   }
@@ -4888,11 +4998,12 @@ function attachApprovalHandlers(){
       if(!isDC()) return; // defense in depth — button only renders for DC anyway
       const d = DOCUMENTS.find(x=>x.id===btn.dataset.delRequest);
       if(!d) return;
-      // แท็บ "ประวัติ": รายการที่จบแล้ว (ไม่มีคำขอค้าง) ไม่มีคำขอให้ถอน — ปุ่มลบจึงลบเอกสารออกจากระบบ
-      // (เดิมตกไปที่ทาง "ถอนคำขอ" ซึ่งแค่ตั้งสถานะอนุมัติแล้วซ้ำ จึงดูเหมือนลบไม่ได้)
+      // แท็บ "ประวัติ": รายการที่จบแล้ว (ไม่มีคำขอค้าง) — ลบออกจาก "ประวัติ Approval" เท่านั้น
+      // เอกสารตัวจริงยังอยู่ในหน้า Documents ตามเดิม (ไม่ลบเอกสาร)
       if(!hasPendingRequest(d)){
-        if(!confirm(`ลบเอกสาร "${d.id} ${cleanName(d)}" ออกจากระบบใช่หรือไม่?\n\nเอกสารจะหายจากรายการเอกสารและประวัติด้วย ลบแล้วกู้คืนไม่ได้`)) return;
-        markDocRemoved(d.id); DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
+        if(!confirm(`ลบ "${d.id} ${cleanName(d)}" ออกจากประวัติ Approval?\n\nเอกสารยังอยู่ในหน้า Documents ตามเดิม — ลบเฉพาะรายการในประวัติ`)) return;
+        d.hiddenFromApprovalHistory = true;
+        d.lastUpdated = Date.now();
         if(state.selectedDoc===d.id){ state.selectedDoc = null; state.approvalDetailOpen = false; }
         render();
         await persistDocs();
@@ -4918,7 +5029,7 @@ function attachApprovalHandlers(){
       if(!confirm(confirmMsg)) return;
       const darWithdrawn = darOnWithdrawn(d, currentActorName());
       if(isNewDocRequest){
-        markDocRemoved(d.id); DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
+        await trashDoc(d, 'ลบเอกสาร'); markDocRemoved(d.id); DOCUMENTS = DOCUMENTS.filter(x=>x.id!==d.id);
         if(state.selectedDoc===d.id) state.selectedDoc = null;
       } else {
         const actor = currentActorName();
@@ -5557,7 +5668,7 @@ async function runMasterListImport(){
 // ADMINISTRATION
 // ============================================================
 function viewAdmin(){
-  return viewWatermarkTool() + viewImportMasterListPanel() + viewStorageUsagePanel();
+  return viewWatermarkTool() + viewTrashPanel() + viewImportMasterListPanel() + viewStorageUsagePanel();
 }
 
 // ============================================================
@@ -7061,6 +7172,7 @@ function darNextFreeNumber(prefix){
 }
 // สร้างคำขอใน Approval จากใบ DAR — ผู้ขอของคำขอ = ผู้ออกใบ DAR · คืน { doc } หรือ { error }
 function darMaterializeRequest(rec){
+  { const ex = DOCUMENTS.find(x=>x.id===rec.requestDocId); if(ex) delete ex.hiddenFromApprovalHistory; }
   const actor = rec.requestedBy || currentActorName();
   const now = Date.now();
   const tag = `DAR No.${rec.darNo}`;
@@ -7910,6 +8022,130 @@ async function downloadDarPdf(rec){
   setTimeout(()=>URL.revokeObjectURL(url), 3000);
 }
 
+
+// ============================================================
+// ถังขยะเอกสาร — ทุกครั้งที่ลบเอกสาร จะเก็บสำเนาทั้งก้อนไว้ใน iso17025/trash ก่อน
+// DC กู้คืนได้ที่หน้า Administration · เก็บ 180 วัน / สูงสุด 100 รายการ (กันเกินเพดาน 1 MB)
+// ============================================================
+var TRASH_ITEMS = [];
+var TRASH_LOADED = false;
+async function loadTrash(){
+  try{
+    const snap = await getDoc(trashDocRef);
+    TRASH_ITEMS = (snap.exists() && Array.isArray(snap.data().items)) ? snap.data().items : [];
+    TRASH_LOADED = true;
+  }catch(e){ console.error('trash load failed', e); TRASH_LOADED = false; }
+}
+async function persistTrash(){
+  const cutoff = Date.now() - 180*24*3600*1000;
+  TRASH_ITEMS = TRASH_ITEMS.filter(t=> (t.deletedAt||0) > cutoff).slice(-100);
+  try{ await setDoc(trashDocRef, { items: TRASH_ITEMS, updatedAt: Date.now() }); }
+  catch(e){ console.error('trash save failed', e); alert('บันทึกถังขยะไม่สำเร็จ: ' + e.message); }
+}
+async function trashDoc(d, reason){
+  try{
+    await loadTrash();
+    TRASH_ITEMS.push({ doc: JSON.parse(JSON.stringify(d)), deletedAt: Date.now(), deletedBy: currentActorName(), reason: reason||'' });
+    await persistTrash();
+  }catch(e){ console.error('trashDoc failed', e); }
+}
+// คืนเอกสารเข้าทะเบียน — lastUpdated ใหม่กว่าเวลาที่ถูกลบ จึงไม่ถูกกรองทิ้งตอน merge
+async function restoreDocObject(d, note){
+  if(DOCUMENTS.some(x=>x.id===d.id)){ alert(`มีเอกสารรหัส ${d.id} อยู่ในระบบแล้ว`); return false; }
+  const now = Date.now();
+  d.lastUpdated = now;
+  delete d.hiddenFromApprovalHistory;
+  d.comments = d.comments || [];
+  d.comments.push({ by: currentActorName(), text: note, time: now });
+  REMOVED_DOCS = REMOVED_DOCS.filter(r=> r.id!==d.id);
+  DOCUMENTS.push(d);
+  await persistDocs();
+  return true;
+}
+// เอกสารที่หายจากทะเบียนแต่ยังมีใบ DAR ที่อนุมัติ/เผยแพร่แล้ว (ลบไปก่อนมีถังขยะ)
+function darOrphanDocs(){
+  const seen = new Set();
+  return DAR_LOG.filter(r=> r.decision==='approved' && r.action!=='cancel' && r.docId && !DOCUMENTS.some(x=>x.id===r.docId))
+    .sort((a,b)=> (b.decidedAt||0)-(a.decidedAt||0))
+    .filter(r=>{ if(seen.has(r.docId)) return false; seen.add(r.docId); return true; });
+}
+function docFromDar(r){
+  const now = Date.now();
+  let clause = '';
+  try{ if(typeof suggestClause==='function') clause = suggestClause(r.docName) || ''; }catch(e){}
+  const publishedAt = r.publishedAt || r.effectiveDate || r.decidedAt || null;
+  return {
+    id: r.docId, name: r.docName, clause, link:'', note:'ควบคุม', rev: r.toRev || '0',
+    approvalStatus:'อนุมัติแล้ว', preparedBy: r.requestedBy || '', preparedAt: r.requestedAt || null,
+    reviewerName: r.reviewerName || '', reviewedAt: r.reviewedAt || null,
+    approverName: r.approverName || '', approvedBy: r.approverName || '', approvedAt: r.decidedAt || null, approvedComment: r.decisionNote || '',
+    publishedPreparedBy: r.requestedBy || '', publishedPreparedAt: r.requestedAt || null,
+    publishedReviewerName: r.reviewerName || '', publishedApproverName: r.approverName || '',
+    publishedName: r.docName, publishedClause: clause,
+    effectiveDate: r.effectiveDate || null, publishedAt, publishedLink: null, linkHistory: [],
+    createdDate: r.requestedAt || now, cancelledDate: null,
+    lastRequestType: null, lastRequestFrom: r.fromRev || null, requestedBy: null,
+    formConfirmedAt: null, linkSetAt: null, revisionLog: [], darNo: r.darNo,
+    comments: [], lastUpdated: now,
+  };
+}
+function viewTrashPanel(){
+  if(!isDC()) return '';
+  const orphans = DAR_LOG_LOADED ? darOrphanDocs() : [];
+  const items = TRASH_ITEMS.slice().reverse();
+  return `
+  <div class="panel">
+    <div class="panel-head"><div>
+      <div class="panel-title">ถังขยะเอกสาร / กู้คืนเอกสาร</div>
+      <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">เอกสารที่ถูกลบจะเก็บสำเนาไว้ที่นี่ 180 วัน (เฉพาะ DC)</div>
+    </div></div>
+    ${orphans.length ? `
+    <div class="side-box" style="border-color:var(--amber-600); background:var(--amber-50); margin-bottom:14px;">
+      <div style="font-size:12.5px; font-weight:800; color:var(--amber-600); margin-bottom:6px;">เอกสารที่หายจากทะเบียน (สร้างคืนจากใบ DAR)</div>
+      <div style="font-size:11.5px; color:var(--ink-700); margin-bottom:8px;">ลบไปก่อนมีถังขยะ จึงไม่มีสำเนาเต็ม — สร้างคืนได้จากข้อมูลในใบ DAR (รหัส ชื่อ Rev. ผู้จัดทำ/ทบทวน/อนุมัติ วันที่) แล้วให้ DC วางลิงก์ SharePoint และตรวจข้อกำหนด ISO อีกครั้งผ่าน "แก้ไขเอกสาร"</div>
+      ${orphans.map(r=>`
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-top:1px solid var(--line); flex-wrap:wrap;">
+        <div style="font-size:12.5px;"><b class="mono">${escapeHtml(r.docId)}</b> ${escapeHtml(r.docName)} · Rev.${escapeHtml(r.toRev||'-')} <span style="color:var(--ink-500);">(DAR No.${escapeHtml(r.darNo)})</span></div>
+        <button class="btn primary" data-restore-dar="${escapeHtml(r.darNo)}">${ic('history')} สร้างคืน</button>
+      </div>`).join('')}
+    </div>` : ''}
+    ${!TRASH_LOADED ? `<div style="font-size:12.5px; color:var(--ink-500);">กำลังโหลดถังขยะ…</div>` : items.length ? `
+    <div class="table-wrap" style="overflow-x:auto;"><table class="dtable">
+      <thead><tr><th>เอกสาร</th><th>Rev.</th><th>ลบเมื่อ</th><th>โดย</th><th></th></tr></thead>
+      <tbody>${items.map((t,i)=>`
+        <tr>
+          <td class="mono" style="white-space:nowrap;">${escapeHtml(t.doc.id)}<div class="name">${escapeHtml(t.doc.name||'')}</div></td>
+          <td>${escapeHtml(t.doc.rev||'-')}</td>
+          <td style="white-space:nowrap;">${fmtDateTime(t.deletedAt)}</td>
+          <td>${escapeHtml(t.deletedBy||'')}</td>
+          <td style="text-align:right;"><button class="btn ghost" data-restore-trash="${TRASH_ITEMS.length-1-i}">${ic('history')} กู้คืน</button></td>
+        </tr>`).join('')}</tbody>
+    </table></div>` : `<div style="font-size:12.5px; color:var(--ink-500);">ถังขยะว่าง</div>`}
+  </div>`;
+}
+function attachTrashHandlers(){
+  document.querySelectorAll('[data-restore-trash]').forEach(b=> b.addEventListener('click', async ()=>{
+    if(!isDC()) return;
+    const idx = parseInt(b.dataset.restoreTrash, 10);
+    const t = TRASH_ITEMS[idx]; if(!t) return;
+    if(!confirm(`กู้คืนเอกสาร ${t.doc.id} ${t.doc.name||''}?`)) return;
+    b.disabled = true;
+    const ok = await restoreDocObject(JSON.parse(JSON.stringify(t.doc)), `DC กู้คืนเอกสารจากถังขยะ (ลบเมื่อ ${fmtDateTime(t.deletedAt)} โดย ${t.deletedBy||'-'})`);
+    if(ok){ TRASH_ITEMS.splice(idx, 1); await persistTrash(); }
+    render();
+  }));
+  document.querySelectorAll('[data-restore-dar]').forEach(b=> b.addEventListener('click', async ()=>{
+    if(!isDC()) return;
+    const r = darFind(b.dataset.restoreDar); if(!r) return;
+    if(!confirm(`สร้างเอกสาร ${r.docId} ${r.docName} คืนจากใบ DAR No.${r.darNo}?\n\nหลังสร้างคืน ให้วางลิงก์ SharePoint และตรวจข้อกำหนด ISO ผ่าน "แก้ไขเอกสาร"`)) return;
+    b.disabled = true;
+    const d = docFromDar(r);
+    if(await restoreDocObject(d, `DC สร้างเอกสารคืนจากใบ DAR No.${r.darNo} (เอกสารถูกลบโดยไม่ตั้งใจ) — ต้องวางลิงก์ SharePoint ใหม่`)){
+      alert(`สร้างคืน ${d.id} แล้ว — กรุณาวางลิงก์ SharePoint และตรวจข้อกำหนด ISO ที่หน้า Documents → แก้ไข`);
+    }
+    render();
+  }));
+}
 // ============================================================
 // GO
 // ============================================================
