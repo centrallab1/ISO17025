@@ -2391,13 +2391,13 @@ function docModal(){
         </div>
         <div class="field"><label>Rev.</label><input id="mfRev" value="${d.rev||'0'}" placeholder="0"></div>
         ${d.lastRequestType==='revision' ? `<div class="field"><label>Rev. ก่อนขอปรับปรุง (ตัวเลขที่ 1 ใน badge "ปรับปรุง Rev.X → Y")</label><input id="mfLastRequestFrom" value="${d.lastRequestFrom||''}" placeholder="0"><div style="font-size:11px; color:var(--ink-500); margin-top:4px;">แก้ตรงนี้ถ้า badge คำขอปรับปรุงในหน้า Approval แสดงเลข Rev. เริ่มต้นผิด (เช่นแสดง "Rev.1 → 2" ทั้งที่ควรเป็น "Rev.0 → 1")</div></div>` : ''}
-        <div class="field"><label>วันที่จัดทำ</label><input id="mfCreated" type="date" value="${toDateInputValue(d.createdDate)}"></div>
+        <div class="field"><label>วันที่จัดทำ</label><input id="mfCreated" type="date" value="${toDateInputValue(hasPendingRequest(d) ? d.createdDate : (d.publishedPreparedAt||d.preparedAt||d.createdDate))}"></div>
         <div class="field"><label>วันที่ประกาศใช้</label><input id="mfEffective" type="date" value="${toDateInputValue(d.effectiveDate)}"></div>
         <div class="field"><label>วันที่ยกเลิก</label><input id="mfCancelled" type="date" value="${toDateInputValue(d.cancelledDate)}"></div>
         <div style="font-size:11px; color:var(--ink-500); margin-top:-8px; margin-bottom:14px;">กรอกเมื่อเปลี่ยนสถานะเอกสารเป็น "ยกเลิก" — ระบบจะเติมวันนี้ให้อัตโนมัติถ้ายังไม่ได้กรอก แก้ไขได้</div>
-        <div class="field"><label>ผู้จัดทำ</label><input id="mfPrep" value="${(d.preparedBy||'').replace(/"/g,'&quot;')}"></div>
-        <div class="field"><label>ผู้ทบทวน</label><input id="mfReviewer" value="${(d.reviewerName||'').replace(/"/g,'&quot;')}"></div>
-        <div class="field"><label>ผู้อนุมัติ</label><input id="mfApprover" value="${(d.approverName||'').replace(/"/g,'&quot;')}"></div>
+        <div class="field"><label>ผู้จัดทำ</label><input id="mfPrep" value="${((hasPendingRequest(d) ? d.preparedBy : (d.publishedPreparedBy||d.preparedBy))||'').replace(/"/g,'&quot;')}"></div>
+        <div class="field"><label>ผู้ทบทวน</label><input id="mfReviewer" value="${((hasPendingRequest(d) ? d.reviewerName : (d.publishedReviewerName||d.reviewerName))||'').replace(/"/g,'&quot;')}"></div>
+        <div class="field"><label>ผู้อนุมัติ</label><input id="mfApprover" value="${((hasPendingRequest(d) ? d.approverName : (d.publishedApproverName||d.approverName))||'').replace(/"/g,'&quot;')}"></div>
         <div class="field"><label>สถานะการอนุมัติ</label>
           <select id="mfApprovalStatus">${[...STATUS_FLOW,'ไม่อนุมัติ'].map(s=>`<option ${((d.approvalStatus||'ร่าง')===s)?'selected':''}>${s}</option>`).join('')}</select></div>
         <div class="field"><label>รอบทบทวน (วัน) — นับจากวันประกาศใช้</label><input id="mfReviewCycle" value="${d.reviewCycleDays || DEFAULT_REVIEW_CYCLE_DAYS}" placeholder="365"></div>
@@ -2683,6 +2683,14 @@ function wireModalControls(){
     const appr = document.getElementById('mfApprover'); if(appr) d.approverName = appr.value.trim();
     const apStatus = document.getElementById('mfApprovalStatus'); if(apStatus) d.approvalStatus = apStatus.value;
     const cycle = document.getElementById('mfReviewCycle'); if(cycle){ const n = parseInt(cycle.value,10); d.reviewCycleDays = isNaN(n) ? DEFAULT_REVIEW_CYCLE_DAYS : n; }
+    // หน้าการ์ดเอกสารแสดงข้อมูลชุด "ที่เผยแพร่ล่าสุด" (published*) — ถ้าไม่มีคำขอค้างอยู่
+    // ให้ค่าที่ DC แก้ในฟอร์มนี้เขียนลงชุดนั้นด้วย การ์ดจึงเปลี่ยนตามทันที
+    if(!hasPendingRequest(d)){
+      if(prep) d.publishedPreparedBy = d.preparedBy;
+      if(rev2) d.publishedReviewerName = d.reviewerName;
+      if(appr){ d.publishedApproverName = d.approverName; d.approvedBy = d.approverName || d.approvedBy; }
+      if(created && d.createdDate){ d.publishedPreparedAt = d.createdDate; d.preparedAt = d.createdDate; }
+    }
     d.lastUpdated = Date.now();
     if(state.selectedDoc===oldId) state.selectedDoc = id;
     closeModal();
@@ -3248,10 +3256,10 @@ function docDetailContent(d){
         <div class="clause-chip">${displayClause(d) ? ic('check') : ''}${displayClause(d) ? clauseLabel(displayClause(d)) : 'ยังไม่ได้ระบุข้อกำหนด'}</div>
       </div>
     </div>
-    <div class="desc-block" style="margin-top:18px;">
+    ${isDC() ? `<div class="desc-block" style="margin-top:18px;">
       <b>ความคิดเห็นล่าสุด:</b><br>
       ${(d.comments||[]).slice(-1).map(c=>`${c.by}: ${c.text} <span style="color:var(--ink-500);">(${fmtDateTime(c.time)})</span>`).join('') || 'ยังไม่มีความเห็น'}
-    </div>
+    </div>` : ''}
     ${(d.linkHistory && d.linkHistory.length) ? `
     <div class="desc-block" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--line);">
       <b>ประวัติลิงก์เอกสาร:</b><br>
@@ -4957,6 +4965,7 @@ function viewApprovalDetail(){
       })()}
     </div>
 
+    ${isDC() ? `
     <div class="panel-head" style="margin:20px 0 10px;">
       <div class="panel-title" style="margin:0;">Unified Timeline Log ${allComments.length ? `<span style="color:var(--ink-500); font-weight:600; font-size:12px;">(${allComments.length})</span>` : ''}</div>
       ${allComments.length > 5 ? `<button class="panel-link" id="btnToggleComments" style="cursor:pointer;">${state.approvalCommentsExpanded ? 'ย่อ ▲' : `แสดงทั้งหมด (${allComments.length}) ▼`}</button>` : ''}
@@ -4970,6 +4979,7 @@ function viewApprovalDetail(){
         <div class="utl-time">${fmtDateTime(c.time)}</div>
       </div>`;
     }).join('') : `<div style="color:var(--ink-500); font-size:12.5px;">ยังไม่มีความเห็น</div>`}
+    ` : ''}
   </div>`;
 }
 
