@@ -6521,13 +6521,9 @@ function fmtDate(ts){
   const y = dt.getFullYear()+543;
   return `${d}/${m}/${y}`;
 }
+// ไม่แสดงเวลาในหน้าใดๆ ของแอป — แสดงเฉพาะวันที่ (เวลาจริงยังเก็บไว้ในข้อมูลตามเดิม)
 function fmtDateTime(ts){
-  if(!ts) return '';
-  const dt = new Date(ts);
-  if(isNaN(dt.getTime())) return '';
-  const hh = String(dt.getHours()).padStart(2,'0');
-  const mm = String(dt.getMinutes()).padStart(2,'0');
-  return `${fmtDate(ts)} ${hh}:${mm}`;
+  return fmtDate(ts);
 }
 // วันที่แบบไทยเต็ม: "วัน เดือนเต็ม ปี พ.ศ." เช่น 2 มีนาคม 2564
 // ใช้เฉพาะในตาราง "ทะเบียนประวัติเอกสาร" (บนหน้าจอ + ไฟล์ Word ที่ส่งออก)
@@ -7241,6 +7237,10 @@ async function darCreateWithRequest(o){
              toRev: o.action==='revision' ? nextRevNumber(d.rev) : (d.rev||'0') };
   }
   const rec = darNewRecord({ ...base, reason:o.reason, detail:o.detail });
+  if(o.darNo && isDC()){
+    if(DAR_LOG.some(x=>x.darNo===o.darNo)) throw new Error(`เลข DAR ${o.darNo} มีในทะเบียนแล้ว`);
+    rec.darNo = o.darNo;
+  }
   const out = darMaterializeRequest(rec);
   if(out.error) throw new Error(out.error);
   rec.linkedDocId = out.doc.id;
@@ -7269,6 +7269,8 @@ function darCreateModalView(){
       <div class="modal-head"><div class="modal-title">ออกใบ DAR (ใบคำร้องขอดำเนินการด้านเอกสารคุณภาพ)</div><button class="modal-close" id="darcClose">✕</button></div>
       <div class="modal-body">
         <div style="font-size:11.5px; color:var(--ink-500); margin-bottom:12px;">ส่งแล้วระบบสร้างคำขอในหน้า Approval ทันที: ${nextStep}</div>
+        ${isDC() ? `<div class="field"><label>DAR No. <span style="font-weight:500; color:var(--ink-500);">(ระบบออกเลขถัดไปให้ — DC แก้ได้)</span></label>
+          <input id="darcNo" value="${escapeHtml(f.darNo || darNextNumber(Date.now()))}" placeholder="เช่น 69-06" style="max-width:180px;"></div>` : ''}
         <div class="field"><label>ร้องขอเพื่อดำเนินการ</label>
           <div style="display:flex; gap:8px; flex-wrap:wrap;">${opt('new','ออกเอกสารใหม่')}${opt('revision','แก้ไข')}${opt('cancel','ยกเลิก')}${opt('review','ทบทวนประจำปี')}</div></div>
         ${f.action==='new' ? `
@@ -7306,7 +7308,7 @@ function wireDarCreateModal(){
   const backdrop = document.getElementById('darCreateBackdrop'); if(!backdrop) return;
   const f = state.darCreate;
   const keep = ()=>{
-    ['darcType:typePrefix','darcName:name','darcNewId:newId','darcDoc:docId','darcReason:reason','darcDetail:detail'].forEach(pair=>{
+    ['darcNo:darNo','darcType:typePrefix','darcName:name','darcNewId:newId','darcDoc:docId','darcReason:reason','darcDetail:detail'].forEach(pair=>{
       const [id,key] = pair.split(':'); const el = document.getElementById(id); if(el) f[key] = el.value;
     });
   };
@@ -7328,6 +7330,11 @@ function wireDarCreateModal(){
     if(f.action!=='new' && !f.docId) return fail('เลือกเอกสารก่อน');
     if(!f.reason) return fail('กรอกเหตุผลที่ขอดำเนินการ');
     if(!f.detail) return fail('กรอกรายละเอียด');
+    if(f.darNo!=null && String(f.darNo).trim()){
+      f.darNo = String(f.darNo).trim();
+      if(!/^\d{2}-\d+$/.test(f.darNo)) return fail('เลข DAR ต้องเป็นรูปแบบ ปี-ลำดับ เช่น 69-06');
+      if(DAR_LOG.some(x=>x.darNo===f.darNo)) return fail(`เลข DAR ${f.darNo} มีในทะเบียนแล้ว`);
+    } else f.darNo = '';
     submit.disabled = true;
     try{
       const { doc: d } = await darCreateWithRequest(f);
@@ -7588,7 +7595,7 @@ function darAdminModalView(){
           ? 'ใช้ลงใบ DAR ที่ดำเนินการบนกระดาษไปแล้ว — บันทึกเข้าทะเบียน DAR อย่างเดียว ไม่สร้างคำขอและไม่เปลี่ยนสถานะเอกสารในระบบ'
           : 'วันที่ที่ระบบบันทึกอัตโนมัติตามเวลาที่กดจริง แก้ไขได้ที่นี่ ช่องที่เว้นว่างของขั้นที่ยังไม่ถึงจะถูกเติมอัตโนมัติเมื่อถึงขั้นนั้น'}</div>
         ${row3(
-          fld('DAR No.', `<input id="daNo" value="${v(r.darNo)}" placeholder="เช่น 69-01" ${linked?'disabled':''}>`),
+          fld('DAR No.', `<input id="daNo" value="${v(r.darNo)}" placeholder="เช่น 69-06">`),
           fld('ร้องขอเพื่อดำเนินการ', `<select id="daAction" ${linked?'disabled':''}>${Object.entries(DAR_ACTION_LABEL).map(([k,l])=>`<option value="${k}" ${r.action===k?'selected':''}>${l}</option>`).join('')}</select>`),
           fld('ประเภทเอกสาร', `<select id="daType" ${linked?'disabled':''}>${['','LM','LP','WI','LF','LR','LS'].map(t=>`<option value="${t}" ${(r.docType||'')===t?'selected':''}>${t||'—'}</option>`).join('')}</select>`)
         )}
@@ -7649,12 +7656,13 @@ function wireDarAdminModal(){
     if(!r) return fail('ไม่พบใบ DAR');
     const no = val('daNo');
     if(isNew || (no!==null && !document.getElementById('daNo').disabled)){
-      if(!/^\d{2}-\d+$/.test(no||'')) return fail('เลข DAR ต้องเป็นรูปแบบ ปปปป-ลำดับ เช่น 69-01');
+      if(!/^\d{2}-\d+$/.test(no||'')) return fail('เลข DAR ต้องเป็นรูปแบบ ปี-ลำดับ เช่น 69-06');
       if(DAR_LOG.some(x=>x!==r && x.darNo===no)) return fail(`เลข DAR ${no} มีในทะเบียนแล้ว`);
     }
     if(!val('daReason') || !val('daDetail')) return fail('กรอกเหตุผลและรายละเอียด');
     if(isNew && (!val('daDocId') || !val('daReqName'))) return fail('กรอกรหัสเอกสารและผู้ขอดำเนินการ');
     const oldNo = r.darNo;
+    let docsChanged = false;
     const set = (key, v)=>{ if(v!==null) r[key] = v; };
     if(no!==null && !document.getElementById('daNo').disabled) r.darNo = no;
     const actEl = document.getElementById('daAction'); if(actEl && !actEl.disabled) r.action = actEl.value;
@@ -7688,9 +7696,20 @@ function wireDarAdminModal(){
       DAR_LOG.push(r);
     } else {
       darTouch(r, currentActorName(), 'DC แก้ไขข้อมูล/วันที่ใบ DAR');
-      if(oldNo !== r.darNo){ const d = DOCUMENTS.find(x=>x.darNo===oldNo); if(d) d.darNo = r.darNo; }
+      if(oldNo !== r.darNo){
+        // เปลี่ยนเลข DAR — ย้ายการอ้างอิงในคำขอ/เอกสารตามไปด้วย
+        darTouch(r, currentActorName(), `DC เปลี่ยนเลข DAR จาก ${oldNo} เป็น ${r.darNo}`);
+        DOCUMENTS.filter(x=>x.darNo===oldNo).forEach(d=>{
+          d.darNo = r.darNo;
+          d.comments = d.comments || [];
+          d.comments.push({ by: currentActorName(), text:`DC เปลี่ยนเลข DAR No.${oldNo} เป็น DAR No.${r.darNo}`, time: Date.now() });
+          d.lastUpdated = Date.now();
+          docsChanged = true;
+        });
+      }
     }
     await persistDarLog();
+    if(docsChanged) await persistDocs();
     state.darAdmin = null;
     render();
   });
