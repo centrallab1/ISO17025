@@ -4091,7 +4091,6 @@ function histPersonTile(label, name, time){
   return `
     <div class="hd-person">
       <div class="hd-person-l">${label}</div>
-      ${avatarNodeHTML(name, 'hist-avatar', (name||'?').trim().charAt(0).toUpperCase(), 40)}
       <div class="hd-person-n">${name || '—'}</div>
       ${time ? `<div class="hd-person-t">${fmtDateTime(time)}</div>` : ''}
     </div>`;
@@ -4117,14 +4116,15 @@ function historyModalView(){
   <style>
     .hist-modal{ width:min(980px, 94vw); max-width:980px; }
     .hd-card{ background:var(--card, #fff); border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin-bottom:14px; }
-    .hd-top{ display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; background:var(--blue-50, #f2f6ff); }
+    .hd-top{ display:grid; grid-template-columns:minmax(0,1fr) auto; gap:16px; align-items:center; background:var(--blue-50, #f2f6ff); }
+    .hd-top-left{ min-width:0; }
     .hd-title-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .hd-code{ font-size:20px; font-weight:800; color:var(--ink-900); }
     .hd-name{ font-size:18px; font-weight:800; color:var(--ink-900); margin-top:2px; }
     .hd-type{ font-size:12px; color:var(--ink-500); margin-top:2px; }
     .hd-rev{ display:inline-block; margin-top:8px; font-size:11.5px; font-weight:700; color:var(--blue-600); background:#fff; border:1px solid var(--line); border-radius:999px; padding:2px 10px; }
-    .hd-people{ display:flex; flex-wrap:wrap; }
-    .hd-person{ display:flex; flex-direction:column; align-items:center; text-align:center; gap:4px; padding:0 18px; min-width:120px; }
+    .hd-people{ display:flex; flex-wrap:nowrap; background:#fff; border:1px solid var(--line); border-radius:12px; padding:10px 4px; }
+    .hd-person{ display:flex; flex-direction:column; align-items:center; text-align:center; gap:3px; padding:0 16px; min-width:110px; }
     .hd-person + .hd-person{ border-left:1px solid var(--line); }
     .hd-person-l{ font-size:11px; color:var(--ink-500); font-weight:700; }
     .hd-person-n{ font-size:12.5px; font-weight:800; color:var(--ink-900); }
@@ -4161,9 +4161,11 @@ function historyModalView(){
     .hd-files{ display:flex; gap:10px; flex-wrap:wrap; }
     .hd-files .btn{ justify-content:center; }
     .hd-open{ flex:1 1 280px; }
+    @media (max-width:980px){ .hd-top{ grid-template-columns:1fr; } .hd-people{ justify-self:start; } }
     @media (max-width:760px){
       .hd-grid{ grid-template-columns:1fr; }
       .hd-dates{ grid-template-columns:1fr 1fr; }
+      .hd-top{ grid-template-columns:1fr; }
       .hd-people{ display:grid; grid-template-columns:repeat(3, 1fr); width:100%; }
       .hd-person{ padding:0 4px; min-width:0; }
       .hd-person-t{ font-size:9.5px; }
@@ -4208,7 +4210,7 @@ function historyModalView(){
   </style>
   <div class="modal-backdrop" id="historyModalBackdrop">
     <div class="modal hist-modal" data-scroll-id="historyModalRoot">
-      <div class="modal-head"><div style="display:flex; align-items:center; gap:12px;"><div style="width:42px; height:42px; border-radius:50%; background:var(--blue-50); display:flex; align-items:center; justify-content:center;">${ic('doc')}</div><div><div class="modal-title">รายละเอียดเอกสาร</div><div style="font-size:11.5px; color:var(--ink-500);">Document Details</div></div></div><button class="modal-close" id="historyModalCloseBtn">✕</button></div>
+      <div class="modal-head"><div style="display:flex; align-items:center; gap:12px;"><div><div class="modal-title">รายละเอียดเอกสาร</div><div style="font-size:11.5px; color:var(--ink-500);">Document Details</div></div></div><button class="modal-close" id="historyModalCloseBtn">✕</button></div>
       <div class="modal-body" data-scroll-id="historyModalBody">
         <div class="hd-card hd-top">
           <div class="hd-top-left">
@@ -4277,9 +4279,7 @@ function historyModalView(){
           <div class="hd-sec-title">${ic('link')} ไฟล์เอกสาร</div>
           ${displayLink(d) ? `
           <div class="hd-files">
-            <a class="btn primary hd-open" href="${displayLink(d)}" target="_blank" rel="noopener">${ic('link')} เปิดใน SharePoint</a>
-            <a class="btn ghost" href="${histLinkParam(displayLink(d),'download','1')}" target="_blank" rel="noopener">${ic('download')} ดาวน์โหลด</a>
-            <a class="btn ghost" href="${histLinkParam(displayLink(d),'web','1')}" target="_blank" rel="noopener">${ic('eye')} ดูตัวอย่าง</a>
+            <a class="btn primary hd-open" href="${displayLink(d)}" target="_blank" rel="noopener">${ic('link')} เปิดเอกสาร</a>
             ${(d.linkHistory && d.linkHistory.length) ? `<button class="btn ghost" id="historyModalToggleLinks">${ic('folder')} ${state.historyModalLinksOpen ? 'ซ่อน' : 'ดู'}ลิงก์ทั้งหมด (${d.linkHistory.length + 1})</button>` : ''}
           </div>` : `<div style="font-size:12.5px; color:var(--ink-500);">ยังไม่มีลิงก์เอกสาร</div>`}
         </div>
@@ -7261,7 +7261,7 @@ function darCreateModalView(){
   const f = state.darCreate;
   const eligible = DOCUMENTS.filter(x=> !hasPendingRequest(x)).slice().sort((a,b)=>a.id.localeCompare(b.id));
   const sel = f.docId ? DOCUMENTS.find(x=>x.id===f.docId) : null;
-  const opt = (v,l)=>`<label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer; padding:6px 12px; border:1px solid ${f.action===v?'var(--blue-600)':'var(--line)'}; border-radius:8px; ${f.action===v?'background:var(--blue-50, #eef4ff); font-weight:700;':''}"><input type="radio" name="darcAction" value="${v}" ${f.action===v?'checked':''}> ${l}</label>`;
+  const opt = (v,l)=>`<label class="darc-opt ${f.action===v?'on':''}"><input type="radio" name="darcAction" value="${v}" ${f.action===v?'checked':''}><span>${l}</span></label>`;
   const nextStep = (f.action==='new' || f.action==='revision') ? 'กรอกฟอร์ม → DC รับเรื่อง → DC วางลิงก์ → ทบทวน → LM อนุมัติ → DC เผยแพร่' : 'DC รับเรื่อง → ทบทวน → LM อนุมัติ';
   return `
   <div class="modal-backdrop" id="darCreateBackdrop">
@@ -7272,7 +7272,14 @@ function darCreateModalView(){
         ${isDC() ? `<div class="field"><label>DAR No. <span style="font-weight:500; color:var(--ink-500);">(ระบบออกเลขถัดไปให้ — DC แก้ได้)</span></label>
           <input id="darcNo" value="${escapeHtml(f.darNo || darNextNumber(Date.now()))}" placeholder="เช่น 69-06" style="max-width:180px;"></div>` : ''}
         <div class="field"><label>ร้องขอเพื่อดำเนินการ</label>
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">${opt('new','ออกเอกสารใหม่')}${opt('revision','แก้ไข')}${opt('cancel','ยกเลิก')}${opt('review','ทบทวนประจำปี')}</div></div>
+          <style>
+            .darc-opts{ display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:8px; }
+            .darc-opt{ display:flex !important; align-items:center; gap:8px; margin:0 !important; padding:10px 12px; border:1.5px solid var(--line); border-radius:10px; cursor:pointer; font-size:13px; font-weight:600; color:var(--ink-700); background:#fff; white-space:nowrap; }
+            .darc-opt input{ width:16px !important; height:16px !important; min-width:16px; margin:0 !important; padding:0 !important; flex:0 0 16px; accent-color:var(--blue-600); box-shadow:none !important; }
+            .darc-opt.on{ border-color:var(--blue-600); background:var(--blue-50, #eef4ff); color:var(--blue-600); font-weight:800; }
+            @media (max-width:560px){ .darc-opts{ grid-template-columns:repeat(2, minmax(0,1fr)); } }
+          </style>
+          <div class="darc-opts">${opt('new','ออกเอกสารใหม่')}${opt('revision','แก้ไข')}${opt('cancel','ยกเลิก')}${opt('review','ทบทวนประจำปี')}</div></div>
         ${f.action==='new' ? `
         <div class="field"><label>ประเภทเอกสาร</label>
           <select id="darcType"><option value="">— เลือกประเภท —</option>
