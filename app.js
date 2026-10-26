@@ -1218,6 +1218,7 @@ function hasPendingRequest(d){
 function isMyTurn(d){
   if(!currentUser) return false;
   if(isDC()) return true; // DC oversees the whole system and can act at every step
+  if(darRequired(d) && !darGatePassed(d)) return darIsMyTurn(d); // ต้องผ่านอนุมัติ DAR ก่อน
   if(d.lastRequestType!=='new' && d.lastRequestType!=='revision') return false;
   if(d.approvalStatus==='ร่าง') return d.requestedBy === currentUser.name;
   if(d.approvalStatus==='รอทบทวน'){
@@ -1318,14 +1319,14 @@ const I18N = {
     brandTitle:'MPIR CENTRAL LAB', brandSub:'ISO/IEC 17025:2017',
     search:'Search documents, records, ISO clause...',
     nav_dashboard:'Dashboard', nav_documents:'Documents',
-    nav_archive:'คลังเอกสาร', nav_approval:'Approval', nav_audit:'Audit',
+    nav_archive:'คลังเอกสาร', nav_approval:'Approval', nav_dar:'DAR', nav_audit:'Audit',
     nav_calendar:'Review Calendar', nav_admin:'Administration',
   },
   en: {
     brandTitle:'MPIR CENTRAL LAB', brandSub:'ISO/IEC 17025:2017',
     search:'Search documents, records, ISO clause...',
     nav_dashboard:'Dashboard', nav_documents:'Documents',
-    nav_archive:'Document Archive', nav_approval:'Approval', nav_audit:'Audit',
+    nav_archive:'Document Archive', nav_approval:'Approval', nav_dar:'DAR', nav_audit:'Audit',
     nav_calendar:'Review Calendar', nav_admin:'Administration',
   },
 };
@@ -1340,7 +1341,7 @@ function applyLanguage(){
   const searchInput = document.getElementById('globalSearch');
   if(searchInput) searchInput.placeholder = t.search;
   const navMap = { dashboard:'nav_dashboard', documents:'nav_documents',
-    archive:'nav_archive', approval:'nav_approval', audit:'nav_audit',
+    archive:'nav_archive', approval:'nav_approval', darlog:'nav_dar', audit:'nav_audit',
     calendar:'nav_calendar', admin:'nav_admin', administration:'nav_admin' };
   document.querySelectorAll('.nav-item').forEach(btn=>{
     const key = navMap[btn.dataset.view];
@@ -1606,7 +1607,7 @@ async function startApp(){
   }
   loadArchive().then(()=>{ if(state.view==='archive' || state.view==='records') render(); }); // best-effort, non-blocking — Archive is a separate store; 'records' also needs it now that Evidence/Support is entirely archive-sourced
   loadWatermarkLog().then(()=>{ if(state.view==='admin') render(); }); // best-effort, non-blocking
-  loadDarLog().then(()=>{ if(state.view==='approval' || state.view==='darlog') render(); }); // ทะเบียน DAR — best-effort, non-blocking
+  loadDarLog().then(()=>{ updateDarNavBadge(); if(state.view==='approval' || state.view==='darlog') render(); }); // ทะเบียน DAR — best-effort, non-blocking
   removeBootScreen();
   wireNav();
   wireGlobalSearch();
@@ -1674,7 +1675,7 @@ function syncNavActive(){
 const NAV_GROUP_MAP = {
   documents:'documents', iso:'documents', records:'documents',
   audit:'audit', audittrail:'audit',
-  approval:'approval', revision:'approval', darlog:'approval',
+  approval:'approval', revision:'approval', darlog:'darlog',
 };
 // shared tab bars for the three merged sections — the underlying pages/state
 // (docFilter, selectedClause, isoTab, approvalTab, revFilter, etc.) are all
@@ -1689,7 +1690,7 @@ function renderAuditHubTabs(){
   return `<div class="tabs">${tabs.map(([k,l])=>`<button class="tab ${state.view===k?'active':''}" data-hub-nav="${k}">${l}</button>`).join('')}</div>`;
 }
 function renderWorkflowHubTabs(){
-  const tabs = [ ['approval','คำขออนุมัติ'], ['revision','ภาพรวมการปรับปรุง'], ['darlog','ทะเบียน DAR'] ];
+  const tabs = [ ['approval','คำขออนุมัติ'], ['revision','ภาพรวมการปรับปรุง'] ];
   return `<div class="tabs">${tabs.map(([k,l])=>`<button class="tab ${state.view===k?'active':''}" data-hub-nav="${k}">${l}</button>`).join('')}</div>`;
 }
 function wireHubTabs(){
@@ -1708,7 +1709,33 @@ function wireHubTabs(){
     });
   });
 }
+// เมนู DAR ในแถบด้านซ้าย — สร้างจากปุ่ม Approval เดิม (โครง/สไตล์เดียวกัน) แล้ววางไว้ด้านบน Approval
+function ensureDarNavItem(){
+  if(document.querySelector('.nav-item[data-view="darlog"]')) return;
+  const approvalBtn = document.querySelector('.nav-item[data-view="approval"]');
+  if(!approvalBtn) return;
+  const btn = approvalBtn.cloneNode(true);
+  btn.dataset.view = 'darlog';
+  btn.classList.remove('active');
+  btn.removeAttribute('id');
+  const svg = btn.querySelector('svg');
+  if(svg){ const tmp = document.createElement('div'); tmp.innerHTML = ic('file', svg.getAttribute('class')||''); const ns = tmp.firstElementChild; if(ns) svg.replaceWith(ns); }
+  const span = btn.querySelector('span');
+  if(span) span.textContent = 'DAR';
+  const badge = document.createElement('b');
+  badge.id = 'darNavBadge';
+  badge.style.cssText = 'display:none; margin-left:auto; min-width:20px; height:20px; padding:0 6px; border-radius:999px; background:var(--red-600,#dc2626); color:#fff; font-size:11px; font-weight:800; align-items:center; justify-content:center;';
+  btn.appendChild(badge);
+  approvalBtn.parentNode.insertBefore(btn, approvalBtn);
+}
+// จำนวน DAR ที่รอผู้ใช้คนนี้ (LM อนุมัติ / ผู้ขอแก้แล้วส่งใหม่)
+function updateDarNavBadge(){
+  const b = document.getElementById('darNavBadge'); if(!b) return;
+  const n = currentUser ? DAR_LOG.filter(r=> r.decision==='pending' && (darCanApprove(r) || darCanResubmit(r))).length : 0;
+  b.textContent = n; b.style.display = n ? 'inline-flex' : 'none';
+}
 function wireNav(){
+  ensureDarNavItem();
   document.querySelectorAll('.nav-item').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       let extra = {};
@@ -1792,7 +1819,7 @@ function render(){
     case 'archive': el.innerHTML = viewArchive(); attachArchiveHandlers(); break;
     case 'revision': el.innerHTML = renderWorkflowHubTabs() + viewRevisionDashboard(); attachRevisionDashboardHandlers(); break;
     case 'approval': el.innerHTML = renderWorkflowHubTabs() + viewApproval(); attachApprovalHandlers(); break;
-    case 'darlog': el.innerHTML = renderWorkflowHubTabs() + viewDarRegister(); attachDarRegisterHandlers(); break;
+    case 'darlog': el.innerHTML = viewDarRegister(); attachDarRegisterHandlers(); break;
     case 'audit': el.innerHTML = renderAuditHubTabs() + viewAudit(); attachAuditHandlers(); break;
     case 'calendar': el.innerHTML = viewCalendar(); attachCalHandlers(); break;
     case 'audittrail': el.innerHTML = renderAuditHubTabs() + viewAuditTrail(); break;
@@ -1805,6 +1832,7 @@ function render(){
   updateNotifBadge();
   updateBackButton();
   wireHubTabs();
+  updateDarNavBadge();
 }
 function attachGlobalRowHandlers(){
   document.querySelectorAll('[data-open-doc]').forEach(row=>{
@@ -3511,6 +3539,7 @@ function wireFormConfirm(){
   if(btn) btn.addEventListener('click', async ()=>{
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
     if(!d) return;
+    if(!darGatePassed(d)){ alert(darGateMessage(d)); return; }
     const actor = currentActorName();
     const now = Date.now();
     d.formConfirmedAt = now;
@@ -3645,6 +3674,7 @@ function wireDcRegister(){
     if(!link){ alert('กรอกลิงก์เอกสารก่อน'); return; }
     const d = DOCUMENTS.find(x=>x.id===state.selectedDoc);
     if(!d) return;
+    if(!darGatePassed(d)){ alert(darGateMessage(d)); return; }
     const now = Date.now();
     d.link = link;
     d.clause = clause;
@@ -3803,8 +3833,10 @@ function wireDcPublish(){
     d.comments = d.comments || [];
     d.comments.push({ by:actor, text: isFirstPublish ? `ขั้นที่ 6: DC เผยแพร่เอกสาร (ลิงก์: ${link}, ประกาศใช้: ${fmtDate(d.effectiveDate)}) — เสร็จสิ้น` : `DC แก้ไขลิงก์ที่เผยแพร่ (ลิงก์ใหม่: ${link})`, time: now });
     state.dcPublishEditing = false;
+    const darPublished = darOnPublished(d, actor);
     render();
     await persistDocs();
+    if(darPublished) await persistDarLog();
   });
 }
 
@@ -4652,7 +4684,7 @@ function viewApproval(){
           <td class="mono" style="white-space:nowrap;">${d.id}</td>
           <td class="name" title="${cleanName(d).replace(/"/g,'&quot;')}">${cleanName(d)}</td>
           <td>${requestTypeBadge(d)}</td>
-          <td>${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, true)}</td>
+          <td>${approvalBadge(d.approvalStatus)}${rejectedRevisionTag(d, true)}${darListTag(d)}</td>
           <td>${stepIndicator(d.approvalStatus||'ร่าง')}</td>
           <td><div class="actor-cell">${avatarNodeHTML(actor.name, 'row-avatar', initials(actor.name))}<div><div class="actor-name">${actor.name||'—'}</div><div class="actor-role">${actor.role}</div></div></div></td>
           <td>${publishedDateOf(d) ? fmtDate(publishedDateOf(d)) : '—'}</td>
@@ -4780,6 +4812,7 @@ function viewApprovalDetail(){
 
     <div class="action-center">
       ${(()=>{
+        if(!darGatePassed(d)) return renderDarGateNotice(d);
         const pastBoxes = [renderFormConfirmBox(d), renderDcRegisterBox(d), renderReviewBox(d), renderApprovedBox(d), renderPublishBox(d)];
         const viewing = (state.approvalStepView!==null && state.approvalStepView>=0 && state.approvalStepView<pastBoxes.length) ? state.approvalStepView : null;
         if(viewing!==null && pastBoxes[viewing]){
@@ -4926,6 +4959,7 @@ function attachApprovalHandlers(){
     const actor = currentActorName();
     const errEl = document.getElementById('approvalError');
     const comment = document.getElementById('approvalComment').value.trim();
+    if(!darGatePassed(d)){ errEl.textContent = darGateMessage(d); errEl.style.display = 'block'; return; }
     const nextIdx = Math.min(currentIdx+1, STATUS_FLOW.length-1);
     const nextStatus = STATUS_FLOW[nextIdx];
 
@@ -5072,10 +5106,9 @@ function attachApprovalHandlers(){
         }
       }
     }
-    // ใบ DAR: บันทึกผู้ทบทวน / ผู้อนุมัติ ตามขั้นตอนจริง (หลังเปลี่ยนรหัสตาม Rev. แล้ว)
+    // ทะเบียน DAR: บันทึกว่าเอกสารของ DAR นี้ได้รับอนุมัติแล้ว (หลังเปลี่ยนรหัสตาม Rev. แล้ว)
     let darChanged = false;
-    if(d.approvalStatus==='รออนุมัติ') darChanged = darOnReviewed(d, actor, comment);
-    if(d.approvalStatus==='อนุมัติแล้ว') darChanged = darOnApproved(d, actor, comment);
+    if(d.approvalStatus==='อนุมัติแล้ว') darChanged = darOnDocApproved(d, actor);
     // Land on whichever tab will actually still show this document. An
     // approved formal (new/revision) request that's still waiting on DC to
     // publish belongs in "รอ DC เผยแพร่", not "ประวัติ" (isPendingPublishDoc
@@ -5103,6 +5136,7 @@ function attachApprovalHandlers(){
       return;
     }
     if(!comment){ errEl.textContent='กรอกความเห็นก่อนกด "ไม่อนุมัติ"'; errEl.style.display='block'; return; }
+    if(!darGatePassed(d)){ errEl.textContent = darGateMessage(d) + ' (ถ้า DAR ไม่ผ่าน ให้ส่งกลับที่กล่องใบ DAR)'; errEl.style.display='block'; return; }
     if(!confirm(`ยืนยันการไม่อนุมัติ (ปฏิเสธ) เอกสาร "${d.id} ${cleanName(d)}" ใช่หรือไม่?`)) return;
     const now = Date.now();
     d.comments = d.comments || [];
@@ -5128,7 +5162,7 @@ function attachApprovalHandlers(){
     // (non-formal request types) actually belongs in history. Previously
     // this always jumped to 'history', where a just-rejected-to-draft
     // formal request wouldn't show up — looking like it had vanished.
-    const darRejectChanged = darOnRejected(d, actor, comment, d.approvalStatus==='ไม่อนุมัติ');
+    const darRejectChanged = d.approvalStatus==='ไม่อนุมัติ' ? darOnDocRejected(d, actor, comment) : false;
     state.approvalTab = d.approvalStatus==='ไม่อนุมัติ' ? 'history' : 'active';
     state.approvalPage = 1;
     render();
@@ -6717,8 +6751,12 @@ function exportRevLogToWord(d){
 // ============================================================
 // DAR — ใบคำร้องขอดำเนินการด้านเอกสาร (Document Action Request)
 // ทุกคำขอที่เปลี่ยนแปลงเอกสาร (เอกสารใหม่ / ปรับปรุง / ยกเลิก) จะได้ใบ DAR
-// ของตัวเองอัตโนมัติ: ออกเลขตอนส่งคำขอ, บันทึกผู้ทบทวน/ผู้อนุมัติตามขั้นตอน
-// จริง และดาวน์โหลดเป็น PDF ตามแบบฟอร์ม RDI-LF-006-02 ได้ทุกเมื่อ
+// ของตัวเองอัตโนมัติตอนส่งคำขอ และ "ใบ DAR ต้องได้รับอนุมัติก่อน" เอกสารจึงจะ
+// เข้าสู่ขั้นตอนกรอกฟอร์ม / ทบทวน / อนุมัติ / เผยแพร่ ได้ (DAR gate):
+//   ผู้ขอส่ง DAR → อนุมัติ DAR (Lab Manager) — ไม่มีขั้นทบทวน DAR
+//   ถ้าไม่อนุมัติ → ส่งกลับให้ผู้ขอแก้แล้วส่งใหม่
+// ชื่อ/วันที่ผู้อนุมัติในใบ DAR คือผู้อนุมัติ "คำขอ" (DAR) ช่องผู้ทบทวนเว้นว่างไว้ ส่วน
+// "วันที่อนุมัติ" ในข้อ 3 คือวันที่เอกสารฉบับนั้นได้รับอนุมัติในขั้นที่ 5
 // ทะเบียน DAR เก็บแยกใน Firestore doc iso17025/darlog (เหมือน watermarklog)
 // เพื่อให้ใบ DAR ยังอยู่ครบแม้เอกสารถูกยกเลิก/ย้ายไปคลัง หรือเปลี่ยนรหัสตาม Rev.
 // ============================================================
@@ -6729,6 +6767,25 @@ const DAR_FORM_CODE_FALLBACK = 'RDI-LF-006-02';
 const DAR_ACTIONS = ['new','revision','cancel'];
 const DAR_ACTION_LABEL = { new:'จัดทำเอกสารใหม่', revision:'แก้ไขเอกสาร', cancel:'ยกเลิกเอกสาร' };
 const DAR_STATUS_LABEL = { pending:'กำลังดำเนินการ', approved:'อนุมัติ', rejected:'ไม่อนุมัติ', withdrawn:'ถอนคำขอ' };
+// สถานะรวมสำหรับแสดงผล (ขั้นของ DAR + ผลของเอกสารหลัง DAR อนุมัติ)
+const DAR_PHASE_LABEL = {
+  approval:'รออนุมัติ DAR', returned:'DAR ไม่อนุมัติ — ส่งกลับแก้ไข',
+  inprogress:'DAR อนุมัติ — เอกสารกำลังดำเนินการ', docapproved:'เอกสารอนุมัติแล้ว — รอเผยแพร่',
+  published:'เผยแพร่แล้ว', docrejected:'เอกสารไม่อนุมัติ', withdrawn:'ถอนคำขอ',
+};
+const DAR_PHASE_COLOR = { review:'--amber-600', approval:'--amber-600', returned:'--red-600', inprogress:'--blue-600', docapproved:'--blue-600', published:'--green-600', docrejected:'--red-600', withdrawn:'--ink-500' };
+// ไม่มีขั้นทบทวน DAR แล้ว — ใบที่ค้างสถานะ 'review' จากเวอร์ชันก่อนถือว่ารออนุมัติ
+function darStage(rec){ const st = rec.stage || (rec.decision==='pending' ? 'approval' : 'done'); return st==='review' ? 'approval' : st; }
+function darPhase(rec){
+  if(rec.decision==='withdrawn' || rec.docOutcome==='withdrawn') return 'withdrawn';
+  const st = darStage(rec);
+  if(st!=='done') return st;
+  if(rec.decision!=='approved') return 'returned';
+  if(rec.docOutcome==='published') return 'published';
+  if(rec.docOutcome==='approved') return rec.action==='cancel' ? 'published' : 'docapproved';
+  if(rec.docOutcome==='rejected') return 'docrejected';
+  return 'inprogress';
+}
 const DAR_INTERNAL_RECIPIENTS = [
   'Head of IRDI','Lab manager','ผู้จัดการคุณภาพ','ผู้จัดการวิชาการ','งานทรัพยากรบุคคล','งานบัญชีการเงิน',
   'ผู้ควบคุมงานทดสอบ','พนักงานวิเคราะห์-1','พนักงานวิเคราะห์-2','งานจัดซื้อ/พัสดุ','จป.วิชาชีพ',
@@ -6797,16 +6854,18 @@ async function darCreateForRequest(d, opts){
     detail: (opts && opts.detail) || '',
     attachments: { doc:false, file: d.lastRequestType!=='cancel', other:'' },
     requestedBy: actor, requestedPosition: darPositionOf(actor), requestedAt: now,
-    reviewerName: d.reviewerName || '', reviewerPosition: darPositionOf(d.reviewerName), reviewedAt: null, reviewerComment: '',
-    approverName: d.approverName || lmAccountName(), approverPosition: 'Lab Manager', decidedAt: null, decision: 'pending', decisionNote: '',
+    stage: 'approval',
+    reviewerName: '', reviewerPosition: '', reviewedAt: null, reviewerComment: '',
+    approverName: lmAccountName(), approverPosition: 'Lab Manager', decidedAt: null, decision: 'pending', decisionNote: '',
+    docOutcome: null, docApprovedAt: null, publishedAt: null, effectiveDate: null,
     distribution: { internal: [], external: '' },
-    history: [{ by: actor, text: 'ออกใบ DAR', time: now }],
+    history: [{ by: actor, text: 'ออกใบ DAR — ส่ง Lab Manager อนุมัติ', time: now }],
     createdAt: now, updatedAt: now,
   };
   DAR_LOG.push(rec);
   d.darNo = rec.darNo;
   d.comments = d.comments || [];
-  d.comments.push({ by: actor, text: `ออกใบ DAR No.${rec.darNo}`, time: now });
+  d.comments.push({ by: actor, text: `ออกใบ DAR No.${rec.darNo} — รอ Lab Manager อนุมัติ DAR ก่อนดำเนินการเอกสาร`, time: now });
   await persistDarLog();
   return rec;
 }
@@ -6816,52 +6875,98 @@ function darTouch(rec, actor, text){
   rec.history = rec.history || [];
   if(text) rec.history.push({ by: actor || currentActorName(), text, time: now });
 }
-// ขั้นทบทวนผ่าน (→ รออนุมัติ)
-function darOnReviewed(d, actor, comment){
-  const rec = darForDoc(d); if(!rec || rec.decision!=='pending') return false;
+// ---------- DAR gate ----------
+// คำขอ new/revision/cancel ที่ยังค้างอยู่ จะไปต่อได้เมื่อ DAR อนุมัติแล้วเท่านั้น
+// (เอกสารเก่าที่อนุมัติไปแล้วก่อนมีฟีเจอร์นี้ไม่ถูกบล็อก — เช็คเฉพาะคำขอที่ค้าง)
+function darRequired(d){ return !!d && DAR_ACTIONS.includes(d.lastRequestType) && hasPendingRequest(d); }
+function darGatePassed(d){
+  if(!darRequired(d)) return true;
+  const rec = darForDoc(d);
+  return !!rec && rec.decision==='approved';
+}
+function darGateMessage(d){
+  const rec = darForDoc(d);
+  if(!rec) return 'คำขอนี้ยังไม่มีใบ DAR — ต้องออกใบ DAR และได้รับอนุมัติก่อน';
+  return `ใบ DAR No.${rec.darNo} ยังไม่ได้รับอนุมัติ (${DAR_PHASE_LABEL[darPhase(rec)]}) — ต้องอนุมัติ DAR ก่อนจึงจะดำเนินการเอกสารต่อได้`;
+}
+// ใครต้องทำอะไรกับ DAR ตอนนี้ (กฎเดียวกับปุ่ม — DC ทำแทนได้ทุกขั้นเหมือนส่วนอื่นของแอป)
+function darCanReview(rec){ return false; } // ไม่มีขั้นทบทวน DAR
+function darCanApprove(rec){
+  if(!rec || !currentUser || darStage(rec)!=='approval' || rec.decision!=='pending') return false;
+  return isDC() || currentUser.role==='LM';
+}
+function darCanResubmit(rec){
+  if(!rec || !currentUser || darStage(rec)!=='returned') return false;
+  return isDC() || rec.requestedBy===currentUser.name;
+}
+function darIsMyTurn(d){
+  const rec = darForDoc(d);
+  if(!rec) return !!currentUser && (isDC() || d.requestedBy===currentUser.name);
+  return darCanReview(rec) || darCanApprove(rec) || darCanResubmit(rec);
+}
+function darReview(rec, actor, comment){
+  rec.stage = 'approval';
   rec.reviewerName = actor; rec.reviewerPosition = darPositionOf(actor);
   rec.reviewedAt = Date.now(); rec.reviewerComment = comment || '';
-  darTouch(rec, actor, 'ทบทวนแล้ว' + (comment ? ` — ${comment}` : ''));
-  return true;
+  darTouch(rec, actor, 'ทบทวน DAR แล้ว → รออนุมัติ' + (comment ? ` — ${comment}` : ''));
 }
-// อนุมัติขั้นสุดท้าย — เรียกหลังเปลี่ยนรหัสเอกสารตาม Rev. แล้ว (d.id เป็นรหัสใหม่)
-function darOnApproved(d, actor, comment){
-  const rec = darForDoc(d); if(!rec || rec.decision!=='pending') return false;
-  rec.decision = 'approved'; rec.decidedAt = Date.now(); rec.decisionNote = comment || '';
+function darApprove(rec, actor, comment){
+  rec.stage = 'done'; rec.decision = 'approved';
+  rec.decidedAt = Date.now(); rec.decisionNote = comment || '';
   rec.approverName = actor; rec.approverPosition = darPositionOf(actor) || 'Lab Manager';
-  rec.docId = d.id;
-  darTouch(rec, actor, 'อนุมัติ' + (comment ? ` — ${comment}` : ''));
+  darTouch(rec, actor, 'อนุมัติ DAR' + (comment ? ` — ${comment}` : ''));
+}
+function darReturn(rec, actor, comment){
+  rec.stage = 'returned';
+  rec.returnNote = comment; rec.returnedBy = actor; rec.returnedAt = Date.now();
+  darTouch(rec, actor, `ไม่อนุมัติ DAR — ส่งกลับแก้ไข: ${comment}`);
+}
+function darResubmit(rec, actor){
+  rec.stage = 'approval';
+  darTouch(rec, actor, 'แก้ไขแล้ว — ส่ง DAR ขออนุมัติอีกครั้ง');
+}
+// ผลของเอกสารหลัง DAR อนุมัติ — บันทึกไว้ในทะเบียน DAR เพื่อสอบกลับได้ครบวงจร
+function darOnDocApproved(d, actor){
+  const rec = darForDoc(d); if(!rec || rec.decision!=='approved' || rec.docOutcome) return false;
+  rec.docOutcome = 'approved'; rec.docApprovedAt = Date.now(); rec.docId = d.id;
+  darTouch(rec, actor, rec.action==='cancel' ? 'เอกสารยกเลิกแล้ว (อนุมัติ)' : `เอกสารอนุมัติแล้ว (${d.id})`);
   return true;
 }
-// ไม่อนุมัติ — คำขอแบบ new/revision ถูกส่งกลับไปแก้ (ยังเป็นคำขอเดิม ใบ DAR เดิม)
-// ส่วนคำขอยกเลิกที่ถูกปฏิเสธถือว่าจบ (ไม่อนุมัติ)
-function darOnRejected(d, actor, comment, final){
-  const rec = darForDoc(d); if(!rec || rec.decision!=='pending') return false;
-  if(final){
-    rec.decision = 'rejected'; rec.decidedAt = Date.now(); rec.decisionNote = comment || '';
-    rec.approverName = actor; rec.approverPosition = darPositionOf(actor);
-    darTouch(rec, actor, `ไม่อนุมัติ — ${comment||''}`);
-  } else {
-    rec.reviewedAt = null;
-    darTouch(rec, actor, `ส่งกลับแก้ไข — ${comment||''}`);
-  }
+function darOnDocRejected(d, actor, comment){
+  const rec = darForDoc(d); if(!rec || rec.decision!=='approved' || rec.docOutcome) return false;
+  rec.docOutcome = 'rejected';
+  darTouch(rec, actor, `เอกสารไม่อนุมัติ — ${comment||''}`);
+  return true;
+}
+function darOnPublished(d, actor){
+  const rec = darForDoc(d); if(!rec || rec.decision!=='approved') return false;
+  rec.docOutcome = 'published'; rec.publishedAt = Date.now(); rec.effectiveDate = d.effectiveDate || null; rec.docId = d.id;
+  darTouch(rec, actor, `เผยแพร่เอกสาร ประกาศใช้ ${fmtDate(d.effectiveDate)}`);
   return true;
 }
 function darOnWithdrawn(d, actor){
-  const rec = darForDoc(d); if(!rec || rec.decision!=='pending') return false;
-  rec.decision = 'withdrawn'; rec.decidedAt = Date.now();
+  const rec = darForDoc(d); if(!rec) return false;
+  if(rec.decision==='pending'){ rec.decision = 'withdrawn'; rec.stage = 'done'; rec.decidedAt = Date.now(); }
+  else if(!rec.docOutcome || rec.docOutcome==='rejected') rec.docOutcome = 'withdrawn';
+  else return false;
   darTouch(rec, actor, 'ถอนคำขอ');
   return true;
 }
+// เนื้อหา DAR (เหตุผล/รายละเอียด/สิ่งที่แนบ) แก้ได้ระหว่างรออนุมัติหรือตอนถูกส่งกลับ
+// ส่วนรายละเอียดแจกจ่าย (ข้อ 4) DC กรอกได้ตลอด เพราะ DC เป็นผู้แจกจ่ายหลังเผยแพร่
+function darContentEditable(rec){
+  if(!rec || !currentUser) return false;
+  const st = darStage(rec);
+  if(!(st==='approval' || st==='returned') || rec.decision!=='pending') return false;
+  return isDC() || rec.requestedBy===currentUser.name;
+}
 function darCanEdit(rec){
   if(!rec || !currentUser) return false;
-  if(isDC()) return true; // DC แก้ได้ทุกช่องเสมอ (รวมรายละเอียดแจกจ่ายหลังอนุมัติ)
-  return rec.decision==='pending' && rec.requestedBy===currentUser.name;
+  return isDC() || darContentEditable(rec);
 }
 function darStatusBadge(rec){
-  const cls = { pending:'pending', approved:'active', rejected:'overdue', withdrawn:'draft' }[rec.decision] || 'draft';
-  const color = { pending:'--blue-600', approved:'--green-600', rejected:'--red-600', withdrawn:'--ink-500' }[rec.decision] || '--ink-500';
-  return `<span class="badge ${cls}" style="color:var(${color}); font-weight:700; font-size:11.5px;">${DAR_STATUS_LABEL[rec.decision]||'-'}</span>`;
+  const ph = darPhase(rec);
+  return `<span class="badge" style="color:var(${DAR_PHASE_COLOR[ph]||'--ink-500'}); font-weight:700; font-size:11.5px;">${DAR_PHASE_LABEL[ph]||'-'}</span>`;
 }
 function darRevText(rec){
   if(rec.action==='revision') return `Rev.${rec.fromRev||'-'} → Rev.${rec.toRev||'-'}`;
@@ -6873,33 +6978,80 @@ function renderDarBox(d){
   if(!d || !DAR_ACTIONS.includes(d.lastRequestType)) return '';
   const rec = darForDoc(d);
   if(!rec){
+    if(!darRequired(d)) return ''; // คำขอเก่าที่จบไปแล้วก่อนมีฟีเจอร์ DAR
     if(!DAR_LOG_LOADED) return `<div class="side-box" style="margin-bottom:18px;"><div class="side-box-title">ใบ DAR</div><div style="font-size:12.5px; color:var(--ink-500); margin-top:6px;">กำลังโหลดทะเบียน DAR…</div></div>`;
     return `
-    <div class="side-box" style="margin-bottom:18px;">
-      <div class="side-box-title">ใบ DAR</div>
-      <div style="font-size:12.5px; color:var(--ink-500); margin-top:6px;">คำขอนี้ยังไม่มีใบ DAR (ส่งคำขอก่อนเปิดใช้ฟีเจอร์นี้)</div>
+    <div class="side-box" style="margin-bottom:18px; border-color:var(--amber-600); background:var(--amber-50);">
+      <div class="side-box-title" style="color:var(--amber-600);">ขั้นที่ 1.1: ใบ DAR</div>
+      <div style="font-size:12.5px; color:var(--ink-700); margin-top:6px;">คำขอนี้ยังไม่มีใบ DAR — ต้องออกใบ DAR และได้รับอนุมัติก่อน จึงจะดำเนินการเอกสารต่อได้</div>
       ${(isDC() || (currentUser && d.requestedBy===currentUser.name)) ? `<button class="btn primary" id="btnDarIssue" style="margin-top:8px;">${ic('plus')} ออกใบ DAR ให้คำขอนี้</button>` : ''}
     </div>`;
   }
+  const st = darStage(rec);
+  const ph = darPhase(rec);
+  const gateOpen = rec.decision==='approved';
   const dist = rec.distribution || { internal:[], external:'' };
   const distText = [...(dist.internal||[]), dist.external ? `ภายนอก: ${dist.external}` : ''].filter(Boolean).join(', ');
   const missing = !rec.reason || !rec.detail;
+  const stepCls = (done, active)=> done ? 'background:var(--green-600); color:#fff;' : active ? 'background:var(--amber-600); color:#fff;' : 'background:var(--line); color:var(--ink-500);';
+  const steps = [
+    ['ส่งคำขอ', st!=='returned', st==='returned'],
+    ['อนุมัติ DAR (Lab Manager)', gateOpen, st==='approval'],
+  ];
+  const canAct = darCanReview(rec) || darCanApprove(rec);
+  const tone = gateOpen ? 'border-color:var(--green-600); background:var(--green-50);' : (st==='returned' ? 'border-color:var(--red-600); background:var(--red-50, #fdecec);' : 'border-color:var(--amber-600); background:var(--amber-50);');
   return `
-  <div class="side-box" style="margin-bottom:18px;">
+  <div class="side-box" data-dar-card="${escapeHtml(rec.darNo)}" style="margin-bottom:18px; ${tone}">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
-      <div class="side-box-title" style="margin:0;">ใบ DAR No.${escapeHtml(rec.darNo)} ${darStatusBadge(rec)}</div>
+      <div class="side-box-title" style="margin:0;">ขั้นที่ 1.1: ใบ DAR No.${escapeHtml(rec.darNo)} ${darStatusBadge(rec)}</div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        ${darCanEdit(rec) ? `<button class="btn ghost" data-dar-edit="${escapeHtml(rec.darNo)}">${ic('edit')} แก้ไขข้อมูล DAR</button>` : ''}
-        <button class="btn primary" data-dar-pdf="${escapeHtml(rec.darNo)}">${ic('download')} ดาวน์โหลด DAR (PDF)</button>
+        ${darCanEdit(rec) ? `<button class="btn ghost" data-dar-edit="${escapeHtml(rec.darNo)}">${ic('edit')} ${darContentEditable(rec) ? 'แก้ไขข้อมูล DAR' : 'รายละเอียดแจกจ่าย'}</button>` : ''}
+        ${gateOpen ? `<button class="btn primary" data-dar-pdf="${escapeHtml(rec.darNo)}">${ic('download')} ดาวน์โหลด DAR (PDF)</button>` : ''}
       </div>
+    </div>
+    <div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">
+      ${steps.map(([l,done,active])=>`<span style="font-size:11.5px; font-weight:700; padding:4px 10px; border-radius:999px; ${stepCls(done,active)}">${done?'✓ ':''}${l}</span>`).join('<span style="color:var(--ink-400); align-self:center;">›</span>')}
     </div>
     <div style="display:grid; grid-template-columns:140px 1fr; gap:4px 10px; font-size:12.5px; margin-top:10px;">
       <div style="color:var(--ink-500);">ขอดำเนินการ</div><div style="font-weight:700;">${DAR_ACTION_LABEL[rec.action]||'-'} · ${darRevText(rec)}</div>
       <div style="color:var(--ink-500);">เหตุผล</div><div style="white-space:pre-wrap;">${rec.reason ? escapeHtml(rec.reason) : '<span style="color:var(--red-600);">ยังไม่ระบุ</span>'}</div>
       <div style="color:var(--ink-500);">รายละเอียด</div><div style="white-space:pre-wrap;">${rec.detail ? escapeHtml(rec.detail) : '<span style="color:var(--red-600);">ยังไม่ระบุ</span>'}</div>
+      ${rec.reviewedAt ? `<div style="color:var(--ink-500);">ทบทวนโดย</div><div>${escapeHtml(rec.reviewerName)} · ${fmtDateTime(rec.reviewedAt)}${rec.reviewerComment ? ` — ${escapeHtml(rec.reviewerComment)}` : ''}</div>` : ''}
+      ${gateOpen ? `<div style="color:var(--ink-500);">อนุมัติโดย</div><div>${escapeHtml(rec.approverName)} · ${fmtDateTime(rec.decidedAt)}${rec.decisionNote ? ` — ${escapeHtml(rec.decisionNote)}` : ''}</div>` : ''}
       <div style="color:var(--ink-500);">แจกจ่ายให้กับ</div><div>${distText ? escapeHtml(distText) : '<span style="color:var(--ink-400);">ยังไม่ระบุ</span>'}</div>
     </div>
-    ${missing ? `<div style="font-size:11.5px; color:var(--amber-600); margin-top:8px;">${ic('alert','sm-icon')} กรอกเหตุผลและรายละเอียดให้ครบก่อนส่งทบทวน เพื่อให้ใบ DAR สมบูรณ์</div>` : ''}
+    ${st==='returned' ? `<div style="font-size:12px; color:var(--red-600); margin-top:10px; padding-top:8px; border-top:1px solid var(--line);"><b>DAR ถูกส่งกลับแก้ไข</b> โดย ${escapeHtml(rec.returnedBy||'')} · ${fmtDateTime(rec.returnedAt)} — ${escapeHtml(rec.returnNote||'')}</div>
+      ${darCanResubmit(rec) ? `<button class="btn success" data-dar-act="resubmit" data-dar-no="${escapeHtml(rec.darNo)}" style="margin-top:8px;">${ic('send')} แก้ไขแล้ว ส่ง DAR ขออนุมัติอีกครั้ง</button>` : ''}` : ''}
+    ${!gateOpen && st!=='returned' && missing ? `<div style="font-size:11.5px; color:var(--amber-600); margin-top:8px;">${ic('alert','sm-icon')} กรอกเหตุผลและรายละเอียดให้ครบ Lab Manager จึงจะอนุมัติ DAR ได้</div>` : ''}
+    ${canAct ? darActionPanelHTML(rec) : (!gateOpen && st!=='returned' ? `<div style="font-size:11.5px; color:var(--ink-500); margin-top:10px;">รอ Lab Manager อนุมัติ DAR</div>` : '')}
+  </div>`;
+}
+// ป้ายสถานะ DAR ในรายการคำขอ — แสดงเฉพาะตอนที่ DAR ยังไม่อนุมัติ (กำลังกั้นขั้นตอนเอกสาร)
+function darListTag(d){
+  if(!darRequired(d) || darGatePassed(d)) return '';
+  const rec = darForDoc(d);
+  const ph = rec ? darPhase(rec) : null;
+  const label = rec ? DAR_PHASE_LABEL[ph] : 'ยังไม่มีใบ DAR';
+  const color = rec ? (DAR_PHASE_COLOR[ph]||'--amber-600') : '--red-600';
+  return `<div style="margin-top:3px;"><span style="display:inline-block; font-size:10.5px; font-weight:700; color:var(${color}); background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:2px 6px; white-space:nowrap;">${label}</span></div>`;
+}
+function darActionPanelHTML(rec){
+  const no = escapeHtml(rec.darNo);
+  return `
+    <div style="margin-top:12px; padding-top:10px; border-top:1px solid var(--line);">
+      <div style="font-size:12px; font-weight:800; color:var(--amber-600); margin-bottom:6px;">รอคุณอนุมัติ DAR</div>
+      <textarea class="dar-act-comment" rows="2" placeholder="ความเห็น (จำเป็นถ้ากด 'ไม่อนุมัติ — ส่งกลับแก้ไข')" style="width:100%; border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px; font-family:inherit;"></textarea>
+      <div class="field-error dar-act-error" style="display:none; margin-top:6px;"></div>
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:8px; flex-wrap:wrap;">
+        <button class="btn danger" data-dar-act="return" data-dar-no="${no}">ไม่อนุมัติ — ส่งกลับแก้ไข</button>
+        <button class="btn success" data-dar-act="approve" data-dar-no="${no}">${ic('check')} อนุมัติ DAR</button>
+      </div>
+    </div>`;
+}
+function renderDarGateNotice(d){
+  return `<div class="side-box" style="border-color:var(--line); background:var(--bg);">
+    <div style="font-size:12.5px; font-weight:700; color:var(--ink-700); display:flex; align-items:center; gap:6px;">${ic('lock','sm-icon')} ขั้นตอนเอกสารยังไม่เปิด</div>
+    <div style="font-size:12px; color:var(--ink-500); margin-top:4px;">${escapeHtml(darGateMessage(d))} — ขั้นตอนกรอกฟอร์ม / ทบทวน / อนุมัติ / เผยแพร่ จะเปิดให้ทำต่อเมื่อ DAR ได้รับอนุมัติ</div>
   </div>`;
 }
 function wireDarButtons(scope){
@@ -6907,6 +7059,7 @@ function wireDarButtons(scope){
   root.querySelectorAll('[data-dar-pdf]').forEach(b=>b.addEventListener('click', async (e)=>{
     e.stopPropagation();
     const rec = darFind(b.dataset.darPdf); if(!rec) return;
+    if(rec.decision!=='approved'){ alert('ดาวน์โหลดใบ DAR ได้หลัง Lab Manager อนุมัติแล้ว'); return; }
     const label = b.innerHTML; b.disabled = true; b.textContent = 'กำลังสร้าง PDF…';
     try{ await downloadDarPdf(rec); }
     catch(err){ console.error(err); alert('สร้าง PDF ไม่สำเร็จ: ' + (err && err.message ? err.message : err)); }
@@ -6917,9 +7070,11 @@ function wireDarButtons(scope){
     state.darModal = { darNo: b.dataset.darEdit };
     renderModalLayer();
   }));
-  const issueBtn = root.querySelector ? root.querySelector('#btnDarIssue') : null;
+  const q = id=> root.querySelector ? root.querySelector('#'+id) : null;
+  const curDoc = ()=> DOCUMENTS.find(x=>x.id===state.selectedDoc);
+  const issueBtn = q('btnDarIssue');
   if(issueBtn) issueBtn.addEventListener('click', async ()=>{
-    const d = DOCUMENTS.find(x=>x.id===state.selectedDoc); if(!d) return;
+    const d = curDoc(); if(!d) return;
     issueBtn.disabled = true;
     const note = d.lastRequestType==='cancel' ? (d.cancelRequestNote||'') : (d.requestNote||'');
     const rec = await darCreateForRequest(d, { detail: note, requestedAt: d.preparedAt || d.lastUpdated || Date.now() });
@@ -6928,13 +7083,62 @@ function wireDarButtons(scope){
     state.darModal = { darNo: rec.darNo };
     render();
   });
+  // ปุ่มทบทวน/อนุมัติ/ส่งกลับ DAR — โหลดทะเบียนล่าสุดก่อนเขียน กันทับการแก้ไขจากเครื่องอื่น
+  async function act(kind, btn){
+    const darNo = btn.dataset.darNo;
+    const card = btn.closest('[data-dar-card]');
+    const errEl = card ? card.querySelector('.dar-act-error') : null;
+    const cEl = card ? card.querySelector('.dar-act-comment') : null;
+    const comment = cEl ? cEl.value.trim() : '';
+    const showErr = m=>{ if(errEl){ errEl.textContent = m; errEl.style.display='block'; } else alert(m); };
+    const d = DOCUMENTS.find(x=>x.darNo===darNo);
+    if(!d) return showErr('ไม่พบคำขอของ DAR นี้ (อาจถูกถอนหรือลบไปแล้ว)');
+    btn.disabled = true;
+    await loadDarLog();
+    const rec = darFind(darNo);
+    if(!rec){ btn.disabled = false; return showErr('ไม่พบใบ DAR (โหลดทะเบียนไม่สำเร็จ)'); }
+    const actor = currentActorName();
+    if(kind==='review'){
+      if(!darCanReview(rec)){ btn.disabled = false; return showErr(rec.requestedBy===actor ? `ผู้ทบทวน DAR ต้องไม่ใช่ผู้ขอ (${rec.requestedBy})` : 'ขั้นตอนนี้ต้องทบทวนโดย QM หรือ DC'); }
+      if(!rec.reason || !rec.detail){ btn.disabled = false; return showErr('ใบ DAR ยังไม่มีเหตุผล/รายละเอียด — ส่งกลับให้ผู้ขอกรอกก่อน'); }
+      if(!confirm(`ยืนยันทบทวน DAR No.${rec.darNo} แล้ว ส่งให้ Lab Manager อนุมัติ?`)){ btn.disabled = false; return; }
+      darReview(rec, actor, comment);
+      d.comments = d.comments || []; d.comments.push({ by:actor, text:`ทบทวน DAR No.${rec.darNo} แล้ว → รออนุมัติ DAR${comment?` — ${comment}`:''}`, time:Date.now() });
+    } else if(kind==='approve'){
+      if(!darCanApprove(rec)){ btn.disabled = false; return showErr('ผู้อนุมัติ DAR ต้องเป็น Lab Manager (LM)'); }
+      if(!rec.reason || !rec.detail){ btn.disabled = false; return showErr('ใบ DAR ยังไม่มีเหตุผล/รายละเอียด — ส่งกลับให้ผู้ขอกรอกก่อน'); }
+      if(!confirm(`ยืนยันอนุมัติ DAR No.${rec.darNo}? คำขอจะเข้าสู่ขั้นตอนดำเนินการเอกสารต่อ`)){ btn.disabled = false; return; }
+      darApprove(rec, actor, comment);
+      d.comments = d.comments || []; d.comments.push({ by:actor, text:`อนุมัติ DAR No.${rec.darNo} — เปิดขั้นตอนดำเนินการเอกสาร${comment?` — ${comment}`:''}`, time:Date.now() });
+    } else if(kind==='return'){
+      if(!(darCanReview(rec) || darCanApprove(rec))){ btn.disabled = false; return showErr('คุณไม่มีสิทธิ์ดำเนินการกับ DAR ขั้นนี้'); }
+      if(!comment){ btn.disabled = false; return showErr('กรอกเหตุผลที่ส่งกลับก่อน'); }
+      if(!confirm(`ไม่อนุมัติ DAR No.${rec.darNo} และส่งกลับให้ผู้ขอแก้ไข?`)){ btn.disabled = false; return; }
+      darReturn(rec, actor, comment);
+      d.comments = d.comments || []; d.comments.push({ by:actor, text:`ไม่อนุมัติ DAR No.${rec.darNo} — ส่งกลับแก้ไข: ${comment}`, time:Date.now() });
+    } else if(kind==='resubmit'){
+      if(!darCanResubmit(rec)){ btn.disabled = false; return showErr('เฉพาะผู้ขอหรือ DC ที่ส่ง DAR ใหม่ได้'); }
+      if(!rec.reason || !rec.detail){ btn.disabled = false; return alert('กรอกเหตุผลและรายละเอียดใน "แก้ไขข้อมูล DAR" ก่อนส่งใหม่'); }
+      darResubmit(rec, actor);
+      d.comments = d.comments || []; d.comments.push({ by:actor, text:`ส่ง DAR No.${rec.darNo} ขออนุมัติอีกครั้ง`, time:Date.now() });
+    }
+    d.lastUpdated = Date.now();
+    await persistDarLog();
+    render();
+    await persistDocs();
+  }
+  root.querySelectorAll('[data-dar-act]').forEach(b=> b.addEventListener('click', (e)=>{ e.stopPropagation(); act(b.dataset.darAct, b); }));
+  root.querySelectorAll('[data-dar-open]').forEach(b=> b.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    goTo('approval', { selectedDoc: b.dataset.darOpen, approvalTab:'active', approvalPage:1, approvalDetailOpen:true, approvalCommentsExpanded:false, approvalStepView:null });
+  }));
 }
 
 // ---------- ป๊อปอัปแก้ไขข้อมูล DAR ----------
 function darModalView(){
   const rec = darFind(state.darModal && state.darModal.darNo);
   if(!rec) return `<div class="modal-backdrop" id="darModalBackdrop"><div class="modal"><div class="modal-body">${emptyState('ไม่พบใบ DAR','')}</div><div class="modal-actions"><button class="btn ghost" id="darModalClose">ปิด</button></div></div></div>`;
-  const pendingOnly = !isDC() && rec.decision!=='pending';
+  const pendingOnly = !darContentEditable(rec);
   const dist = rec.distribution || { internal:[], external:'' };
   const att = rec.attachments || {};
   const ck = (id, on, label)=>`<label style="display:flex; align-items:center; gap:7px; font-size:12.5px; cursor:pointer;"><input type="checkbox" id="${id}" ${on?'checked':''}> ${label}</label>`;
@@ -6944,6 +7148,7 @@ function darModalView(){
       <div class="modal-head"><div class="modal-title">ข้อมูลใบ DAR No.${escapeHtml(rec.darNo)}</div><button class="modal-close" id="darModalClose">✕</button></div>
       <div class="modal-body">
         <div style="font-size:12.5px; color:var(--ink-700); margin-bottom:12px;"><b>${escapeHtml(rec.docId)}</b> ${escapeHtml(rec.docName)} · ${DAR_ACTION_LABEL[rec.action]} · ${darRevText(rec)}</div>
+        ${pendingOnly ? `<div style="font-size:11.5px; color:var(--ink-500); margin-bottom:10px;">${ic('lock','sm-icon')} DAR อนุมัติแล้ว — แก้ได้เฉพาะสิ่งที่แนบและรายละเอียดแจกจ่าย</div>` : ''}
         <div class="field"><label>เหตุผลที่ขอดำเนินการ</label>
           <textarea id="darReason" rows="2" ${pendingOnly?'disabled':''} placeholder="เช่น ตามข้อบกพร่องจาก Internal Audit 2568 (CAR No.68-009)">${escapeHtml(rec.reason||'')}</textarea></div>
         <div class="field"><label>รายละเอียด</label>
@@ -7000,12 +7205,49 @@ function viewDarRegister(){
   const years = [...new Set(DAR_LOG.map(r=>String(r.darNo||'').slice(0,2)))].filter(Boolean).sort().reverse();
   const q = f.q.toLowerCase();
   const list = DAR_LOG.slice()
-    .filter(r=> f.status==='All' || r.decision===f.status)
+    .filter(r=> f.status==='All' || darPhase(r)===f.status)
     .filter(r=> f.year==='All' || String(r.darNo).startsWith(f.year+'-'))
     .filter(r=> !q || [r.darNo, r.docId, r.requestDocId, r.docName, r.requestedBy, r.reason, r.detail].join(' ').toLowerCase().includes(q))
     .sort((a,b)=> String(b.darNo).localeCompare(String(a.darNo)));
-  const count = st=> DAR_LOG.filter(r=>r.decision===st).length;
+  const count = (...ph)=> DAR_LOG.filter(r=>ph.includes(darPhase(r))).length;
+  const pending = DAR_LOG.filter(r=> r.decision==='pending' && ['approval','returned'].includes(darStage(r)))
+    .sort((a,b)=> String(a.darNo).localeCompare(String(b.darNo)));
+  const mine = pending.filter(r=> darCanApprove(r) || darCanResubmit(r));
+  const ordered = [...mine, ...pending.filter(r=>!mine.includes(r))];
+  const card = r=>{
+    const st = darStage(r);
+    const d = DOCUMENTS.find(x=>x.darNo===r.darNo);
+    return `
+    <div class="side-box" data-dar-card="${escapeHtml(r.darNo)}" style="margin-bottom:12px; ${st==='returned' ? 'border-color:var(--red-600);' : 'border-color:var(--amber-600);'}">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+        <div style="font-size:13px; font-weight:800; color:var(--ink-900);">DAR No.${escapeHtml(r.darNo)} ${darStatusBadge(r)}</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          ${darCanEdit(r) ? `<button class="btn ghost" data-dar-edit="${escapeHtml(r.darNo)}">${ic('edit')} แก้ไขข้อมูล DAR</button>` : ''}
+          ${d ? `<button class="btn ghost" data-dar-open="${escapeHtml(d.id)}">${ic('doc')} เปิดคำขอ</button>` : ''}
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:120px 1fr; gap:4px 10px; font-size:12.5px; margin-top:8px;">
+        <div style="color:var(--ink-500);">เอกสาร</div><div><b>${escapeHtml(r.docId)}</b> ${escapeHtml(r.docName)}</div>
+        <div style="color:var(--ink-500);">ขอดำเนินการ</div><div style="font-weight:700;">${DAR_ACTION_LABEL[r.action]||'-'} · ${darRevText(r)}</div>
+        <div style="color:var(--ink-500);">ผู้ขอ</div><div>${escapeHtml(r.requestedBy||'')} (${escapeHtml(r.requestedPosition||'-')}) · ${fmtDateTime(r.requestedAt)}</div>
+        <div style="color:var(--ink-500);">เหตุผล</div><div style="white-space:pre-wrap;">${r.reason ? escapeHtml(r.reason) : '<span style="color:var(--red-600);">ยังไม่ระบุ</span>'}</div>
+        <div style="color:var(--ink-500);">รายละเอียด</div><div style="white-space:pre-wrap;">${r.detail ? escapeHtml(r.detail) : '<span style="color:var(--red-600);">ยังไม่ระบุ</span>'}</div>
+      </div>
+      ${st==='returned' ? `<div style="font-size:12px; color:var(--red-600); margin-top:8px;"><b>ส่งกลับแก้ไข</b> โดย ${escapeHtml(r.returnedBy||'')} · ${fmtDateTime(r.returnedAt)} — ${escapeHtml(r.returnNote||'')}</div>
+        ${darCanResubmit(r) ? `<button class="btn success" data-dar-act="resubmit" data-dar-no="${escapeHtml(r.darNo)}" style="margin-top:8px;">${ic('send')} แก้ไขแล้ว ส่ง DAR ขออนุมัติอีกครั้ง</button>` : ''}
+        <div class="field-error dar-act-error" style="display:none; margin-top:6px;"></div>` : ''}
+      ${darCanApprove(r) ? darActionPanelHTML(r) : (st==='approval' ? `<div style="font-size:11.5px; color:var(--ink-500); margin-top:8px;">รอ Lab Manager อนุมัติ DAR</div>` : '')}
+    </div>`;
+  };
   return `
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">DAR รอดำเนินการ ${ordered.length ? `<span style="color:var(--ink-500); font-weight:600; font-size:12px;">(${ordered.length})</span>` : ''}</div>
+      <div style="font-size:11.5px; color:var(--ink-500); margin-top:2px;">ใบ DAR ต้องได้รับอนุมัติจาก Lab Manager ก่อน คำขอจึงจะไปขั้นตอนทบทวน / อนุมัติ / เผยแพร่เอกสารได้</div></div>
+    </div>
+    ${!DAR_LOG_LOADED ? `<div style="font-size:12.5px; color:var(--ink-500);">กำลังโหลดทะเบียน DAR…</div>`
+      : ordered.length ? ordered.map(card).join('') : `<div style="font-size:12.5px; color:var(--ink-500); padding:10px 0;">ไม่มี DAR ที่รออนุมัติ</div>`}
+  </div>
   <div class="panel">
     <div class="panel-head">
       <div><div class="panel-title">ทะเบียนใบ DAR</div>
@@ -7014,17 +7256,20 @@ function viewDarRegister(){
     </div>
     ${!DAR_LOG_LOADED ? `<div style="font-size:12.5px; color:var(--red-600); margin-bottom:10px;">โหลดทะเบียน DAR ไม่สำเร็จ — ลองรีเฟรชหน้า</div>` : ''}
     <div style="display:flex; gap:16px; flex-wrap:wrap; font-size:12.5px; margin-bottom:12px;">
-      <span>ทั้งหมด <b>${DAR_LOG.length}</b></span><span style="color:var(--blue-600);">กำลังดำเนินการ <b>${count('pending')}</b></span>
-      <span style="color:var(--green-600);">อนุมัติ <b>${count('approved')}</b></span><span style="color:var(--red-600);">ไม่อนุมัติ <b>${count('rejected')}</b></span>
-      <span style="color:var(--ink-500);">ถอนคำขอ <b>${count('withdrawn')}</b></span>
+      <span>ทั้งหมด <b>${DAR_LOG.length}</b></span>
+      <span style="color:var(--amber-600);">รออนุมัติ DAR <b>${count('review','approval')}</b></span>
+      <span style="color:var(--red-600);">ส่งกลับแก้ไข <b>${count('returned')}</b></span>
+      <span style="color:var(--blue-600);">เอกสารกำลังดำเนินการ <b>${count('inprogress','docapproved')}</b></span>
+      <span style="color:var(--green-600);">เผยแพร่แล้ว <b>${count('published')}</b></span>
+      <span style="color:var(--ink-500);">ถอนคำขอ/ไม่อนุมัติ <b>${count('withdrawn','docrejected')}</b></span>
     </div>
     <div class="toolbar">
       <div class="search"><span>${ic('search')}</span><input id="darSearch" placeholder="ค้นหาเลข DAR, รหัส, ชื่อเอกสาร, เหตุผล..." value="${escapeHtml(f.q)}"></div>
       <select class="select" id="darFYear"><option value="All">ทุกปี</option>${years.map(y=>`<option value="${y}" ${y===f.year?'selected':''}>ปี 25${y}</option>`).join('')}</select>
-      <select class="select" id="darFStatus">${[['All','ทุกสถานะ'],...Object.entries(DAR_STATUS_LABEL)].map(([v,l])=>`<option value="${v}" ${v===f.status?'selected':''}>${l}</option>`).join('')}</select>
+      <select class="select" id="darFStatus">${[['All','ทุกสถานะ'],...Object.entries(DAR_PHASE_LABEL)].map(([v,l])=>`<option value="${v}" ${v===f.status?'selected':''}>${l}</option>`).join('')}</select>
     </div>
     <div class="table-wrap" style="overflow-x:auto;"><table class="dtable">
-      <thead><tr><th>DAR No.</th><th>วันที่ขอ</th><th>เอกสาร</th><th>ขอดำเนินการ</th><th>Rev.</th><th>ผู้ขอ</th><th>สถานะ</th><th>วันที่อนุมัติ</th><th></th></tr></thead>
+      <thead><tr><th>DAR No.</th><th>วันที่ขอ</th><th>เอกสาร</th><th>ขอดำเนินการ</th><th>Rev.</th><th>ผู้ขอ</th><th>สถานะ</th><th>วันที่อนุมัติ DAR</th><th></th></tr></thead>
       <tbody>
       ${list.length ? list.map(r=>`
         <tr>
@@ -7038,7 +7283,7 @@ function viewDarRegister(){
           <td style="white-space:nowrap;">${r.decision==='approved' ? fmtDate(r.decidedAt) : '—'}</td>
           <td style="white-space:nowrap;">
             ${darCanEdit(r) ? `<button class="btn ghost" data-dar-edit="${escapeHtml(r.darNo)}" title="แก้ไขข้อมูล DAR">${ic('edit')}</button>` : ''}
-            <button class="btn ghost" data-dar-pdf="${escapeHtml(r.darNo)}" title="ดาวน์โหลด PDF">${ic('pdf')} PDF</button>
+            ${r.decision==='approved' ? `<button class="btn ghost" data-dar-pdf="${escapeHtml(r.darNo)}" title="ดาวน์โหลด PDF">${ic('pdf')} PDF</button>` : `<span style="font-size:11px; color:var(--ink-400);" title="ดาวน์โหลดได้หลัง DAR อนุมัติ">${ic('lock','sm-icon')} รออนุมัติ</span>`}
           </td>
         </tr>`).join('') : `<tr><td colspan="9" style="text-align:center; padding:40px 0; color:var(--ink-500);">${DAR_LOG.length ? 'ไม่มีใบ DAR ตรงตามเงื่อนไข' : 'ยังไม่มีใบ DAR — ใบ DAR จะถูกออกอัตโนมัติเมื่อส่งคำขอเอกสารใหม่ / ปรับปรุง / ยกเลิก'}</td></tr>`}
       </tbody>
@@ -7055,12 +7300,12 @@ function attachDarRegisterHandlers(){
   wireDarButtons(document.getElementById('content'));
 }
 function exportDarCsv(){
-  const head = ['DAR No.','วันที่ขอ','รหัสเอกสาร','ชื่อเอกสาร','ประเภท','ขอดำเนินการ','Rev. เดิม','Rev. ใหม่','เหตุผล','รายละเอียด','ผู้ขอ','ผู้ทบทวน','วันที่ทบทวน','ผู้อนุมัติ','สถานะ','วันที่อนุมัติ/ตัดสิน','แจกจ่ายให้กับ'];
+  const head = ['DAR No.','วันที่ขอ','รหัสเอกสาร','ชื่อเอกสาร','ประเภท','ขอดำเนินการ','Rev. เดิม','Rev. ใหม่','เหตุผล','รายละเอียด','ผู้ขอ','ผู้อนุมัติ DAR','วันที่อนุมัติ DAR','สถานะ','วันที่เอกสารอนุมัติ','วันที่ประกาศใช้','แจกจ่ายให้กับ'];
   const q = v=> `"${String(v==null?'':v).replace(/"/g,'""')}"`;
   const rows = DAR_LOG.slice().sort((a,b)=>String(a.darNo).localeCompare(String(b.darNo))).map(r=>[
     r.darNo, fmtDate(r.requestedAt), r.docId, r.docName, r.docType, DAR_ACTION_LABEL[r.action]||'', r.fromRev||'', r.toRev||'',
-    r.reason, r.detail, r.requestedBy, r.reviewerName, fmtDate(r.reviewedAt), r.decision==='pending' ? '' : r.approverName,
-    DAR_STATUS_LABEL[r.decision]||'', fmtDate(r.decidedAt),
+    r.reason, r.detail, r.requestedBy, r.decision==='approved' ? r.approverName : '', r.decision==='approved' ? fmtDate(r.decidedAt) : '',
+    DAR_PHASE_LABEL[darPhase(r)]||'', fmtDate(r.docApprovedAt), fmtDate(r.effectiveDate),
     [...((r.distribution||{}).internal||[]), (r.distribution||{}).external||''].filter(Boolean).join(', '),
   ].map(q).join(','));
   const blob = new Blob(['﻿' + [head.map(q).join(','), ...rows].join('\r\n')], { type:'text/csv;charset=utf-8' });
@@ -7170,7 +7415,7 @@ async function buildDarPdfBytes(rec){
     'Check Box 10': act!=='cancel' && (internal.length>0 || !!dist.external),
     'Check Box 16': false, 'Check Box 17': act==='cancel', 'Check Box 18': false, 'Check Box 19': false, 'Check Box 20': false,
     'Check Box 11': !!att.doc, 'Check Box 12': !!att.file, 'Check Box 13': !!att.other,
-    'Check Box 14': rec.decision==='approved', 'Check Box 15': rec.decision==='rejected',
+    'Check Box 14': rec.decision==='approved', 'Check Box 15': rec.decision==='rejected' || darStage(rec)==='returned',
     'Rectangle 2': internal.length>0, 'Rectangle 4': !!dist.external,
     'Rectangle 3': has('Head of IRDI'), 'Rectangle 5': has('Lab manager'), 'Rectangle 6': has('ผู้จัดการคุณภาพ'),
     'Rectangle 7': has('ผู้จัดการวิชาการ'), 'Rectangle 11': has('งานทรัพยากรบุคคล'), 'Rectangle 13': has('งานบัญชีการเงิน'),
@@ -7200,7 +7445,7 @@ async function buildDarPdfBytes(rec){
   cell(13, 3, rec.docName, { maxW: colR(13)-colL(3)-6 });
   cell(14, 3, rec.docId);
   cell(14, 10, act==='revision' ? `${rec.toRev||'-'} (จาก Rev.${rec.fromRev||'-'})` : (rec.toRev||'0'));
-  cell(15, 10, rec.decision==='approved' ? fmtDateRevLog(rec.decidedAt) : '….................');
+  cell(15, 10, rec.docApprovedAt ? fmtDateRevLog(rec.docApprovedAt) : '….................');
   block(18, 18, rec.reason || '-', 0);
   block(20, 21, rec.detail || '-', 0);
   const sysTime = (endX, row, ts)=>{ if(ts) text(`(ในระบบ ${fmtDateTime(ts).slice(-5)})`, endX + 4*k, baseline(row), { size:FS*0.72, color:grey }); };
@@ -7213,7 +7458,7 @@ async function buildDarPdfBytes(rec){
   else cell(26, 10, '….................');
   if(rec.reviewerComment) block(29, 29, rec.reviewerComment, 0);
   else cell(29, 2, '…....-....................................................................................................................................', { maxW: colR(13)-colL(2)-6 });
-  if(rec.decision==='rejected') cell(33, 3, `ไม่อนุมัติ เนื่องจาก ${rec.decisionNote||'-'}`, { maxW: colR(13)-colL(3)-6 });
+  if(rec.decision==='rejected' || darStage(rec)==='returned') cell(33, 3, `ไม่อนุมัติ เนื่องจาก ${rec.returnNote || rec.decisionNote || '-'}`, { maxW: colR(13)-colL(3)-6 });
   else cell(33, 3, 'ไม่อนุมัติ เนื่องจาก…..................................................................................................................................', { maxW: colR(13)-colL(3)-6 });
   if(rec.decision==='approved' && rec.decisionNote) cell(32, 4, `ความเห็น: ${rec.decisionNote}`, { maxW: colR(13)-colL(4)-6, size:FS*0.85, color:grey });
   const decided = rec.decision==='approved' || rec.decision==='rejected';
@@ -7233,7 +7478,7 @@ async function buildDarPdfBytes(rec){
     cell(42, 10, '….............................', { bold:true });
   }
   // บันทึกที่มาของเอกสาร (นอกกรอบฟอร์ม ใต้ขอบล่าง)
-  text(`ออกจากระบบควบคุมเอกสาร ISO/IEC 17025 · ${fmtDateTime(Date.now())} · สถานะคำขอ: ${DAR_STATUS_LABEL[rec.decision]||'-'}`,
+  text(`ออกจากระบบควบคุมเอกสาร ISO/IEC 17025 · ${fmtDateTime(Date.now())} · สถานะ: ${DAR_PHASE_LABEL[darPhase(rec)]||'-'}`,
        ML, Y(SP.ry[SP.ry.length-1]) - FS*1.3, { size:FS*0.7, color:grey });
   return pdfDoc.save();
 }
