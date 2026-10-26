@@ -1771,8 +1771,14 @@ function updateDarNavBadge(){
   const n = currentUser ? DAR_LOG.filter(darMyTurn).length : 0;
   b.textContent = n; b.style.display = n ? 'inline-flex' : 'none';
 }
+// เมนูที่ไม่ใช้แล้ว — ซ่อนออกจากแถบด้านซ้าย (หน้าเดิมยังอยู่ในโค้ด ไม่กระทบข้อมูล)
+const HIDDEN_NAV_VIEWS = ['audit', 'audittrail', 'calendar'];
+function hideUnusedNavItems(){
+  HIDDEN_NAV_VIEWS.forEach(v=> document.querySelectorAll(`.nav-item[data-view="${v}"]`).forEach(el=>{ el.style.display = 'none'; }));
+}
 function wireNav(){
   ensureDarNavItem();
+  hideUnusedNavItems();
   document.querySelectorAll('.nav-item').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       let extra = {};
@@ -4564,7 +4570,7 @@ function viewRevisionDashboard(){
 
 
   <div class="panel">
-    <div class="panel-head"><div class="panel-title">กิจกรรมล่าสุด (Latest Activity)</div><a class="panel-link" style="cursor:pointer;" data-go="audittrail">ดูทั้งหมด →</a></div>
+    <div class="panel-head"><div class="panel-title">กิจกรรมล่าสุด (Latest Activity)</div></div>
     <div class="activity-grid">
       ${feed.length ? feed.map(a=>`
         <div class="activity-card">
