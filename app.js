@@ -4957,6 +4957,7 @@ function viewApprovalDetail(){
         ${isApproved ? renderApprovedBox(d) : isRejected ? renderRejectedBox(d) : ((status==='ร่าง' || (status==='รอทบทวน' && !d.linkSetAt)) && (d.lastRequestType==='new'||d.lastRequestType==='revision')) ? (status==='ร่าง' ? pastBoxes[0] : pastBoxes[1]) : `
         ${(d.lastRequestType==='new'||d.lastRequestType==='revision') && currentIdx===1 ? `<div style="font-size:11.5px; font-weight:700; color:var(--amber-600); margin-bottom:10px;">${ic('clock','sm-icon')} ขั้นที่ 4: ต้องทบทวนโดย QM หรือ DC</div>` : ''}
         ${(d.lastRequestType==='new'||d.lastRequestType==='revision') && currentIdx===2 ? `<div style="font-size:11.5px; font-weight:700; color:var(--amber-600); margin-bottom:10px;">${ic('clock','sm-icon')} ขั้นที่ 5: ต้องอนุมัติโดย Lab Manager (LM)</div>` : ''}
+        ${canActOnApproval(d) ? `
         <div class="field" style="max-width:320px;"><label>ผู้ดำเนินการ</label><div style="font-size:12.5px; font-weight:700; color:var(--ink-900); padding:9px 12px; background:var(--bg); border-radius:9px;">${currentActorName()} <span style="color:var(--ink-500); font-weight:600;">(${docRoleOf(currentUser.role)})</span></div></div>
         <div class="comment-box">
           <label style="font-size:12px; font-weight:700; color:var(--ink-700); display:block; margin-bottom:8px;">ความเห็น (จำเป็นถ้ากด "ไม่อนุมัติ")</label>
@@ -4967,6 +4968,7 @@ function viewApprovalDetail(){
             <button class="btn success" id="btnApprove">${currentIdx===STATUS_FLOW.length-2 ? 'Final Approve':'Approve / Next Step'}</button>
           </div>
         </div>
+        ` : approvalWaitingNote(d)}
         `}
         ${renderPublishBox(d)}`;
       })()}
@@ -4990,6 +4992,23 @@ function viewApprovalDetail(){
   </div>`;
 }
 
+// ผู้ที่มีสิทธิ์กดทบทวน/อนุมัติคำขอในขั้นปัจจุบัน — ตรงกับเงื่อนไขของปุ่ม Approve/Reject
+// (ผู้ทบทวนต้องเป็น QM/DC ที่ไม่ใช่ผู้สร้างคำขอ, ผู้อนุมัติขั้นสุดท้ายต้องเป็น LM, DC ทำแทนได้ทุกขั้น)
+// คนอื่นจะไม่เห็นช่องความเห็นและปุ่ม Approve/Reject เลย
+function canActOnApproval(d){
+  if(!currentUser || !d) return false;
+  if(isDC()) return true;
+  const st = d.approvalStatus || 'ร่าง';
+  if(st==='รอทบทวน') return currentUser.role==='QM' && d.requestedBy!==currentUser.name;
+  if(st==='รออนุมัติ') return currentUser.role==='LM';
+  return false;
+}
+function approvalWaitingNote(d){
+  const st = d.approvalStatus || '';
+  const who = st==='รอทบทวน' ? `ผู้ทบทวน (${escapeHtml(d.reviewerName || 'QM/DC')})` : st==='รออนุมัติ' ? `ผู้อนุมัติ (${escapeHtml(d.approverName || 'Lab Manager')})` : '';
+  if(!who) return '';
+  return `<div class="side-box" style="background:var(--bg);"><div style="font-size:12.5px; color:var(--ink-700); display:flex; align-items:center; gap:6px;">${ic('clock','sm-icon')} รอ${who}ดำเนินการ</div></div>`;
+}
 function attachApprovalHandlers(){
   document.querySelectorAll('[data-ap-tab]').forEach(elx=>{
     elx.addEventListener('click', ()=>{ state.approvalTab = elx.dataset.apTab; state.approvalPage = 1; render(); });
