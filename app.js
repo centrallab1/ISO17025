@@ -1860,7 +1860,10 @@ function render(){
     case 'audit': el.innerHTML = renderAuditHubTabs() + viewAudit(); attachAuditHandlers(); break;
     case 'calendar': el.innerHTML = viewCalendar(); attachCalHandlers(); break;
     case 'audittrail': el.innerHTML = renderAuditHubTabs() + viewAuditTrail(); break;
-    case 'admin': el.innerHTML = viewAdmin(); attachWatermarkHandlers(); attachTrashHandlers(); if(isDC() && !TRASH_LOADED) loadTrash().then(()=>{ if(state.view==='admin') render(); }); break;
+    case 'admin': el.innerHTML = viewAdmin(); attachWatermarkHandlers(); attachTrashHandlers();
+      if(isDC() && !TRASH_LOADED) loadTrash().then(()=>{ if(state.view==='admin') render(); });
+      if(isDC() && !DAR_LOG_LOADED) loadDarLog().then(()=>{ if(state.view==='admin') render(); });
+      break;
     case 'docdetail': el.innerHTML = viewDocDetail(state.selectedDoc); attachDetailActionHandlers(); break;
     default: el.innerHTML = viewDashboard();
   }
@@ -7853,6 +7856,7 @@ function darCardModalView(){
       <div class="modal-actions" style="flex-wrap:wrap;">
         ${isDC() ? `<button class="btn ghost" data-dar-del="${escapeHtml(r.darNo)}" style="color:var(--red-600); margin-right:auto;">${ic('trash')} ลบ</button>` : ''}
         ${isDC() ? `<button class="btn ghost" data-dar-admin="${escapeHtml(r.darNo)}">${ic('edit')} แก้ไขข้อมูล/วันที่</button>` : (darCanEdit(r) ? `<button class="btn ghost" data-dar-edit="${escapeHtml(r.darNo)}">${ic('edit')} แก้ไขข้อมูล DAR</button>` : '')}
+        ${isDC() && !d && r.action!=='cancel' && r.decision!=='withdrawn' && r.docId && !DOCUMENTS.some(x=>x.id===r.docId || x.id===r.requestDocId) ? `<button class="btn ghost" data-restore-dar="${escapeHtml(r.darNo)}">${ic('history')} สร้างเอกสารคืน</button>` : ''}
         ${ph==='inprogress' && (isDC() || (currentUser && r.requestedBy===currentUser.name)) ? `<button class="btn primary" data-dar-act="materialize" data-dar-no="${escapeHtml(r.darNo)}">${ic('plus')} สร้างคำขอในหน้า Approval</button>` : ''}
         ${darCanRegister(r) ? `<button class="btn success" data-dar-act="register" data-dar-no="${escapeHtml(r.darNo)}">${ic('check')} รับเรื่อง DAR</button>` : ''}
         <button class="btn primary" data-dar-pdf="${escapeHtml(r.darNo)}">${ic('download')} ดาวน์โหลด DAR (PDF)</button>
@@ -7868,6 +7872,7 @@ function wireDarCardModal(){
   ['darCardClose','darCardCloseBtn'].forEach(id=>{ const b = document.getElementById(id); if(b) b.addEventListener('click', close); });
   backdrop.addEventListener('click', e=>{ if(e.target===backdrop) close(); });
   wireDarButtons(backdrop);
+  wireRestoreFromDar(backdrop);
 }
 function attachDarRegisterHandlers(){
   const f = state.darFilter;
@@ -8089,19 +8094,27 @@ async function restoreDocObject(d, note){
   return true;
 }
 // เอกสารที่หายจากทะเบียนแต่ยังมีใบ DAR ที่อนุมัติ/เผยแพร่แล้ว (ลบไปก่อนมีถังขยะ)
+// ใบ DAR ทุกสถานะ (ยกเว้นคำขอยกเลิก) ที่ไม่มีเอกสารของมันอยู่ในทะเบียนแล้ว — ทั้งตามรหัสและตามเลข DAR
+// ใช้เป็นทางสร้างเอกสารคืน เผื่อกรณีสถานะในใบ DAR ไม่ใช่ "อนุมัติ" (เช่น ใบจากเวอร์ชันก่อน)
 function darOrphanDocs(){
   const seen = new Set();
-  return DAR_LOG.filter(r=> r.decision==='approved' && r.action!=='cancel' && r.docId && !DOCUMENTS.some(x=>x.id===r.docId))
-    .sort((a,b)=> (b.decidedAt||0)-(a.decidedAt||0))
-    .filter(r=>{ if(seen.has(r.docId)) return false; seen.add(r.docId); return true; });
+  const exists = id=> !!id && DOCUMENTS.some(x=>x.id===id);
+  return DAR_LOG.filter(r=> r.action!=='cancel' && r.decision!=='withdrawn' && r.docId && !r.backfilled
+      && !exists(r.docId) && !exists(r.requestDocId) && !DOCUMENTS.some(x=>x.darNo===r.darNo))
+    .sort((a,b)=> (b.decidedAt||b.requestedAt||0)-(a.decidedAt||a.requestedAt||0))
+    .filter(r=>{ const k = String(r.docId).replace(/-\d+$/,''); if(seen.has(k)) return false; seen.add(k); return true; });
 }
 function docFromDar(r){
   const now = Date.now();
   let clause = '';
   try{ if(typeof suggestClause==='function') clause = suggestClause(r.docName) || ''; }catch(e){}
-  const publishedAt = r.publishedAt || r.effectiveDate || r.decidedAt || null;
+  const publishedAt = r.publishedAt || r.effectiveDate || r.docApprovedAt || r.decidedAt || null;
+  // รหัสต้องตรงกับ Rev. ที่อนุมัติ (ใบ DAR จากเวอร์ชันก่อนอาจยังเก็บรหัสของ Rev. เดิม เช่น -04)
+  let id = r.docId;
+  const m = String(id).match(/^(MPIR-[A-Za-z]+-\d+)-\d+$/i);
+  if(m && /^\d+$/.test(String(r.toRev||''))) id = `${m[1]}-${String(parseInt(r.toRev,10)).padStart(2,'0')}`;
   return {
-    id: r.docId, name: r.docName, clause, link:'', note:'ควบคุม', rev: r.toRev || '0',
+    id, name: r.docName, clause, link:'', note:'ควบคุม', rev: r.toRev || '0',
     approvalStatus:'อนุมัติแล้ว', preparedBy: r.requestedBy || '', preparedAt: r.requestedAt || null,
     reviewerName: r.reviewerName || '', reviewedAt: r.reviewedAt || null,
     approverName: r.approverName || '', approvedBy: r.approverName || '', approvedAt: r.decidedAt || null, approvedComment: r.decisionNote || '',
@@ -8131,7 +8144,7 @@ function viewTrashPanel(){
       <div style="font-size:11.5px; color:var(--ink-700); margin-bottom:8px;">ลบไปก่อนมีถังขยะ จึงไม่มีสำเนาเต็ม — สร้างคืนได้จากข้อมูลในใบ DAR (รหัส ชื่อ Rev. ผู้จัดทำ/ทบทวน/อนุมัติ วันที่) แล้วให้ DC วางลิงก์ SharePoint และตรวจข้อกำหนด ISO อีกครั้งผ่าน "แก้ไขเอกสาร"</div>
       ${orphans.map(r=>`
       <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-top:1px solid var(--line); flex-wrap:wrap;">
-        <div style="font-size:12.5px;"><b class="mono">${escapeHtml(r.docId)}</b> ${escapeHtml(r.docName)} · Rev.${escapeHtml(r.toRev||'-')} <span style="color:var(--ink-500);">(DAR No.${escapeHtml(r.darNo)})</span></div>
+        <div style="font-size:12.5px;"><b class="mono">${escapeHtml(r.docId)}</b> ${escapeHtml(r.docName)} · Rev.${escapeHtml(r.toRev||'-')} <span style="color:var(--ink-500);">(DAR No.${escapeHtml(r.darNo)} · ${escapeHtml(DAR_PHASE_LABEL[darPhase(r)]||'-')})</span></div>
         <button class="btn primary" data-restore-dar="${escapeHtml(r.darNo)}">${ic('history')} สร้างคืน</button>
       </div>`).join('')}
     </div>` : ''}
@@ -8160,13 +8173,25 @@ function attachTrashHandlers(){
     if(ok){ TRASH_ITEMS.splice(idx, 1); await persistTrash(); }
     render();
   }));
-  document.querySelectorAll('[data-restore-dar]').forEach(b=> b.addEventListener('click', async ()=>{
+  wireRestoreFromDar(document);
+}
+function wireRestoreFromDar(root){
+  root.querySelectorAll('[data-restore-dar]').forEach(b=> b.addEventListener('click', async (e)=>{
+    e.stopPropagation();
     if(!isDC()) return;
     const r = darFind(b.dataset.restoreDar); if(!r) return;
-    if(!confirm(`สร้างเอกสาร ${r.docId} ${r.docName} คืนจากใบ DAR No.${r.darNo}?\n\nหลังสร้างคืน ให้วางลิงก์ SharePoint และตรวจข้อกำหนด ISO ผ่าน "แก้ไขเอกสาร"`)) return;
+    if(!confirm(`สร้างเอกสาร ${r.docId} ${r.docName} (Rev.${r.toRev||'-'}) คืนจากใบ DAR No.${r.darNo}?\n\nหลังสร้างคืน ให้วางลิงก์ SharePoint และตรวจข้อกำหนด ISO ผ่าน "แก้ไขเอกสาร"`)) return;
     b.disabled = true;
     const d = docFromDar(r);
     if(await restoreDocObject(d, `DC สร้างเอกสารคืนจากใบ DAR No.${r.darNo} (เอกสารถูกลบโดยไม่ตั้งใจ) — ต้องวางลิงก์ SharePoint ใหม่`)){
+      // ให้ใบ DAR นับว่าจบแล้ว (อนุมัติ/เผยแพร่) ตามสภาพเอกสารที่กู้คืน
+      if(r.decision!=='approved'){ r.decision = 'approved'; r.decidedAt = r.decidedAt || r.docApprovedAt || Date.now(); }
+      if(darPublishable(r) && r.docOutcome!=='published'){ r.docOutcome = 'published'; }
+      r.linkedDocId = d.id; r.docId = d.id;
+      d.darNo = r.darNo;
+      darTouch(r, currentActorName(), `DC สร้างเอกสาร ${d.id} คืนจากใบ DAR`);
+      await persistDarLog();
+      state.darCard = null;
       alert(`สร้างคืน ${d.id} แล้ว — กรุณาวางลิงก์ SharePoint และตรวจข้อกำหนด ISO ที่หน้า Documents → แก้ไข`);
     }
     render();
