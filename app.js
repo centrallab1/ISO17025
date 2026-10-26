@@ -7282,11 +7282,12 @@ function darCreateModalView(){
           <input id="darcNo" value="${escapeHtml(f.darNo || darNextNumber(Date.now()))}" placeholder="เช่น 69-06" style="max-width:180px;"></div>` : ''}
         <div class="field"><label>ร้องขอเพื่อดำเนินการ</label>
           <style>
-            .darc-opts{ display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:8px; }
-            .darc-opt{ display:flex !important; align-items:center; gap:8px; margin:0 !important; padding:10px 12px; border:1.5px solid var(--line); border-radius:10px; cursor:pointer; font-size:13px; font-weight:600; color:var(--ink-700); background:#fff; white-space:nowrap; }
+            .darc-opts{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:8px; }
+            .darc-opt{ display:flex !important; align-items:center; gap:10px; margin:0 !important; padding:11px 14px; border:1.5px solid var(--line); border-radius:10px; cursor:pointer; font-size:13.5px; font-weight:600; color:var(--ink-700); background:#fff; min-width:0; box-sizing:border-box; }
+            .darc-opt span{ min-width:0; line-height:1.3; }
             .darc-opt input{ width:16px !important; height:16px !important; min-width:16px; margin:0 !important; padding:0 !important; flex:0 0 16px; accent-color:var(--blue-600); box-shadow:none !important; }
             .darc-opt.on{ border-color:var(--blue-600); background:var(--blue-50, #eef4ff); color:var(--blue-600); font-weight:800; }
-            @media (max-width:560px){ .darc-opts{ grid-template-columns:repeat(2, minmax(0,1fr)); } }
+            @media (max-width:380px){ .darc-opts{ grid-template-columns:1fr; } }
           </style>
           <div class="darc-opts">${opt('new','ออกเอกสารใหม่')}${opt('revision','แก้ไข')}${opt('cancel','ยกเลิก')}${opt('review','ทบทวนประจำปี')}</div></div>
         ${f.action==='new' ? `
