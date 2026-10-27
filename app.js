@@ -740,12 +740,9 @@ function updateUserBadge(){
   if(badge) badge.onclick = ()=>{
     if(confirm('ออกจากระบบใช่หรือไม่?')){ clearSession(); location.reload(); }
   };
-  // Administration now stays visible to everyone, like Archive — it hosts
-  // the watermark/print tool that every role can use. The DC-only parts
-  // (Firestore/SharePoint info, Import Master List) are gated inside
-  // viewAdmin() itself, not by hiding the nav entry.
+  // Administration (ลายน้ำ/แจกจ่ายสำเนา, ถังขยะ, นำเข้า, พื้นที่จัดเก็บ) — เฉพาะ DC เท่านั้น
   document.querySelectorAll('.nav-item[data-view="administration"], .nav-item[data-view="admin"]').forEach(el=>{
-    el.style.display = '';
+    el.style.display = isDC() ? '' : 'none';
   });
 }
 
@@ -1870,7 +1867,8 @@ function render(){
     case 'audit': el.innerHTML = renderAuditHubTabs() + viewAudit(); attachAuditHandlers(); break;
     case 'calendar': el.innerHTML = viewCalendar(); attachCalHandlers(); break;
     case 'audittrail': el.innerHTML = renderAuditHubTabs() + viewAuditTrail(); break;
-    case 'admin': el.innerHTML = viewAdmin(); attachWatermarkHandlers(); attachTrashHandlers();
+    case 'admin': if(!isDC()){ state.view = 'dashboard'; el.innerHTML = viewDashboard(); syncNavActive(); break; }
+      el.innerHTML = viewAdmin(); attachWatermarkHandlers(); attachTrashHandlers();
       if(isDC() && !TRASH_LOADED) loadTrash().then(()=>{ if(state.view==='admin') render(); });
       if(isDC() && !DAR_LOG_LOADED) loadDarLog().then(()=>{ if(state.view==='admin') render(); });
       break;
