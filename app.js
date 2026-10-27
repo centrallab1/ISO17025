@@ -50,7 +50,7 @@ const USERS = [
   // บัญชีมุมมอง TM (คนเดียวกับ DC) — สำหรับแสดงให้ Auditor เห็นว่างานเอกสาร (ขอ DAR / จัดทำ / ทบทวน)
   // แยกจากสิทธิ์ควบคุมระบบของ DC: เข้าบัญชีนี้แล้วจะไม่มีปุ่มของ DC (รับเรื่อง วางลิงก์ เผยแพร่ ลบ ฯลฯ)
   // ** เปลี่ยนรหัสผ่านก่อนใช้งานจริง **
-  { id:'yarapon.tm', password:'tm-change-me', name:'Yarapon Puttakot', role:'TM', thName:'ญาราภรณ์' },
+  { id:'yarapon.tm', password:'yarapon', name:'Yarapon Puttakot', role:'TM', thName:'ญาราภรณ์' },
 ];
 const ROLE_LABEL = { DC:'Document Control', TM:'Technical Manager', QM:'Quality Manager', LM:'Lab Manager' };
 // บัญชี DC ทำ 2 หน้าที่: DC (จัดเก็บเอกสาร/ควบคุมระบบ) และ TM (Technical Manager)
