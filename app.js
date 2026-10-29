@@ -45,8 +45,8 @@ const APP_VERSION = '2.0.1';
 const USERS = [
   // thName = ชื่อที่ใช้ลงในแบบฟอร์ม DAR (ตำแหน่งงานเอกสาร: TM ญาราภรณ์ / QM ธิดารัตน์ / LM พิมพ์ชนก)
   { id:'yaraponp',  password:'yarapon23452', name:'Yarapon Puttakot',   role:'DC', thName:'ญาราภรณ์' },
-  { id:'thidarati', password:'ISO123',       name:'Thitarat Intakham',  role:'QM', thName:'ธิดารัตน์' },
-  { id:'pimchanok', password:'mpir1234',     name:'Pimchanok Busayapongchai', role:'LM', thName:'พิมพ์ชนก' },
+  { id:'thidarati', password:'xxx',       name:'Thitarat Intakham',  role:'QM', thName:'ธิดารัตน์' },
+  { id:'pimchanok', password:'xxx',     name:'Pimchanok Busayapongchai', role:'LM', thName:'พิมพ์ชนก' },
   // บัญชีมุมมอง TM (คนเดียวกับ DC) — สำหรับแสดงให้ Auditor เห็นว่างานเอกสาร (ขอ DAR / จัดทำ / ทบทวน)
   // แยกจากสิทธิ์ควบคุมระบบของ DC: เข้าบัญชีนี้แล้วจะไม่มีปุ่มของ DC (รับเรื่อง วางลิงก์ เผยแพร่ ลบ ฯลฯ)
   // ** เปลี่ยนรหัสผ่านก่อนใช้งานจริง **
